@@ -37,7 +37,9 @@ static void App_ChargingRun (system_state_t charge_state, bool reset_var);
 static void App_IgnitionSwitchOff (void);
 static void App_IgnitionRun(void);
 static void App_ArmConfigurationSet (void);
+#if MINING_MODE_SUPP
 static void App_MiningModeEnableCbk (uint8_t timer_id);
+#endif /* MINING_MODE_SUPP */
 
 /***************************************** SET/GET CONFIGURATION HANDLERS HANDLERS ******************************/
 void App_RefreshConfig (void)
@@ -130,7 +132,9 @@ static void App_SetError(err_type_t err_type, uint32_t usr_data)
 		/* Stop all timers */
 		Timer_ResetAll();
 		/* Deinit blocks */
+#if (CONTROL_MODE == PWM_CTRL_SUPP)
 		Stick_Deinit();
+#endif
 		AccProc_Stop();
 
 		sysStatus.state = SYSTEM_STATE_ERROR;
@@ -163,7 +167,9 @@ static void App_SetError(err_type_t err_type, uint32_t usr_data)
 		if (
 				(usr_data == ERR_CODE_UNEXPECTED_ARM)  ||
 				(usr_data == ERR_CODE_UNEXPECTED_IGNITION) ||
+#if MINING_MODE_SUPP
 				(usr_data == ERR_CODE_UNEXPECTED_MINING) ||
+#endif /* MINING_MODE_SUPP */
 				(usr_data == ERR_CODE_FUSE_INCORRECT_STATE) ||
 				(usr_data == ERR_CODE_UNEXPECTED_VUSA_SHORTED)
 			)
@@ -210,7 +216,12 @@ static void App_SelfDestructionCbk (uint8_t timer_id)
 static void App_SelfDestroyRunCbk (uint8_t timer_id)
 {
 	/* Enable indication in the last seconds before self destroy. Not applicable for mining case */
-	if ((SELF_DESTROY_INDICATE_LAST_SECONDS != 0u) && (sysStatus.mining_state != MINING_STATE_IGNITION))
+	if (
+			(SELF_DESTROY_INDICATE_LAST_SECONDS != 0u) 
+#if MINING_MODE_SUPP
+			&& (sysStatus.mining_state != MINING_STATE_IGNITION)
+#endif /* MINING_MODE_SUPP */
+		)
 	{
 		Timer_Start (SELF_DISTRUCTION_IND_TMR, (SELF_DESTROY_INDICATE_LAST_SECONDS * MILISECONDS_IN_SECOND), App_SelfDestructionCbk);
 		Indication_SetStatus(IND_STATUS_DESTRUCTION_START, 0u);
@@ -240,7 +251,11 @@ static void App_SelfDestroyTmrTick (uint8_t timer_id)
 
 static void App_SelfDestroyTmrTickCbk (void)
 {
+	/* Decrement timer tick */
     sysStatus.self_destroy_tmr_tick--;
+
+	/* Update timer mode */
+	sysStatus.sys_info.timer_mode = TIMER_MODE_SELF_DESTROY;
 
 	/* Update timer info */
 	sysStatus.sys_info.timer_seconds = sysStatus.self_destroy_tmr_tick;
@@ -277,6 +292,7 @@ static void App_SelfDestroyTimerStart (self_destroy_mode_t mode)
 			Timer_Start (SELF_DESTRUCTION_TMR, ONE_SECOND_TICK_TMR_PERIOD_MS, App_SelfDestroyTmrTick);
 		}
 
+#if MINING_MODE_SUPP
 		/* Check if mining feature is enabled */
 		if (
 				(sysStatus.config->miningMode == MINING_MODE_AUTO)
@@ -291,6 +307,7 @@ static void App_SelfDestroyTimerStart (self_destroy_mode_t mode)
 			Timer_Start (MINING_ACTIVATE_TMR, (sysStatus.config->miningAutoActivationMin * MILISECONDS_IN_MINUTE), App_MiningModeEnableCbk);
 #endif /* TEST_SELF_DESTROY_MINING_MODE */
 		}
+#endif /* MINING_MODE_SUPP */
 	}
 	else if (mode == SELF_DESTROY_MODE_CTRL_LOST)
 	{
@@ -312,7 +329,9 @@ static void App_SelfDestroyTimerStart (self_destroy_mode_t mode)
 static void App_SelfDestroyTimerStop (void)
 {
 	Timer_Stop (SELF_DESTRUCTION_TMR);
+#if MINING_MODE_SUPP
 	Timer_Stop (MINING_ACTIVATE_TMR);
+#endif /* MINING_MODE_SUPP */
 	Timer_Stop (SELF_DISTRUCTION_IND_TMR);
 	/* Clear related indication */
 	Indication_SetStatus(IND_STATUS_DESTRUCTION_STOP, 0u);
@@ -325,6 +344,7 @@ static void App_SelfDestroyTimerStop (void)
 	sysStatus.self_destroy_tmr_tick = sysStatus.config->selfDestroyTimeoutMin * SECONDS_IN_MINUTE;
 }
 
+#if MINING_MODE_SUPP
 static void App_MiningModeEnableCbk (uint8_t timer_id)
 {
 	/* Enable mining feature */
@@ -367,6 +387,7 @@ static void App_MiningModeDisable (void)
 		AccProc_Stop();
 	}
 }
+#endif /* MINING_MODE_SUPP */
 
 /***************************************** VUSA HANDLERS ********************************************************/
 static void App_VusaHandleCbk (bool vusaShorted);
@@ -504,6 +525,7 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 	Test2LedToggle();
 #endif
 
+#if MINING_MODE_SUPP
 	if ((sysStatus.config->miningMode == MINING_MODE_MANUAL) && (usr_data >= CONTROL_EVT_MINING_DISABLE))
 	{
 		if (sysStatus.mining_stick_ctrl_stat != usr_data)
@@ -580,6 +602,7 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 		sysStatus.mining_stick_ctrl_stat = usr_data;
 		return;
 	}
+#endif /* MINING_MODE_SUPP */
 
 	if (usr_data == CONTROL_EVT_NO_EVT)
 	{
@@ -594,8 +617,10 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 		usr_data = CONTROL_EVT_ARM_WITH_ACC;
 	}
 	else if (
-				(sysStatus.config->accEnable != false) &&
-				(sysStatus.mining_state == MINING_STATE_NONE)
+				(sysStatus.config->accEnable != false) 
+#if MINING_MODE_SUPP
+				&& (sysStatus.mining_state == MINING_STATE_NONE)
+#endif /* MINING_MODE_SUPP */
 			)
 	{
 		/* Enable accelerometer functionality */
@@ -624,8 +649,10 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 			if (sysStatus.stick_ctrl_mode == STICK_MODE_STICK_PWM)
 			{
 				if (
-						(sysStatus.state == SYSTEM_STATE_DISARM) &&
-						(sysStatus.mining_state == MINING_STATE_NONE)
+						(sysStatus.state == SYSTEM_STATE_DISARM) 
+#if MINING_MODE_SUPP
+						&& (sysStatus.mining_state == MINING_STATE_NONE)
+#endif /* MINING_MODE_SUPP */
 					)
 				{
 					/* Start self destroy timer if stick connection is lost when system was in disarm state */
@@ -700,8 +727,10 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 			}
 
 			if (
-					(sysStatus.state == SYSTEM_STATE_DISARM) ||
-					((sysStatus.config->miningMode == MINING_MODE_MANUAL) && (sysStatus.mining_state != MINING_STATE_NONE))
+					(sysStatus.state == SYSTEM_STATE_DISARM) 
+#if MINING_MODE_SUPP
+					|| ((sysStatus.config->miningMode == MINING_MODE_MANUAL) && (sysStatus.mining_state != MINING_STATE_NONE))
+#endif /* MINING_MODE_SUPP */
 				)
 			{
 				if (usr_data == CONTROL_EVT_ARM_WITH_ACC)
@@ -830,6 +859,7 @@ static void App_AccProcCbk (system_evt_t evt, uint32_t usr_data)
 #endif
 			}
 		}
+#if MINING_MODE_SUPP
 		else if (usr_data == ACC_EVT_MOVE_DETECTED)
 		{
 			/* Check if self destruction allowed */
@@ -841,6 +871,7 @@ static void App_AccProcCbk (system_evt_t evt, uint32_t usr_data)
 				Util_SetFlag((uint32_t*)&sysStatus.app_task_mask, APP_TASK_SELF_DESTROY_INIT_CBK);
 			}
 		}
+#endif /* MINING_MODE_SUPP */
 	}
 }
 
@@ -862,8 +893,11 @@ void App_SetSafe (bool ind_enable)
 	sysStatus.safe_tmr_tick = sysStatus.config->safeTimeoutSec;
 	sysStatus.safe_tmr_pause = false;
 	sysStatus.self_destroy_mode = SELF_DESTROY_STATE_NONE;
-	sysStatus.mining_state = MINING_STATE_NONE;
 	sysStatus.low_pwr_self_dest_allowed = false;
+
+#if MINING_MODE_SUPP
+	sysStatus.mining_state = MINING_STATE_NONE;
+#endif /* MINING_MODE_SUPP */
 
 #if 0
 	TestLedSet(false);
@@ -1099,6 +1133,12 @@ static void App_IgnitionOnCbk(void)
 	/* Clear self destruction flag */
 	sysStatus.self_destroy_mode = SELF_DESTROY_STATE_NONE;
 
+	/* Set ignition done flag */
+	sysStatus.sys_info.is_ignition_done = 1;
+
+	/* Set board state to ignition */
+	sysStatus.sys_info.board_state = BOARD_STATE_BOOM;
+
 	/* Provide indication */
 	Indication_SetStatus(IND_STATUS_BOOM_START, 0u);
 
@@ -1121,8 +1161,10 @@ static void App_IgnitionRun(void)
 	App_SelfDestroyTimerStop();
 	App_ArmConfigurationSet();
 
+#if MINING_MODE_SUPP
 	/* Disable mining before ignition */
 	App_MiningModeDisable();
+#endif /* MINING_MODE_SUPP */
 
 	sysStatus.state = SYSTEM_STATE_IGNITION;
 
@@ -1157,6 +1199,9 @@ static void App_ArmRun (void)
 
 	sysStatus.state = SYSTEM_STATE_ARMED;
 
+	/* Set board state to ARMED */
+	sysStatus.sys_info.board_state = BOARD_STATE_ARMED;
+
 	/* Check if any ignition controls is already triggered */
 	if (
 			(sysStatus.vusa_state == VUSA_STATE_SHORTED) ||
@@ -1168,6 +1213,7 @@ static void App_ArmRun (void)
 		return;
 	}
 
+#if MINING_MODE_SUPP
 	/* Process the mining mode if enabled */
 	if (sysStatus.mining_state >= MINING_STATE_ENABLING)
 	{
@@ -1186,6 +1232,8 @@ static void App_ArmRun (void)
 #endif
 		ret = true;
 	}
+#endif /* MINING_MODE_SUPP */
+
 	/* Check stick state */
 	else if (sysStatus.stick_ctrl_mode == STICK_MODE_STICK_PWM)
 	{
@@ -1228,8 +1276,10 @@ static void App_ChargingStopCbk (void)
 {
 	/* Notify that system is ready in case of first charing cycle */
 	if (
-			(sysStatus.state == SYSTEM_STATE_CHARGING) &&
-			(sysStatus.mining_state != MINING_STATE_ENABLING)
+			(sysStatus.state == SYSTEM_STATE_CHARGING) 
+#if MINING_MODE_SUPP
+			&& (sysStatus.mining_state != MINING_STATE_ENABLING)
+#endif /* MINING_MODE_SUPP */
 		)
 	{
 	    Indication_SetStatus(IND_STATUS_CHARGING_STOP, 0u);
@@ -1250,8 +1300,10 @@ static void App_ChargingRun (system_state_t charge_state, bool reset_var)
 	sysStatus.state = charge_state;
 
 	if (
-			(sysStatus.state == SYSTEM_STATE_CHARGING) &&
-			(sysStatus.mining_state != MINING_STATE_ENABLING)
+			(sysStatus.state == SYSTEM_STATE_CHARGING) 
+#if MINING_MODE_SUPP
+			&& (sysStatus.mining_state != MINING_STATE_ENABLING)
+#endif /* MINING_MODE_SUPP */
 		)
 	{
 		Indication_SetStatus(IND_STATUS_CHARGING_START, 0u);
@@ -1261,6 +1313,9 @@ static void App_ChargingRun (system_state_t charge_state, bool reset_var)
 	{
 		/* Reset all system blocks and variables for initial charging */
 		App_SetSafe(false);
+
+		/* Set board state to charging */
+		sysStatus.sys_info.board_state = BOARD_STATE_CHARGING;
 	}
 
 	/* Enable capacitor charging MOSFET */
@@ -1277,6 +1332,9 @@ static void App_ChargingRun (system_state_t charge_state, bool reset_var)
 /***************************************** DISARM STATE **************************************************/
 static void App_DisarmRun (bool ind_enable)
 {
+	/* Set board state to disarmed */
+	sysStatus.sys_info.board_state = BOARD_STATE_DISARMED;
+
 	/* Reset all system blocks and variables */
 	App_SetSafe(ind_enable);
 
@@ -1302,7 +1360,6 @@ static void App_SafeTmrTickCbk (void)
     if (sysStatus.safe_tmr_tick == 0u)
     {
 		/* Set Self Destruction timer in sys info*/
-		sysStatus.sys_info.timer_mode = TIMER_MODE_SELF_DESTROY;
 		if (Timer_IsActive(SELF_DESTRUCTION_TMR))
 		{
 			sysStatus.sys_info.timer_seconds = sysStatus.self_destroy_tmr_tick;
@@ -1493,6 +1550,7 @@ static void App_FuseCheck (void)
 
     	if (stickStat != false)
     	{
+#if MINING_MODE_SUPP
 			if (sysStatus.mining_stick_ctrl_stat == CONTROL_EVT_MINING_ENABLE)
 			{
 				stickStat = false;
@@ -1503,6 +1561,7 @@ static void App_FuseCheck (void)
 			{
 				App_ClearError(ERR_CODE_UNEXPECTED_MINING);
 			}
+#endif /* MINING_MODE_SUPP */
     	}
     }
 
@@ -1539,12 +1598,17 @@ static void App_FuseCheckRun (void)
 	/* Stop self destroy timer every time fuse is populated */
 	App_SelfDestroyTimerStop();
 
+#if MINING_MODE_SUPP
 	/* Disable mining */
 	App_MiningModeDisable();
+#endif /* MINING_MODE_SUPP */
 
 	/* Update timer info */
 	sysStatus.sys_info.timer_seconds = sysStatus.config->safeTimeoutSec;
 	sysStatus.sys_info.fuse_present = !(ReadFuseGpio() == GPIO_PIN_RESET);
+
+	/* Clear ignition done flag */
+	sysStatus.sys_info.is_ignition_done = 0;
 
 	/* Reset Stick SM in case is connection was lost */
 	if (sysStatus.is_ctrl_lost != false)
@@ -1552,7 +1616,9 @@ static void App_FuseCheckRun (void)
 		sysStatus.is_ctrl_lost = false;
 		sysStatus.stick_ctrl_mode = STICK_MODE_NONE;
 		sysStatus.stick_ctrl_stat = CONTROL_EVT_NO_CTRL;
+#if MINING_MODE_SUPP
 		sysStatus.mining_stick_ctrl_stat = CONTROL_EVT_NO_CTRL;
+#endif /* MINING_MODE_SUPP */
 	}
 
 	sysStatus.state = SYSTEM_STATE_INIT_FUSE_CHECK;
@@ -1610,6 +1676,8 @@ static void App_InitCbk (void)
 	{
 		/* Restart logic from the beginning */
 		App_FuseCheckRun();
+		/* Set board state to disarmed */
+		sysStatus.sys_info.board_state = BOARD_STATE_DISARMED;
 	}
 }
 
@@ -1619,7 +1687,11 @@ void App_InitFinish (void)
 	sysStatus.state = SYSTEM_STATE_INIT;
 
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
+#if MINING_MODE_SUPP
 	Stick_Reset(App_StickCbk, (sysStatus.config->miningMode == MINING_MODE_MANUAL));
+#else
+	Stick_Reset(App_StickCbk, false);
+#endif /* MINING_MODE_SUPP */
 	/* Set callback for FC PWM */
 	FcPwmSetCbk(Stick_ProcessEdgeCbk);
 #elif (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
@@ -1664,8 +1736,10 @@ void App_InitRun(void)
 
 	/* Enable accelerometer if required */
 	if (
-			(sysStatus.config->accEnable != false) ||
-			(sysStatus.config->miningMode != MINING_MODE_NONE)
+			(sysStatus.config->accEnable != false) 
+#if MINING_MODE_SUPP
+			|| (sysStatus.config->miningMode != MINING_MODE_NONE)
+#endif /* MINING_MODE_SUPP */
 		)
 	{
 		/* Set error by default - after successful init error will be erased */

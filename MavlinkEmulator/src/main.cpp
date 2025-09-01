@@ -24,6 +24,18 @@
 // Command Configuration
 #define MAVLINK_CMD_IGNITION 1            // Only command that autopilot can send
 
+// ======================= INITBOARD HEARTBEAT CUSTOM MODE STRUCTURE =======================
+// InitBoard HEARTBEAT custom_mode bitfield structure (32-bit):
+// Bits 0-13:   timer_sec (14 bits) - Timer seconds (0-16383)
+// Bits 14-15:  timer_mode (2 bits) - Timer mode (0-3)
+// Bit 16:      fc_control_present (1 bit) - FC control present (0-1) - autopilot connection status
+// Bit 17:      fuse_present (1 bit) - Fuse present (0-1)
+// Bits 18-20:  board_state (3 bits) - Board state (0-7)
+// Bits 21-24:  battery_level (4 bits) - Battery level 0-10 (encoded as 0-15)
+// Bits 25-28:  error_code (4 bits) - Error code (0-15)
+// Bit 29:      is_ignition_done (1 bit) - Ignition done flag (0-1)
+// Bits 30-31:  reserved (2 bits) - Reserved for future use
+
 // ======================= TYPE DEFINITIONS =======================
 // ARM and PREARM states (read from GPIO pins) - matching STM32G0 enum definitions
 typedef enum {
@@ -66,6 +78,8 @@ void debug_arm_state_change(mavlink_arm_state_t new_state);
 void debug_prearm_state_change(mavlink_prearm_state_t new_state);
 void debug_ignition_state_change(mavlink_ignition_state_t new_state);
 void send_ignition_command(void);
+const char* get_timer_mode_description(uint8_t timer_mode);
+const char* get_board_state_description(uint8_t board_state);
 
 // ======================= HELPER FUNCTIONS =======================
 // ESP32 helper function for error description
@@ -77,6 +91,24 @@ const char* get_error_description(uint8_t error_code) {
     };
     
     return (error_code < 8) ? error_descriptions[error_code] : error_descriptions[8];
+}
+
+// Get timer mode description
+const char* get_timer_mode_description(uint8_t timer_mode) {
+    static const char* timer_mode_descriptions[] = {
+        "No Timer", "Safe", "Self Destroy", "Unknown"
+    };
+    
+    return (timer_mode < 3) ? timer_mode_descriptions[timer_mode] : timer_mode_descriptions[3];
+}
+
+// Get board state description
+const char* get_board_state_description(uint8_t board_state) {
+    static const char* board_state_descriptions[] = {
+        "Init", "Disarmed", "Charging", "Armed", "Boom", "Unknown"
+    };
+    
+    return (board_state < 5) ? board_state_descriptions[board_state] : board_state_descriptions[5];
 }
 
 // Get incrementing sequence number
@@ -197,44 +229,49 @@ void send_autopilot_heartbeat() {
 // ======================= MAVLINK MESSAGE PROCESSING =======================
 // Process received HEARTBEAT from InitBoard
 void debug_mavlink_rx(uint8_t* packet, uint8_t len) {
-    Serial.printf("[MAVLINK_RX] Received packet: ");
-    for (int i = 0; i < len; i++) {
-        Serial.printf("%02X ", packet[i]);
-    }
-    Serial.println();
+    // Serial.printf("[MAVLINK_RX] Received packet: ");
+    // for (int i = 0; i < len; i++) {
+    //     Serial.printf("%02X ", packet[i]);
+    // }
+    // Serial.println();
     
     // Decode message type if it's a known message
     if (len >= 10) {
         uint32_t msg_id = packet[7] | (packet[8] << 8) | (packet[9] << 16);
         switch (msg_id) {
             case 0:
-                Serial.println("[MAVLINK_RX] Message type: HEARTBEAT");
+                // Serial.println("[MAVLINK_RX] Message type: HEARTBEAT");
                 // Debug: Show packet length and system ID
-                Serial.printf("[DEBUG] Packet length: %d, System ID: 0x%02X (expected: 0x%02X)\n", 
-                             len, packet[5], MAVLINK_SYSTEM_ID_INITBOARD);
+                // Serial.printf("[DEBUG] Packet length: %d, System ID: 0x%02X (expected: 0x%02X)\n", 
+                //              len, packet[5], MAVLINK_SYSTEM_ID_INITBOARD);
                 
                 // Decode custom mode if HEARTBEAT from InitBoard
                 if (len >= 21 && packet[5] == MAVLINK_SYSTEM_ID_INITBOARD) {
                     uint32_t custom_mode_raw = packet[13] | (packet[14] << 8) | 
                                               (packet[15] << 16) | (packet[16] << 24);
                     
-                    // Decode bitfield
+                    // Decode bitfield (updated with fc_control_present and is_ignition_done)
                     uint16_t timer_sec = custom_mode_raw & 0x3FFF;           // Bits 0-13
                     uint8_t timer_mode = (custom_mode_raw >> 14) & 0x03;     // Bits 14-15
-                    uint8_t fuse_present = (custom_mode_raw >> 16) & 0x01;   // Bit 16
-                    uint8_t board_state = (custom_mode_raw >> 17) & 0x07;    // Bits 17-19
-                    uint8_t battery_level = (custom_mode_raw >> 20) & 0x0F;  // Bits 20-23
-                    uint8_t error_code = (custom_mode_raw >> 24) & 0x0F;     // Bits 24-27
+                    uint8_t fc_control_present = (custom_mode_raw >> 16) & 0x01; // Bit 16
+                    uint8_t fuse_present = (custom_mode_raw >> 17) & 0x01;   // Bit 17
+                    uint8_t board_state = (custom_mode_raw >> 18) & 0x07;    // Bits 18-20
+                    uint8_t battery_level = (custom_mode_raw >> 21) & 0x0F;  // Bits 21-24
+                    uint8_t error_code = (custom_mode_raw >> 25) & 0x0F;     // Bits 25-28
+                    uint8_t is_ignition_done = (custom_mode_raw >> 29) & 0x01; // Bit 29
                     
-                    Serial.printf("  Timer: %d sec, Mode: %d, Fuse: %d, State: %d, Battery: %d%%, Error: %s\n",
-                                 timer_sec, timer_mode, fuse_present, board_state,
-                                 battery_level * 10, get_error_description(error_code));
+                    Serial.printf("  Timer: %d sec, Timer Mode: %s, FC: %s, Fuse: %d, State: %s, Battery: %d%%, Error: %s, Ignition: %s\n",
+                                 timer_sec, get_timer_mode_description(timer_mode), 
+                                 fc_control_present ? "Connected" : "Disconnected",
+                                 fuse_present, get_board_state_description(board_state), 
+                                 battery_level * 10, get_error_description(error_code),
+                                 is_ignition_done ? "Done" : "Not Done");
                 } else {
-                    Serial.println("[DEBUG] HEARTBEAT decode skipped - length or system ID mismatch");
+                    // Serial.println("[DEBUG] HEARTBEAT decode skipped - length or system ID mismatch");
                 }
                 break;
             case 77:
-                Serial.println("[MAVLINK_RX] Message type: COMMAND_ACK");
+                // Serial.println("[MAVLINK_RX] Message type: COMMAND_ACK");
                 if (len >= 13) {
                     uint16_t command = packet[10] | (packet[11] << 8);
                     uint8_t result = packet[12];
@@ -242,7 +279,7 @@ void debug_mavlink_rx(uint8_t* packet, uint8_t len) {
                 }
                 break;
             default:
-                Serial.printf("[MAVLINK_RX] Message type: Unknown (ID=%d)\n", msg_id);
+                // Serial.printf("[MAVLINK_RX] Message type: Unknown (ID=%d)\n", msg_id);
                 break;
         }
     }
@@ -314,9 +351,9 @@ void process_periodic_heartbeat() {
         bool gpio4_raw = digitalRead(MAVLINK_ESP32_ARM_PIN);
         bool gpio15_raw = digitalRead(MAVLINK_ESP32_PREARM_PIN);
         
-        Serial.printf("[TX] Autopilot HEARTBEAT: ARM=%s (GPIO4=%d), PREARM=%s (GPIO15=%d)\n",
-                      arm_state == MAVLINK_ARM_STATE_ARMED ? "ARMED" : "DISARMED", gpio4_raw,
-                      prearm_state == MAVLINK_PREARM_STATE_ENABLED ? "ENABLED" : "DISABLED", gpio15_raw);
+        // Serial.printf("[TX] Autopilot HEARTBEAT: ARM=%s (GPIO4=%d), PREARM=%s (GPIO15=%d)\n",
+        //               arm_state == MAVLINK_ARM_STATE_ARMED ? "ARMED" : "DISARMED", gpio4_raw,
+        //               prearm_state == MAVLINK_PREARM_STATE_ENABLED ? "ENABLED" : "DISABLED", gpio15_raw);
     }
 }
 

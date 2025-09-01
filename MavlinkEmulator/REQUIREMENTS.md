@@ -2,41 +2,40 @@
 ## Mavlink InitBoard System
 
 ### 1. SYSTEM OVERVIEW
-**Objective:** Create a Mavlink node that can integrate into UAV communication network
+**Objective:** Create a Mavlink node for InitBoard ↔ Autopilot communication
 **Components:** 
-- STM32G0 InitBoard (main controller with custom mode bitfield transmission)
-- ESP32 DevKit V1 (Autopilot emulator with ARM/PREARM state monitoring)
+- STM32G0 InitBoard (sends status, receives commands from autopilot)
+- ESP32 DevKit V1 (Autopilot emulator with GPIO monitoring and command generation)
 
 ### 2. HARDWARE ARCHITECTURE
 - **STM32G0 ↔ ESP32:** UART connection (9600 baud)
 - **ESP32 UART2:** GPIO 16 (RX2), GPIO 17 (TX2) - communication with STM32G0
-- **ESP32 Ground Station Emulator:** UART-only communication (NO WiFi)
-- **ESP32 Control Inputs:**
-  - **GPIO 4:** 3-position switch input (pull-up enabled)
-  - **GPIO 2:** 3-position switch input (pull-up enabled)
-  - **GPIO 15:** PREARM button input (pull-up enabled)
+- **ESP32 Autopilot Emulator:** UART-only communication (NO WiFi)
+- **ESP32 GPIO Monitoring:**
+  - **GPIO 0:** IGNITION signal monitoring (triggers command when LOW)
+  - **GPIO 1:** ARM signal monitoring (reflected in heartbeat)
+  - **GPIO 2:** PREARM signal monitoring (reflected in heartbeat)
 - **ESP32 Debug Output:** UART0 (default Serial) for terminal debugging
 - **Power:** 5V external supply
 
 ### 2.1 CONFIGURATION MANAGEMENT
-- **System IDs:** Configurable via defines in config file
-- **Ground Station ID:** Configurable define
-- **InitBoard ID:** Configurable define
+- **System IDs:** Both devices use System ID 0x42
+- **InitBoard Component ID:** 1
+- **Autopilot Component ID:** 2
 
 ### 3. FUNCTIONAL REQUIREMENTS
 
 #### 3.1 InitBoard (STM32G0) SHALL:
 - **FR-01:** Send HEARTBEAT message every 1Hz using Mavlink_SendData()
-  - System ID: Configurable define
-  - Component ID: MAVLINK_COMP_ID_USER1 (25)
-  - Custom mode: 4 bytes for internal status
-- **FR-02:** Receive VFR_HUD messages from ground station (1Hz) via Mavlink_ByteReceived()
-- **FR-03:** Receive HEARTBEAT from ground station (1Hz) via Mavlink_ByteReceived()
-- **FR-04:** Process COMMAND_LONG (MAVLINK_CMD_USER_1) commands via Mavlink_ByteReceived()
-- **FR-05:** Send COMMAND_ACK responses using Mavlink_SendData()
-- **FR-06:** Process float parameters in COMMAND_LONG using union-based conversion (no floating point operations)
-- **FR-07:** Extract 2-byte custom data from COMMAND_LONG param1 field using bit manipulation
-- **FR-08:** Parse custom command types from lower byte of 2-byte custom data (DISARM, ARM, TARGET_APPROACH, IGNITION)
+  - System ID: 0x42
+  - Component ID: 1
+  - Custom mode: Status bitfield for ignition, mining, ARM states and error codes
+- **FR-02:** Receive HEARTBEAT messages from autopilot (1Hz) via Mavlink_ByteReceived()
+- **FR-03:** Process COMMAND_LONG commands from autopilot via Mavlink_ByteReceived()
+- **FR-04:** Send COMMAND_ACK responses using Mavlink_SendData()
+- **FR-05:** Process IGNITION commands (command = 1) from autopilot
+- **FR-06:** Decode autopilot GPIO states from HEARTBEAT custom mode field
+- **FR-07:** Monitor autopilot connection status and detect timeout
 
 #### 3.1.1 STM32G0 Mavlink UART Module (mavlink_uart.c/.h) SHALL:
 - **FR-01a:** Implement Mavlink_ByteReceived(uint8_t byte) for byte-by-byte reception
@@ -44,30 +43,27 @@
 - **FR-01c:** Implement Mavlink_Reset(mavlink_app_cbk_fn system_cbk) for initialization and callback setup
 - **FR-01d:** Support callback function typedef: void (*mavlink_app_cbk_fn)(mavlink_system_evt_t evt, uint32_t usr_data)
 - **FR-01e:** Parse incoming Mavlink packets and notify upper layers via callback
-- **FR-01f:** Generate HEARTBEAT packets with configurable system ID
-- **FR-01g:** Implement GCS connection timeout detection using Timer API
-- **FR-01h:** Restart timeout timer on each valid GCS HEARTBEAT reception
-- **FR-01i:** Notify upper layers when GCS connection is lost (timeout expired)
-- **FR-01j:** Parse COMMAND_LONG messages and extract custom data using float-to-uint32 conversion
+- **FR-01f:** Generate HEARTBEAT packets with System ID 0x42
+- **FR-01g:** Implement autopilot connection timeout detection using Timer API
+- **FR-01h:** Restart timeout timer on each valid autopilot HEARTBEAT reception
+- **FR-01i:** Notify upper layers when autopilot connection is lost (timeout expired)
+- **FR-01j:** Parse COMMAND_LONG messages for IGNITION commands
 - **FR-01k:** Generate COMMAND_ACK responses with proper result codes
-- **FR-01l:** Parse VFR_HUD messages and store data in integer-only format (no floating point operations)
-- **FR-01m:** Validate VFR_HUD data freshness and provide access functions for upper layers
+- **FR-01l:** Parse autopilot HEARTBEAT and extract ARM/PREARM/IGNITION GPIO states
+- **FR-01m:** Provide access functions for autopilot ARM and PREARM states
 
-#### 3.2 ESP32 Ground Station Emulator SHALL:
-- **FR-06:** Implement configurable System ID and Component ID via defines
-- **FR-07:** Send VFR_HUD messages (1Hz) with realistic flight data via UART2 (GPIO 16/17) at 9600 baud
-- **FR-08:** Send HEARTBEAT GCS messages (1Hz) via UART2 (GPIO 16/17) at 9600 baud with proper GCS identification
-- **FR-09:** Send test COMMAND_LONG commands via UART2 (GPIO 16/17) at 9600 baud based on input states
-- **FR-10:** Receive and display InitBoard HEARTBEAT and responses via UART2 (GPIO 16/17) at 9600 baud
-- **FR-11:** Use configuration file with defines for system parameters
-- **FR-12:** Implement 1-second timer for periodic HEARTBEAT transmission
-- **FR-13:** Generate proper Mavlink v2.0 HEARTBEAT packet with GCS-specific fields
-- **FR-14:** Use only UART2 communication - NO WiFi functionality
-- **FR-15:** Monitor 3-position switch on GPIO 4/2 with pull-up configuration
-- **FR-16:** Monitor PREARM button on GPIO 15 with pull-up configuration
-- **FR-17:** Implement 300ms debounce for all input switches
-- **FR-18:** Send commands only on state changes (not continuously)
-- **FR-19:** Output debug messages via UART0 (Serial) for all Mavlink events
+#### 3.2 ESP32 Autopilot Emulator SHALL:
+- **FR-06:** Use System ID 0x42, Component ID 2
+- **FR-07:** Send HEARTBEAT messages (1Hz) with GPIO states via UART2 (GPIO 16/17) at 9600 baud
+- **FR-08:** Monitor GPIO pins for ARM/PREARM/IGNITION signals
+- **FR-09:** Send IGNITION COMMAND_LONG when GPIO0 goes LOW
+- **FR-10:** Receive and display InitBoard HEARTBEAT and status via UART2 (GPIO 16/17) at 9600 baud
+- **FR-11:** Implement 1-second timer for periodic HEARTBEAT transmission
+- **FR-12:** Generate proper Mavlink v2.0 HEARTBEAT packet with autopilot-specific fields
+- **FR-13:** Use only UART2 communication - NO WiFi functionality
+- **FR-14:** Monitor GPIO 0 (IGNITION), GPIO 1 (ARM), GPIO 2 (PREARM)
+- **FR-15:** Encode GPIO states in HEARTBEAT custom mode bitfield
+- **FR-16:** Output debug messages via UART0 (Serial) for all Mavlink events
 - **FR-20:** Decode and display human-readable command descriptions in debug output
 - **FR-21:** Generate VFR_HUD messages (1Hz) with simulated flight data and dynamic parameter changes
 - **FR-22:** Implement periodic message scheduling to prevent UART transmission overlap
@@ -75,94 +71,135 @@
 
 ### 4. TECHNICAL PARAMETERS
 - **Mavlink version:** v2.0
-- **System ID InitBoard:** Configurable define (MAVLINK_SYSTEM_ID_INITBOARD)
-- **System ID GCS Emulator:** Configurable define (MAVLINK_SYSTEM_ID_GCS)
-- **Component ID InitBoard:** 25 (MAVLINK_COMP_ID_USER1)
-- **Component ID GCS:** 190 (MAVLINK_COMP_ID_MISSIONPLANNER)
+- **System ID:** 0x42 (both InitBoard and Autopilot)
+- **Component ID InitBoard:** 1
+- **Component ID Autopilot:** 2
 - **STM32 UART Speed:** 9600 baud
 - **ESP32 UART2:** GPIO 16 (RX2), GPIO 17 (TX2) at 9600 baud
 - **ESP32 Debug UART:** UART0 (Serial) for terminal output
-- **ESP32 Input Debounce:** 300ms for switch stability
+- **ESP32 GPIO Monitoring:** GPIO 0 (IGNITION), GPIO 1 (ARM), GPIO 2 (PREARM)
 - **Message Rates:** 1Hz for all periodic messages
-- **GCS Timeout Period:** 3000ms (3 seconds) - configurable in header file
+- **Autopilot Timeout Period:** 3000ms (3 seconds) - configurable in header file
 - **InitBoard Heartbeat Interval:** 1000ms (1Hz)
 - **Timer API:** Timer_Start(uint8_t timer_id, uint32_t timer_period_ms, tmr_cbk cbk)
 - **Timer Callback:** typedef void (*tmr_cbk)(uint8_t tmr_id)
-- **Battery Monitoring:** AAA battery voltage range 900mV-1500mV
-- **Battery Level Resolution:** 10% increments (0-10 scale)
-- **ADC Update Rate:** Configurable via ADC_START_MEASURE_TMR_PERIOD_MS
 
 #### 4.1 Timer Configuration
 ```c
 // Mavlink timer IDs (add to your timer configuration)
 #define MAVLINK_INITBOARD_HEARTBEAT_TMR        // Timer for 1Hz InitBoard heartbeat
-#define MAVLINK_GCS_CONNECTION_TIMEOUT_TMR     // Timer for GCS connection timeout
+#define MAVLINK_AUTOPILOT_CONNECTION_TIMEOUT_TMR // Timer for autopilot connection timeout
 
 // Mavlink timing constants
 #define MAVLINK_INITBOARD_HEARTBEAT_INTERVAL_MS  1000  // 1Hz InitBoard heartbeat
-#define MAVLINK_CONNECTION_TIMEOUT_MS            3000  // 3 second GCS timeout
+#define MAVLINK_CONNECTION_TIMEOUT_MS            3000  // 3 second autopilot timeout
 ```
+
 ### 5. PROTOCOL DETAILS
 
 #### 5.1 InitBoard HEARTBEAT Message
-- **Message:** HEARTBEAT
+- **Message:** HEARTBEAT (ID: 0x00)
 - **Rate:** 1Hz (every 1000ms)
+- **Purpose:** Send status to autopilot
 - **Fields:**
   - `type`: MAV_TYPE_QUADROTOR (2)
   - `autopilot`: MAV_AUTOPILOT_GENERIC (0) 
-  - `base_mode`: MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
-  - `custom_mode`: Bitfield containing switch and battery states
+  - `base_mode`: MAV_MODE_FLAG_CUSTOM_MODE_ENABLED (1)
+  - `custom_mode`: Status bitfield
   - `system_status`: MAV_STATE_ACTIVE (4)
   - `mavlink_version`: 3
 
-#### 5.2 Custom Mode Bitfield Structure
+#### 5.2 InitBoard Custom Mode Bitfield Structure
 ```
-Bit Position | Field Name    | Bits | Range/Values          | Description
--------------|---------------|------|----------------------|---------------------------
-0-7          | switch1       | 8    | 0-255                | Switch 1 ADC value/state
-8-15         | switch2       | 8    | 0-255                | Switch 2 ADC value/state  
-16-19        | switch3       | 4    | 0-15                 | Switch 3 ADC value/state
-20-23        | battery_level | 4    | 0-10                 | Battery level (0%-100% in 10% increments)
-24-31        | reserved      | 8    | 0                    | Reserved for future use
+Bit Position | Field Name         | Bits | Range/Values          | Description
+-------------|-------------------|------|----------------------|---------------------------
+0            | ignition_pin      | 1    | 0-1                  | IGNITION pin state (0=HIGH, 1=LOW)
+1            | mining_status     | 1    | 0-1                  | MINING status (0=LOW, 1=HIGH)
+2            | arm_status        | 1    | 0-1                  | ARM status (0=LOW, 1=HIGH)
+3            | is_armed          | 1    | 0-1                  | ARMED state (0=DISARMED, 1=ARMED)
+4            | need_ignition     | 1    | 0-1                  | Need ignition (0=NO, 1=YES)
+5-7          | error_code_low    | 3    | 0-7                  | Error code bits 0-2
+8-10         | error_code_high   | 3    | 0-7                  | Error code bits 3-5
+11-31        | reserved          | 21   | 0                    | Reserved for future use
 ```
 
-#### 5.3 Battery Level Calculation
-- **Input Range:** 900mV - 1500mV (AAA battery voltage)
-- **Output Scale:** 0-10 (representing 0%-100% in 10% increments)
-- **Calculation Formula:**
-  ```c
-  battery_level = (adc_voltage_mv - 900) * 10 / (1500 - 900)
-  battery_level = min(max(battery_level, 0), 10)
-  ```
-- **Integration:** Updated in ADC processing and transmitted via custom_mode field
-### 6. GCS COMMAND PROCESSING
+#### 5.3 Autopilot HEARTBEAT Message
+- **Message:** HEARTBEAT (ID: 0x00)
+- **Rate:** 1Hz (every 1000ms)
+- **Purpose:** Send GPIO states to InitBoard
+- **Fields:**
+  - `type`: MAV_TYPE_QUADROTOR (2)
+  - `autopilot`: MAV_AUTOPILOT_GENERIC (0)
+  - `base_mode`: MAV_MODE_FLAG_CUSTOM_MODE_ENABLED (1)
+  - `custom_mode`: GPIO state bitfield
+  - `system_status`: MAV_STATE_ACTIVE (4)
+  - `mavlink_version`: 3
 
-#### 6.1 Supported Commands from GCS
-1. **HEARTBEAT** - GCS presence detection and connection establishment
-2. **REQUEST_DATA_STREAM** - Request for periodic message transmission
-3. **COMMAND_LONG** - General command execution interface
-4. **MISSION_ITEM** - Mission waypoint/command handling
-5. **SET_MODE** - Flight mode change requests
+#### 5.4 Autopilot Custom Mode Bitfield Structure
+```
+Bit Position | Field Name         | Bits | Range/Values          | Description
+-------------|-------------------|------|----------------------|---------------------------
+0            | arm_gpio          | 1    | 0-1                  | GPIO1 state (0=HIGH, 1=LOW)
+1            | prearm_gpio       | 1    | 0-1                  | GPIO2 state (0=HIGH, 1=LOW)  
+2            | ignition_gpio     | 1    | 0-1                  | GPIO0 state (0=HIGH, 1=LOW)
+3-31         | reserved          | 29   | 0                    | Reserved for future use
+```
+#### 5.5 Command Types
+- **IGNITION (1):** Only supported command - trigger ignition when GPIO0 goes LOW
 
-#### 6.2 GCS Connection Management
-- **Connection Detection:** GCS considered connected when HEARTBEAT received
+#### 5.6 Autopilot Events (STM32G0)
+```c
+typedef enum {
+    MAVLINK_EVT_COMMAND_IGNITION = 0x01,           // Ignition command received
+    MAVLINK_EVT_AUTOPILOT_CONNECTED = 0x02,        // Autopilot connected
+    MAVLINK_EVT_AUTOPILOT_DISCONNECTED = 0x03,     // Autopilot disconnected
+    MAVLINK_EVT_AUTOPILOT_HEARTBEAT = 0x04,        // Autopilot HEARTBEAT received
+    MAVLINK_EVT_AUTOPILOT_ARMED = 0x05,            // Autopilot armed
+    MAVLINK_EVT_AUTOPILOT_DISARMED = 0x06,         // Autopilot disarmed
+    MAVLINK_EVT_AUTOPILOT_PREARM_ENABLED = 0x07,   // PREARM enabled
+    MAVLINK_EVT_AUTOPILOT_PREARM_DISABLED = 0x08   // PREARM disabled
+} mavlink_event_t;
+```
+
+#### 5.7 Error Code Descriptions
+```c
+0: "No Error"
+1: "Strong Alarm"
+2: "Battery Low"
+3: "Fuse Incorrect"
+4: "Unexpected Ignition"
+5: "Unexpected Arm"
+6: "Unexpected Mining"
+7: "VUSA Shorted"
+8+: "Unknown Error"
+```
+
+### 6. AUTOPILOT COMMAND PROCESSING
+
+#### 6.1 Supported Commands from Autopilot
+1. **HEARTBEAT** - Autopilot presence detection with GPIO states
+2. **COMMAND_LONG** - IGNITION command when GPIO0 goes LOW
+
+#### 6.2 Autopilot Connection Management
+- **Connection Detection:** Autopilot considered connected when HEARTBEAT received
 - **Timeout Handling:** 3-second timeout triggers connection lost state
 - **Status Indication:** Connection status reflected in debug output
-- **Automatic Recovery:** System automatically reconnects when GCS HEARTBEAT resumes
+- **Automatic Recovery:** System automatically reconnects when autopilot HEARTBEAT resumes
 
 ### 7. IMPLEMENTATION ARCHITECTURE
 
 #### 7.1 STM32G0 InitBoard Components
-- **Mavlink UART Module:** Message parsing and transmission
-- **ADC Processing:** Battery and switch monitoring with configurable update rates
-- **Event System:** Mavlink event handler with comprehensive switch-case processing
-- **Timer Integration:** 1Hz heartbeat and connection timeout management
-- **Battery Calculation:** AAA battery level mapping to 10% increments
+- **Mavlink UART Module:** Message parsing and transmission for autopilot communication
+- **Status Processing:** Ignition, mining, ARM states and error code monitoring
+- **Event System:** Mavlink event handler for autopilot-specific events
+- **Timer Integration:** 1Hz heartbeat and autopilot connection timeout management
+- **Command Processing:** IGNITION command handling from autopilot
 
-#### 7.2 ESP32 GCS Emulator Components
+#### 7.2 ESP32 Autopilot Emulator Components
 - **Dual UART System:** UART2 for Mavlink, UART0 for debug output
-- **Switch Input Processing:** GPIO debouncing with 300ms stability window
-- **Command Generation:** Automated periodic message transmission
+- **GPIO Monitoring:** Real-time monitoring of ARM/PREARM/IGNITION signals
+- **Command Generation:** IGNITION commands triggered by GPIO0 LOW state
+- **State Transmission:** GPIO states encoded in HEARTBEAT custom mode field
 - **Debug Interface:** Human-readable message logging and status display
 } mavlink_custom_mode_t;
 

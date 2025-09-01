@@ -1,70 +1,70 @@
 # Mavlink Integration Guide - Current Implementation Status
 
 ## Overview
-This document reflects the actual implementation of the Mavlink communication system as currently coded. The system uses custom mode bitfield encoding in HEARTBEAT messages and timer-based periodic communication between STM32G0 InitBoard and ESP32 Autopilot Emulator.
+This document reflects the actual implementation of the Mavlink communication system for InitBoard ↔ Autopilot communication. The system uses bidirectional HEARTBEAT messages and COMMAND_LONG for ignition control between STM32G0 InitBoard and ESP32 Autopilot Emulator.
 
 ## Key Implementation Features
-- **Custom Mode Bitfield:** 32-bit system state encoding in InitBoard HEARTBEAT
+- **Bidirectional Communication:** InitBoard sends status, Autopilot sends GPIO states
 - **Timer-Based Messaging:** Uses Timer API for 1Hz periodic HEARTBEAT transmission
-- **System ID Synchronization:** Both systems use 0x42 (66) as system/component ID
-- **Event-Driven Architecture:** Callback-based event handling for Mavlink events
+- **System ID Synchronization:** Both systems use 0x42 (66) as system ID
+- **Event-Driven Architecture:** Callback-based event handling for autopilot events
 - **Integer-Only Operations:** No floating point math in STM32G0 code
-- **Comprehensive Debugging:** Detailed packet parsing and status display
+- **GPIO Monitoring:** Real-time autopilot ARM/PREARM/IGNITION state tracking
 
 ## Current Implementation Architecture
 
 ### STM32G0 InitBoard
 - **File:** `mavlink_uart.c/.h` in `shared/Src/` and `shared/Inc/`
-- **System ID:** 0x42 (66) - MAVLINK_SYSTEM_ID_INITBOARD
-- **Component ID:** 0x42 (66) - MAVLINK_COMP_ID_USER1
-- **Function:** Sends HEARTBEAT with custom mode bitfield, processes commands
+- **System ID:** 0x42 (66)
+- **Component ID:** 1
+- **Function:** Sends status HEARTBEAT, receives autopilot HEARTBEAT and IGNITION commands
 
 ### ESP32 Autopilot Emulator  
 - **File:** `main.cpp` in `MavlinkEmulator/src/`
-- **System ID:** 0x42 (66) - same as InitBoard (autopilot speaking TO InitBoard)
-- **Component ID:** 0x42 (66) - MAVLINK_COMP_ID_INITBOARD
-- **Function:** Monitors GPIO states, sends autopilot HEARTBEAT, decodes InitBoard status
+- **System ID:** 0x42 (66)
+- **Component ID:** 2
+- **Function:** Monitors GPIO 0/1/2 states, sends autopilot HEARTBEAT, sends IGNITION commands
 
 ### Communication Protocol
 - **UART:** 9600 baud between ESP32 GPIO16/17 and STM32G0 UART2
-- **Messages:** Mavlink v2.0 HEARTBEAT (1Hz), COMMAND_LONG, COMMAND_ACK
-- **Timing:** Timer-based periodic transmission, debounced GPIO monitoring
+- **Messages:** Mavlink v2.0 HEARTBEAT (1Hz), COMMAND_LONG (IGNITION), COMMAND_ACK
+- **Timing:** Timer-based periodic transmission, GPIO event-triggered commands
 
 ### 4. Implement Mavlink Event Handler
 Add to app.c:
 ```c
 static void App_MavlinkEventHandler(mavlink_evt_t event_type, uint8_t event_data) {
     switch (event_type) {
-        case MAVLINK_EVT_HEARTBEAT_RECEIVED:
-            // GCS connection established
+        case MAVLINK_EVT_AUTOPILOT_CONNECTED:
+            // Autopilot connection established
             break;
             
-        case MAVLINK_EVT_CONNECTION_LOST:
-            // GCS connection lost - handle timeout
+        case MAVLINK_EVT_AUTOPILOT_DISCONNECTED:
+            // Autopilot connection lost - handle timeout
             break;
             
-        case MAVLINK_EVT_COMMAND_ARM:
-            // Handle ARM command
+        case MAVLINK_EVT_COMMAND_IGNITION:
+            // Handle IGNITION command from autopilot
             break;
             
-        case MAVLINK_EVT_COMMAND_DISARM:
-            // Handle DISARM command
+        case MAVLINK_EVT_AUTOPILOT_HEARTBEAT:
+            // Autopilot HEARTBEAT received - update connection status
             break;
             
-        case MAVLINK_EVT_COMMAND_LONG_RECEIVED:
-            // Handle general commands
+        case MAVLINK_EVT_AUTOPILOT_ARMED:
+            // Autopilot armed state detected
             break;
             
-        case MAVLINK_EVT_REQUEST_DATA_STREAM:
-            // Handle data stream requests
+        case MAVLINK_EVT_AUTOPILOT_DISARMED:
+            // Autopilot disarmed state detected
             break;
             
-        case MAVLINK_EVT_MISSION_ITEM_RECEIVED:
-            // Handle mission items
+        case MAVLINK_EVT_AUTOPILOT_PREARM_ENABLED:
+            // Autopilot PREARM enabled
             break;
             
-        case MAVLINK_EVT_SET_MODE_RECEIVED:
-            // Handle mode changes
+        case MAVLINK_EVT_AUTOPILOT_PREARM_DISABLED:
+            // Autopilot PREARM disabled
             break;
             
         default:

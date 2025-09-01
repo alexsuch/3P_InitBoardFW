@@ -52,6 +52,7 @@ extern "C" {
 #define MINING_ACTIVATE_TMR                          (9u)
 
 #define IGNITION_TMR                                 (10u)
+
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
 #define STICK1_LOST_TMR                        		 (11u)
 #define STICK2_LOST_TMR                        		 (12u)
@@ -59,7 +60,7 @@ extern "C" {
 #elif (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 // Mavlink Timer IDs
 #define MAVLINK_INITBOARD_HEARTBEAT_TMR              (11u)
-#define MAVLINK_GCS_CONNECTION_TIMEOUT_TMR           (12u)
+#define MAVLINK_AUTOPILOT_CONNECTION_TIMEOUT_TMR     (12u)
 #endif
 
 #define CHARGING_TMR                        		 (13u)

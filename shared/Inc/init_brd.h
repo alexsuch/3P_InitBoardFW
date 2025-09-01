@@ -206,10 +206,11 @@ typedef enum {
 
 // Board state enumeration
 typedef enum {
-    BOARD_STATE_NO_FC = 0x00,       // No FC connected
+    BOARD_STATE_INIT = 0x00,        // No data available
     BOARD_STATE_DISARMED = 0x01,    // Disarmed
-    BOARD_STATE_ARMED = 0x02,       // Armed
-    BOARD_STATE_BOOM = 0x03         // Boom
+	BOARD_STATE_CHARGING = 0x02,    // Charging
+    BOARD_STATE_ARMED = 0x03,       // Armed
+    BOARD_STATE_BOOM = 0x04         // Boom
 } board_state_t;
 
 typedef struct __attribute__ ((__packed__))
@@ -256,6 +257,7 @@ typedef struct {
     uint8_t board_state;         // Board state (0-7)
     uint8_t battery_level;       // Battery level (0-10, where 10 = 100%)
     uint8_t error_code;          // Error code (0-15)
+    uint8_t is_ignition_done;    // Ignition done flag (0-1)
 } init_board_system_info_t;
 
 typedef struct

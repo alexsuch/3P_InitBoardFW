@@ -2,24 +2,24 @@
  * mavlink_uart.c - STM32G0 Mavlink UART Communication Module
  * 
  * This module handles Mavlink v2.0 communication via UART for the STM32G0-based InitBoard.
- * It processes incoming GCS commands and sends InitBoard HEARTBEAT messages with custom mode bitfield.
+ * It sends InitBoard HEARTBEAT messages with ARM/PREARM state encoding and processes
+ * IGNITION commands from autopilot.
  * 
  * Features:
  * - Integer-only operations (no floating point)
- * - Custom mode bitfield encoding (32-bit)
- * - Command processing and acknowledgment
+ * - 8-bit custom mode encoding (ARM + PREARM states)
+ * - IGNITION command processing
  * - UART interrupt-driven communication
- * - VFR_HUD message processing with float-to-integer conversion
+ * - Autopilot connection monitoring
  */
 
-#include "solution_wrapper.h"
+#include "main.h"
 #include "mavlink_uart.h"
 #include "prj_config.h"
 #include "app.h"
 #include "timer.h"
+#include "solution_wrapper.h"
 #include <string.h>
-
-#if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 
 // ======================= GLOBAL VARIABLES =======================
 static mavlink_state_t mavlink_state = {0};
@@ -31,18 +31,16 @@ static uint8_t mavlink_sequence_number = 0;
 static void Mavlink_SendPacket(uint8_t* packet, uint16_t length);
 static uint16_t Mavlink_CalculateCrc(const uint8_t* data, uint8_t len);
 static uint8_t Mavlink_GetSequenceNumber(void);
-static void Mavlink_ProcessGcsHeartbeat(const uint8_t* payload);
-static void Mavlink_ProcessVfrHud(const uint8_t* payload);
+static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload);
 static void Mavlink_ProcessCommandLong(const uint8_t* payload);
 static void Mavlink_SendCommandAck(uint16_t command, uint8_t result);
 static mavlink_custom_mode_t Mavlink_EncodeCustomMode(void);
-static void Mavlink_DecodeVfrHudFloats(const uint8_t* float_data, mavlink_vfr_hud_data_t* hud_data);
 static void Mavlink_SendInitBoardHeartbeat(void);
 static void Mavlink_ProcessReceivedMessage(void);
 
 // Timer callback functions
 static void Mavlink_InitBoardHeartbeatTimerCallback(uint8_t tmr_id);
-static void Mavlink_GcsConnectionTimeoutCallback(uint8_t tmr_id);
+static void Mavlink_AutopilotConnectionTimeoutCallback(uint8_t tmr_id);
 
 // ======================= INITIALIZATION =======================
 /**
@@ -56,14 +54,18 @@ void Mavlink_Init(app_cbk_fn system_cbk, init_board_system_info_t* system_info) 
     
     // Set default values
     mavlink_state.system_id = MAVLINK_SYSTEM_ID_INITBOARD;
-    mavlink_state.component_id = MAVLINK_COMP_ID_USER1;
+    mavlink_state.component_id = MAVLINK_COMP_ID_INITBOARD;
     mavlink_state.connected = 0;
     mavlink_state.rx_state = MAVLINK_RX_IDLE;
     mavlink_state.rx_index = 0;
     mavlink_state.system_callback = system_cbk;
     mavlink_state.system_info = system_info;  // Store pointer to system state
     mavlink_state.initboard_heartbeat_send_flag = 0;
-    mavlink_state.gcs_connection_timeout_flag = 0;
+    mavlink_state.autopilot_connection_timeout_flag = 0;
+    
+    // Initialize autopilot ARM/PREARM states to unknown
+    mavlink_state.autopilot_arm_state = 0xFF;      // Unknown state initially
+    mavlink_state.autopilot_prearm_state = 0xFF;   // Unknown state initially
     
     // Initialize buffers
     memset(mavlink_tx_buffer, 0, sizeof(mavlink_tx_buffer));
@@ -84,35 +86,35 @@ static void Mavlink_SendInitBoardHeartbeat(void) {
     mavlink_custom_mode_t custom_mode = Mavlink_EncodeCustomMode();
     
     // Header (10 bytes for Mavlink v2.0)
-    packet[0] = MAVLINK_V2_MAGIC;                    // Magic byte
-    packet[1] = 9;                                   // Payload length
-    packet[2] = 0;                                   // Incompat flags
-    packet[3] = 0;                                   // Compat flags
-    packet[4] = Mavlink_GetSequenceNumber();         // Sequence
-    packet[5] = mavlink_state.system_id;             // System ID
-    packet[6] = mavlink_state.component_id;          // Component ID
-    packet[7] = MAVLINK_MSG_ID_HEARTBEAT & 0xFF;     // Message ID (low byte)
-    packet[8] = (MAVLINK_MSG_ID_HEARTBEAT >> 8) & 0xFF;  // Message ID (mid byte)
-    packet[9] = (MAVLINK_MSG_ID_HEARTBEAT >> 16) & 0xFF; // Message ID (high byte)
+    packet[MAVLINK_V2_MAGIC_INDEX] = MAVLINK_V2_MAGIC;                    // Magic byte
+    packet[MAVLINK_V2_PAYLOAD_LEN_INDEX] = HEARTBEAT_PAYLOAD_SIZE;        // Payload length
+    packet[MAVLINK_V2_INCOMPAT_FLAGS_INDEX] = 0;                         // Incompat flags
+    packet[MAVLINK_V2_COMPAT_FLAGS_INDEX] = 0;                           // Compat flags
+    packet[MAVLINK_V2_SEQUENCE_INDEX] = Mavlink_GetSequenceNumber();     // Sequence
+    packet[MAVLINK_V2_SYSTEM_ID_INDEX] = mavlink_state.system_id;        // System ID
+    packet[MAVLINK_V2_COMPONENT_ID_INDEX] = mavlink_state.component_id;  // Component ID
+    packet[MAVLINK_V2_MSG_ID_LOW_INDEX] = MAVLINK_MSG_ID_HEARTBEAT & 0xFF;     // Message ID (low byte)
+    packet[MAVLINK_V2_MSG_ID_MID_INDEX] = (MAVLINK_MSG_ID_HEARTBEAT >> 8) & 0xFF;  // Message ID (mid byte)
+    packet[MAVLINK_V2_MSG_ID_HIGH_INDEX] = (MAVLINK_MSG_ID_HEARTBEAT >> 16) & 0xFF; // Message ID (high byte)
     
     // Payload (9 bytes)
-    packet[10] = MAV_TYPE_GENERIC;                   // Type
-    packet[11] = MAV_AUTOPILOT_INVALID;              // Autopilot
-    packet[12] = 0;                                  // Base mode
+    packet[MAVLINK_V2_PAYLOAD_START_INDEX + HEARTBEAT_TYPE_INDEX] = MAV_TYPE_GENERIC;                   // Type
+    packet[MAVLINK_V2_PAYLOAD_START_INDEX + HEARTBEAT_AUTOPILOT_INDEX] = MAV_AUTOPILOT_INVALID;        // Autopilot
+    packet[MAVLINK_V2_PAYLOAD_START_INDEX + HEARTBEAT_BASE_MODE_INDEX] = 0;                            // Base mode
     
-    // Custom mode (4 bytes) - our bitfield structure
-    packet[13] = custom_mode.raw & 0xFF;
-    packet[14] = (custom_mode.raw >> 8) & 0xFF;
-    packet[15] = (custom_mode.raw >> 16) & 0xFF;
-    packet[16] = (custom_mode.raw >> 24) & 0xFF;
+    // Custom mode (4 bytes) - InitBoard system state bitfield
+    packet[MAVLINK_V2_PAYLOAD_START_INDEX + HEARTBEAT_CUSTOM_MODE_INDEX + 0] = custom_mode.raw & 0xFF;
+    packet[MAVLINK_V2_PAYLOAD_START_INDEX + HEARTBEAT_CUSTOM_MODE_INDEX + 1] = (custom_mode.raw >> 8) & 0xFF;
+    packet[MAVLINK_V2_PAYLOAD_START_INDEX + HEARTBEAT_CUSTOM_MODE_INDEX + 2] = (custom_mode.raw >> 16) & 0xFF;
+    packet[MAVLINK_V2_PAYLOAD_START_INDEX + HEARTBEAT_CUSTOM_MODE_INDEX + 3] = (custom_mode.raw >> 24) & 0xFF;
     
-    packet[17] = MAV_STATE_ACTIVE;                   // System status
-    packet[18] = MAVLINK_VERSION;                    // Mavlink version
+    packet[MAVLINK_V2_PAYLOAD_START_INDEX + HEARTBEAT_SYSTEM_STATUS_INDEX] = MAV_STATE_ACTIVE;         // System status
+    packet[MAVLINK_V2_PAYLOAD_START_INDEX + HEARTBEAT_MAVLINK_VERSION_INDEX] = MAVLINK_VERSION;       // Mavlink version
     
     // Calculate and add CRC16
-    uint16_t crc = Mavlink_CalculateCrc(packet, 19);
-    packet[19] = crc & 0xFF;
-    packet[20] = (crc >> 8) & 0xFF;
+    uint16_t crc = Mavlink_CalculateCrc(packet, MAVLINK_V2_HEADER_SIZE + HEARTBEAT_PAYLOAD_SIZE);
+    packet[MAVLINK_V2_HEADER_SIZE + HEARTBEAT_PAYLOAD_SIZE] = crc & 0xFF;
+    packet[MAVLINK_V2_HEADER_SIZE + HEARTBEAT_PAYLOAD_SIZE + 1] = (crc >> 8) & 0xFF;
     
     // Send packet
     Mavlink_SendPacket(packet, 21);
@@ -138,14 +140,16 @@ static mavlink_custom_mode_t Mavlink_EncodeCustomMode(void) {
     // Get current system state from the structure
     init_board_system_info_t* state = mavlink_state.system_info;
     
-    // Encode bitfield (matching REQUIREMENTS.md specification)
-    custom_mode.bitfield.timer_sec = state->timer_seconds & 0x3FFF;           // 14 bits (0-13)
-    custom_mode.bitfield.timer_mode = state->timer_mode & 0x03;               // 2 bits (14-15)
-    custom_mode.bitfield.fuse_present = state->fuse_present & 0x01;           // 1 bit (16)
-    custom_mode.bitfield.board_state = state->board_state & 0x07;             // 3 bits (17-19)
-    custom_mode.bitfield.battery_level = state->battery_level & 0x0F;         // 4 bits (20-23)
-    custom_mode.bitfield.error_code = state->error_code & 0x0F;               // 4 bits (24-27)
-    custom_mode.bitfield.reserved = 0;                                        // 4 bits (28-31)
+    // Encode bitfield (matching updated REQUIREMENTS.md specification)
+    custom_mode.bitfield.timer_sec = state->timer_seconds;           // 14 bits (0-13) - auto-truncated by compiler
+    custom_mode.bitfield.timer_mode = state->timer_mode;             // 2 bits (14-15) - auto-truncated by compiler
+    custom_mode.bitfield.fc_control_present = mavlink_state.connected; // 1 bit (16) - autopilot connection status
+    custom_mode.bitfield.fuse_present = state->fuse_present;         // 1 bit (17) - auto-truncated by compiler
+    custom_mode.bitfield.board_state = state->board_state;           // 3 bits (18-20) - auto-truncated by compiler
+    custom_mode.bitfield.battery_level = state->battery_level;       // 4 bits (21-24) - auto-truncated by compiler
+    custom_mode.bitfield.error_code = state->error_code;             // 4 bits (25-28) - auto-truncated by compiler
+    custom_mode.bitfield.is_ignition_done = state->is_ignition_done; // 1 bit (29) - auto-truncated by compiler
+    custom_mode.bitfield.reserved = 0;                               // 2 bits (30-31)
     
     return custom_mode;
 }
@@ -169,10 +173,10 @@ void Mavlink_UartRxByte(uint8_t byte) {
         case MAVLINK_RX_HEADER:
             mavlink_rx_buffer[mavlink_state.rx_index++] = byte;
             
-            // Check if we have complete header (10 bytes)
-            if (mavlink_state.rx_index >= 10) {
-                mavlink_state.payload_length = mavlink_rx_buffer[1];
-                mavlink_state.expected_length = 10 + mavlink_state.payload_length + 2; // Header + Payload + CRC
+            // Check if we have complete header
+            if (mavlink_state.rx_index >= MAVLINK_V2_HEADER_SIZE) {
+                mavlink_state.payload_length = mavlink_rx_buffer[MAVLINK_V2_PAYLOAD_LEN_INDEX];
+                mavlink_state.expected_length = MAVLINK_V2_HEADER_SIZE + mavlink_state.payload_length + MAVLINK_V2_CRC_SIZE;
                 
                 // Validate payload length
                 if (mavlink_state.payload_length <= MAVLINK_MAX_PAYLOAD_SIZE) {
@@ -235,40 +239,32 @@ static void Mavlink_ProcessReceivedMessage(void) {
     }
     
     // Extract message ID
-    uint32_t msg_id = mavlink_rx_buffer[7] | 
-                     (mavlink_rx_buffer[8] << 8) | 
-                     (mavlink_rx_buffer[9] << 16);
+    uint32_t msg_id = mavlink_rx_buffer[MAVLINK_V2_MSG_ID_LOW_INDEX] | 
+                     (mavlink_rx_buffer[MAVLINK_V2_MSG_ID_MID_INDEX] << 8) | 
+                     (mavlink_rx_buffer[MAVLINK_V2_MSG_ID_HIGH_INDEX] << 16);
     
-    // Extract source system and component
-    uint8_t source_system = mavlink_rx_buffer[5];
-    //uint8_t source_component = mavlink_rx_buffer[6];
+    // Extract source system and component (not used for filtering per requirements)
+    uint8_t source_system = mavlink_rx_buffer[MAVLINK_V2_SYSTEM_ID_INDEX];
+    uint8_t source_component = mavlink_rx_buffer[MAVLINK_V2_COMPONENT_ID_INDEX];
     
-    // Update connection status if message from GCS
-    if (source_system == MAVLINK_SYSTEM_ID_GCS) {
-        if (!mavlink_state.connected) {
-            mavlink_state.connected = 1;
-            // Notify application about GCS connection
-            if (mavlink_state.system_callback) {
-                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_GCS_CONNECTED);
-            }
+    // Update connection status for any incoming message (autopilot connection)
+    if (!mavlink_state.connected) {
+        mavlink_state.connected = 1;
+        // Notify application about autopilot connection
+        if (mavlink_state.system_callback) {
+            mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_CONNECTED);
         }
-        
-        // Reset GCS connection timeout timer every time we receive ANY message from GCS
-        Timer_Start(MAVLINK_GCS_CONNECTION_TIMEOUT_TMR, MAVLINK_CONNECTION_TIMEOUT_MS, Mavlink_GcsConnectionTimeoutCallback);
     }
     
+    // Reset autopilot connection timeout timer for ANY received message
+    Timer_Start(MAVLINK_AUTOPILOT_CONNECTION_TIMEOUT_TMR, MAVLINK_CONNECTION_TIMEOUT_MS, Mavlink_AutopilotConnectionTimeoutCallback);
+    
     // Process message based on ID
-    const uint8_t* payload = &mavlink_rx_buffer[10];
+    const uint8_t* payload = &mavlink_rx_buffer[MAVLINK_V2_PAYLOAD_START_INDEX];
     
     switch (msg_id) {
         case MAVLINK_MSG_ID_HEARTBEAT:
-        	//HAL_GPIO_TogglePin(LED_YELLOW_OUT_GPIO_Port, LED_YELLOW_OUT_Pin);
-            Mavlink_ProcessGcsHeartbeat(payload);
-            break;
-            
-        case MAVLINK_MSG_ID_VFR_HUD:
-        	//HAL_GPIO_TogglePin(LED_YELLOW_OUT_GPIO_Port, LED_YELLOW_OUT_Pin);
-            Mavlink_ProcessVfrHud(payload);
+            Mavlink_ProcessAutopilotHeartbeat(payload);
             break;
             
         case MAVLINK_MSG_ID_COMMAND_LONG:
@@ -282,82 +278,58 @@ static void Mavlink_ProcessReceivedMessage(void) {
 }
 
 /**
- * @brief Process GCS HEARTBEAT message
+ * @brief Process Autopilot HEARTBEAT message
  * @param payload Message payload
  */
-static void Mavlink_ProcessGcsHeartbeat(const uint8_t* payload) {
+static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload) {
     // Extract type and autopilot for logging/debugging if needed
-    uint8_t type = payload[0];
-    uint8_t autopilot = payload[1];
-    uint8_t base_mode = payload[2];
+    uint8_t type = payload[HEARTBEAT_TYPE_INDEX];
+    uint8_t autopilot = payload[HEARTBEAT_AUTOPILOT_INDEX];
     
-    // Extract custom mode (4 bytes at offset 3-6) - ARM/PREARM states from autopilot
-    uint32_t custom_mode_raw = payload[3] | (payload[4] << 8) | (payload[5] << 16) | (payload[6] << 24);
+    // Extract custom mode (4 bytes) - contains ARM/PREARM states from ESP32 GPIO
+    uint32_t custom_mode_raw = payload[HEARTBEAT_CUSTOM_MODE_INDEX] | 
+                              (payload[HEARTBEAT_CUSTOM_MODE_INDEX + 1] << 8) | 
+                              (payload[HEARTBEAT_CUSTOM_MODE_INDEX + 2] << 16) | 
+                              (payload[HEARTBEAT_CUSTOM_MODE_INDEX + 3] << 24);
     
-    // Decode ARM/PREARM states from autopilot custom mode
-    uint8_t arm_state = custom_mode_raw & 0x0F;          // Bits 0-3: ARM state
-    uint8_t prearm_state = (custom_mode_raw >> 4) & 0x0F; // Bits 4-7: PREARM state
+    // Decode ARM/PREARM states from 32-bit custom mode
+    mavlink_autopilot_states_t autopilot_states;
+    autopilot_states.raw = custom_mode_raw;
     
-    // TODO: Process ARM/PREARM states if needed by application
-    // Could call system callback with these states
+    uint32_t new_arm_state = autopilot_states.bitfield.arm_state;        // Bits 0-3 - auto-extracted by compiler
+    uint32_t new_prearm_state = autopilot_states.bitfield.prearm_state;  // Bits 4-7 - auto-extracted by compiler
     
-    // GCS connection timeout timer is already restarted in Mavlink_ProcessReceivedMessage()
-    // when any message from GCS is received, including this heartbeat
-    
-    // Could add additional GCS heartbeat-specific processing here if needed
-}
-
-/**
- * @brief Process VFR_HUD message
- * @param payload Message payload (20 bytes)
- */
-static void Mavlink_ProcessVfrHud(const uint8_t* payload) {
-    mavlink_vfr_hud_data_t hud_data = {0};
-    
-    // Decode float values to integer format
-    Mavlink_DecodeVfrHudFloats(payload, &hud_data);
-    
-    // Notify application via callback with VFR_HUD data
-    if (mavlink_state.system_callback) {
-        mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_VFR_HUD_RECEIVED);
-        // Note: hud_data can be accessed through a global variable or separate callback parameter
-        // For now, we just notify that VFR_HUD was received
+    // Check for ARM state changes and notify application with specific events
+    if (new_arm_state != mavlink_state.autopilot_arm_state) {
+        mavlink_state.autopilot_arm_state = new_arm_state;
+        if (mavlink_state.system_callback) {
+            if (new_arm_state == MAVLINK_AUTOPILOT_ARM_ARMED) {
+                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_ARMED);
+            } else if (new_arm_state == MAVLINK_AUTOPILOT_ARM_DISARMED) {
+                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_DISARMED);
+            }
+        }
     }
-}
-
-/**
- * @brief Decode VFR_HUD float data to integer format
- * @param float_data Raw float data from payload
- * @param hud_data Output integer data structure
- */
-static void Mavlink_DecodeVfrHudFloats(const uint8_t* float_data, mavlink_vfr_hud_data_t* hud_data) {
-    // Use union for float-to-bytes conversion
-    union {
-        float f;
-        uint8_t bytes[4];
-    } float_converter;
     
-    // Airspeed (bytes 0-3)
-    memcpy(float_converter.bytes, &float_data[0], 4);
-    hud_data->airspeed_cm_s = (int32_t)(float_converter.f * 100);  // Convert to cm/s
+    // Check for PREARM state changes and notify application with specific events
+    if (new_prearm_state != mavlink_state.autopilot_prearm_state) {
+        mavlink_state.autopilot_prearm_state = new_prearm_state;
+        if (mavlink_state.system_callback) {
+            if (new_prearm_state == MAVLINK_AUTOPILOT_PREARM_ENABLED) {
+                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_PREARM_ENABLED);
+            } else if (new_prearm_state == MAVLINK_AUTOPILOT_PREARM_DISABLED) {
+                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_PREARM_DISABLED);
+            }
+        }
+    }
     
-    // Groundspeed (bytes 4-7)
-    memcpy(float_converter.bytes, &float_data[4], 4);
-    hud_data->groundspeed_cm_s = (int32_t)(float_converter.f * 100);  // Convert to cm/s
+    // Autopilot connection timeout timer is already restarted in Mavlink_ProcessReceivedMessage()
+    // when any message from autopilot is received, including this heartbeat
     
-    // Altitude (bytes 8-11)
-    memcpy(float_converter.bytes, &float_data[8], 4);
-    hud_data->altitude_cm = (int32_t)(float_converter.f * 100);  // Convert to cm
-    
-    // Climb rate (bytes 12-15)
-    memcpy(float_converter.bytes, &float_data[12], 4);
-    hud_data->climb_rate_cm_s = (int32_t)(float_converter.f * 100);  // Convert to cm/s
-    
-    // Heading (bytes 16-17)
-    memcpy(&hud_data->heading_deg, &float_data[16], 2);
-    
-    // Throttle (bytes 18-19)
-    memcpy(&hud_data->throttle_percent, &float_data[18], 2);
+    // Notify application about autopilot HEARTBEAT received
+    if (mavlink_state.system_callback) {
+        mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_HEARTBEAT);
+    }
 }
 
 /**
@@ -368,64 +340,19 @@ static void Mavlink_ProcessCommandLong(const uint8_t* payload) {
     // Extract command ID (bytes 28-29)
     uint16_t command_id = payload[28] | (payload[29] << 8);
     
-    // Extract target system and component
+    // Extract target system and component  
     uint8_t target_system = payload[30];
     uint8_t target_component = payload[31];
     
-    // Check if command is for us
-    if (target_system != mavlink_state.system_id || 
-        target_component != mavlink_state.component_id) {
-        return;  // Not for us
-    }
-    
+    // Check if command is for us (ignore system/component ID checks as per requirements)
     uint8_t result = MAV_RESULT_UNSUPPORTED;
     
-    // Process specific commands
-    if (command_id == MAV_CMD_USER_1) {
-        // Extract param1 (contains our custom command)
-        union {
-            float f;
-            uint8_t bytes[4];
-        } param1_converter;
-        
-        memcpy(param1_converter.bytes, &payload[0], 4);
-        uint32_t custom_command = *(uint32_t*)&param1_converter.f;  // Union conversion
-        
-        // Process custom command via callback
-        mavlink_event_t event;
-        uint8_t command_valid = 1;
-        
-        switch (custom_command) {
-            case MAVLINK_CMD_DISARM:
-                event = MAVLINK_EVT_COMMAND_DISARM;
-                break;
-                
-            case MAVLINK_CMD_ARM:
-                event = MAVLINK_EVT_COMMAND_ARM;
-                break;
-                
-            case MAVLINK_CMD_IGNITION:
-                event = MAVLINK_EVT_COMMAND_IGNITION;
-                break;
-                
-            case MAVLINK_CMD_PREARM_ENABLED:
-                event = MAVLINK_EVT_COMMAND_PREARM_ENABLED;
-                break;
-                
-            case MAVLINK_CMD_PREARM_DISABLED:
-                event = MAVLINK_EVT_COMMAND_PREARM_DISABLED;
-                break;
-                
-            default:
-                command_valid = 0;
-                result = MAV_RESULT_UNSUPPORTED;
-                break;
-        }
-        
-        if (command_valid && mavlink_state.system_callback) {
-            // Call callback to notify application
-            mavlink_state.system_callback(SYSTEM_EVT_READY, event);
-            result = MAV_RESULT_ACCEPTED;  // Assume command will be processed successfully
+    // Process only IGNITION command (value = 1)
+    if (command_id == MAVLINK_CMD_IGNITION) {
+        // Process IGNITION command via callback
+        if (mavlink_state.system_callback) {
+            mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_COMMAND_IGNITION);
+            result = MAV_RESULT_ACCEPTED;
         }
     }
     
@@ -442,26 +369,26 @@ static void Mavlink_SendCommandAck(uint16_t command, uint8_t result) {
     uint8_t packet[15] = {0};  // Mavlink v2.0 header + 3 bytes payload + CRC
     
     // Header (10 bytes)
-    packet[0] = MAVLINK_V2_MAGIC;
-    packet[1] = 3;                                   // Payload length
-    packet[2] = 0;                                   // Incompat flags
-    packet[3] = 0;                                   // Compat flags
-    packet[4] = Mavlink_GetSequenceNumber();         // Sequence
-    packet[5] = mavlink_state.system_id;             // System ID
-    packet[6] = mavlink_state.component_id;          // Component ID
-    packet[7] = MAVLINK_MSG_ID_COMMAND_ACK & 0xFF;   // Message ID (low byte)
-    packet[8] = (MAVLINK_MSG_ID_COMMAND_ACK >> 8) & 0xFF;  // Message ID (mid byte)
-    packet[9] = (MAVLINK_MSG_ID_COMMAND_ACK >> 16) & 0xFF; // Message ID (high byte)
+    packet[MAVLINK_V2_MAGIC_INDEX] = MAVLINK_V2_MAGIC;
+    packet[MAVLINK_V2_PAYLOAD_LEN_INDEX] = COMMAND_ACK_PAYLOAD_SIZE;                 // Payload length
+    packet[MAVLINK_V2_INCOMPAT_FLAGS_INDEX] = 0;                                     // Incompat flags
+    packet[MAVLINK_V2_COMPAT_FLAGS_INDEX] = 0;                                       // Compat flags
+    packet[MAVLINK_V2_SEQUENCE_INDEX] = Mavlink_GetSequenceNumber();                 // Sequence
+    packet[MAVLINK_V2_SYSTEM_ID_INDEX] = mavlink_state.system_id;                    // System ID
+    packet[MAVLINK_V2_COMPONENT_ID_INDEX] = mavlink_state.component_id;              // Component ID
+    packet[MAVLINK_V2_MSG_ID_LOW_INDEX] = MAVLINK_MSG_ID_COMMAND_ACK & 0xFF;         // Message ID (low byte)
+    packet[MAVLINK_V2_MSG_ID_MID_INDEX] = (MAVLINK_MSG_ID_COMMAND_ACK >> 8) & 0xFF; // Message ID (mid byte)
+    packet[MAVLINK_V2_MSG_ID_HIGH_INDEX] = (MAVLINK_MSG_ID_COMMAND_ACK >> 16) & 0xFF; // Message ID (high byte)
     
     // Payload (3 bytes)
-    packet[10] = command & 0xFF;        // Command (low byte)
-    packet[11] = (command >> 8) & 0xFF; // Command (high byte)
-    packet[12] = result;                // Result
+    packet[MAVLINK_V2_PAYLOAD_START_INDEX + COMMAND_ACK_COMMAND_INDEX] = command & 0xFF;        // Command (low byte)
+    packet[MAVLINK_V2_PAYLOAD_START_INDEX + COMMAND_ACK_COMMAND_INDEX + 1] = (command >> 8) & 0xFF; // Command (high byte)
+    packet[MAVLINK_V2_PAYLOAD_START_INDEX + COMMAND_ACK_RESULT_INDEX] = result;                 // Result
     
     // Calculate and add CRC16
-    uint16_t crc = Mavlink_CalculateCrc(packet, 13);
-    packet[13] = crc & 0xFF;
-    packet[14] = (crc >> 8) & 0xFF;
+    uint16_t crc = Mavlink_CalculateCrc(packet, MAVLINK_V2_HEADER_SIZE + COMMAND_ACK_PAYLOAD_SIZE);
+    packet[MAVLINK_V2_HEADER_SIZE + COMMAND_ACK_PAYLOAD_SIZE] = crc & 0xFF;
+    packet[MAVLINK_V2_HEADER_SIZE + COMMAND_ACK_PAYLOAD_SIZE + 1] = (crc >> 8) & 0xFF;
     
     // Send packet
     Mavlink_SendPacket(packet, 15);
@@ -478,14 +405,14 @@ void Mavlink_Process(void) {
         Mavlink_SendInitBoardHeartbeat();
     }
     
-    // Check GCS connection timeout flag (set by timer callback)
-    if (mavlink_state.gcs_connection_timeout_flag) {
-        mavlink_state.gcs_connection_timeout_flag = 0;
+    // Check autopilot connection timeout flag (set by timer callback)
+    if (mavlink_state.autopilot_connection_timeout_flag) {
+        mavlink_state.autopilot_connection_timeout_flag = 0;
         if (mavlink_state.connected) {
             mavlink_state.connected = 0;
-            // Notify application about GCS disconnection via callback
+            // Notify application about autopilot disconnection via callback
             if (mavlink_state.system_callback) {
-                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_GCS_DISCONNECTED);
+                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_DISCONNECTED);
             }
         }
     }
@@ -505,13 +432,30 @@ static void Mavlink_InitBoardHeartbeatTimerCallback(uint8_t tmr_id) {
 }
 
 /**
- * @brief GCS connection timeout callback - called after 3000ms of no GCS messages
+ * @brief Autopilot connection timeout callback - called after 3000ms of no autopilot messages
  * @param tmr_id Timer ID
  */
-static void Mavlink_GcsConnectionTimeoutCallback(uint8_t tmr_id) {
-    // Set flag to handle GCS connection timeout in main processing function
-    mavlink_state.gcs_connection_timeout_flag = 1;
-    // Note: Timer is not restarted - it will be restarted when we receive next GCS message
+static void Mavlink_AutopilotConnectionTimeoutCallback(uint8_t tmr_id) {
+    // Set flag to handle autopilot connection timeout in main processing function
+    mavlink_state.autopilot_connection_timeout_flag = 1;
+    // Note: Timer is not restarted - it will be restarted when we receive next autopilot message
+}
+
+// ======================= PUBLIC GETTER FUNCTIONS =======================
+/**
+ * @brief Get autopilot ARM state (from last received HEARTBEAT)
+ * @return uint8_t ARM state (0=DISARMED, 1=ARMED, 0xFF=unknown)
+ */
+uint8_t Mavlink_GetAutopilotArmState(void) {
+    return mavlink_state.autopilot_arm_state;
+}
+
+/**
+ * @brief Get autopilot PREARM state (from last received HEARTBEAT)
+ * @return uint8_t PREARM state (0=PREARM_DISABLED, 1=PREARM_ENABLED, 0xFF=unknown)
+ */
+uint8_t Mavlink_GetAutopilotPrearmState(void) {
+    return mavlink_state.autopilot_prearm_state;
 }
 
 // ======================= UTILITY FUNCTIONS =======================
@@ -564,5 +508,3 @@ static uint16_t Mavlink_CalculateCrc(const uint8_t* data, uint8_t len) {
 static uint8_t Mavlink_GetSequenceNumber(void) {
     return mavlink_sequence_number++;
 }
-
-#endif 

@@ -43,6 +43,8 @@ static uint8_t oldest_idx;
 static int32_t x_new, y_new, z_new, x_old, y_old, z_old, norm_new, norm_old, delta;
 #endif
 
+
+#if MINING_MODE_SUPP
 /*-------------------------- Movement calculations block -----------------------*/
 
 #define FIXED_SCALE (1LL << 16) // Масштаб: 2^16 = 65536 точність 4-5 знаків
@@ -224,6 +226,8 @@ uint8_t calcVectorSpeed(int16_t x, int16_t y, int16_t z, uint32_t currentTimeMil
 
     return detected;
 }
+#endif /* MINING_MODE_SUPP */
+
 /*--------------------------Hit detection block -------------------------------*/
 
 #if NET_DETECTION_ENABLE
@@ -417,6 +421,7 @@ static void AccProc_Processing(void)
 
 #endif /* NET_DETECTION_ENABLE */
 			}
+#if MINING_MODE_SUPP
 			else if (accProcStatus.move_detection_enabled != false)
 			{
 				if (++accProcStatus.move_detection_retry_cnt % 2 == 0u)
@@ -435,6 +440,7 @@ static void AccProc_Processing(void)
 			}
 			/* reset a flag */
 			accProcStatus.data_ready = false;
+#endif /* MINING_MODE_SUPP */
 		}
 		else
 		{
@@ -450,8 +456,10 @@ void AccProc_Stop (void)
 	/* Reset all data and SM */
 	memset(&accProcStatus, 0u, sizeof(accProcStatus_t));
 
+#if MINING_MODE_SUPP
 	/* Reset local variables */
 	firstMeasure = 1u;
+#endif
 
 	/* Skip first measurements results */
 	accProcStatus.init_skip_counts = MOVE_DETECT_INIT_DELAY_SKIP_CNT;
@@ -486,6 +494,7 @@ void AccProc_HitDetectionStart (void)
 	}
 }
 
+#if MINING_MODE_SUPP
 void AccProc_MoveDetectionStart (uint32_t move_threshold)
 {
 	if ((accProcStatus.move_detection_enabled == false) && (acc_sys_cbk != NULL))
@@ -500,6 +509,7 @@ void AccProc_MoveDetectionStart (uint32_t move_threshold)
 #endif
 	}
 }
+#endif /* MINING_MODE_SUPP */
 
 void AccProc_Task ()
 {

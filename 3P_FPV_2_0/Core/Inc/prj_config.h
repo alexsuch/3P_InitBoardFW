@@ -48,16 +48,20 @@ extern "C" {
 /* Enable/disable accelerometer functionality */
 #define ACC_ENABLE_DEFAULT                            (1u) // RELEASE VALUE - 1u
 
-/* Enable/disable mining mode  */
-#define MINING_MODE_ENABLE_DEFAULT                    MINING_MODE_NONE //MINING_MODE_MANUAL//MINING_MODE_AUTO //RELEASE VALUE - MINING_MODE_NONE
-#define MINING_SELF_DESTROY_EN_TIMEOUT_MIN_DEFAULT    (30u)  //RELEASE VALUE - 30u
-#define MINING_ENABLE_DELAY_SEC                       (5u)  //RELEASE VALUE - 30u
-
 /* Self destruction related timings */
 #define SELF_DESTROY_TIMEOUT_MIN_DEFAULT              (30u)     //RELEASE VALUE - 30u
 
 /* Magic number chosen by experimental way */
 #define MOVEMENT_THRESHOLD_DEFAULT                    (72089LL) //RELEASE VALUE - 72089LL
+
+/*------------------------ Mining Mode Configuration -----------------------*/
+
+#define MINING_MODE_SUPP                              (1u)
+
+/* Enable/disable mining mode  */
+#define MINING_MODE_ENABLE_DEFAULT                    MINING_MODE_NONE //MINING_MODE_MANUAL//MINING_MODE_AUTO //RELEASE VALUE - MINING_MODE_NONE
+#define MINING_SELF_DESTROY_EN_TIMEOUT_MIN_DEFAULT    (30u)  //RELEASE VALUE - 30u
+#define MINING_ENABLE_DELAY_SEC                       (5u)  //RELEASE VALUE - 30u
 
 /*------------------------ Accelerometer Parameters -----------------------------------*/
 #define ACC_HIT_THRESHOLD_MG                          (12000u)  // units in mili G //RELEASE VALUE - 12G - 12000u
@@ -68,9 +72,9 @@ extern "C" {
 
 #define NET_DETECTION_ENABLE                          (1u)
 
-#define ACC_NET_BUFF_SIZE                             (100u) //RELEASE VALUE - WINDOW SIZE = 60u
+#define ACC_NET_BUFF_SIZE                             (100u) //RELEASE VALUE - WINDOW SIZE = 100u
 
-#define ACC_HIT_NET_DIFF_THRESHOLD_MG                 (5000u)  // units in mili G //RELEASE VALUE - 4G - 4000u
+#define ACC_HIT_NET_DIFF_THRESHOLD_MG                 (4200u)  // units in mili G //RELEASE VALUE - 4G - 4200u
 
 #define ACC_NET_DECIMATION_RATE                       (5u)
 
@@ -107,7 +111,7 @@ extern "C" {
 /*----------------------------- Mavlink parameters -----------------------*/
 #if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 // Timing Configuration
-#define MAVLINK_INITBOARD_HEARTBEAT_INTERVAL_MS       (1000u)
+#define MAVLINK_INITBOARD_HEARTBEAT_INTERVAL_MS       (750u)
 #define MAVLINK_CONNECTION_TIMEOUT_MS                 (3000u)
 #endif /* MAVLINK_V2_CTRL_SUPP */
 
@@ -115,7 +119,7 @@ extern "C" {
 #define TEST_SELF_DESTROY_ONLY_MODE                   (0u) //RELEASE VALUE - 0u
 #define TEST_SELF_DESTROY_MINING_MODE                 (0u) //RELEASE VALUE - 0u
 
-#define SELF_DESTROY_DISABLE                          (1u) //RELEASE VALUE - 0u
+#define SELF_DESTROY_DISABLE                          (0u) //RELEASE VALUE - 0u
 
 #define ACC_HIT_DETECTED_STICKY_LED_FEATURE           (0u) //RELEASE VALUE - 0u
 #define MOVE_DETECTED_STICKY_LED_FEATURE              (0u) //RELEASE VALUE - 0u

@@ -12,6 +12,7 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include "prj_config.h"
 #include "init_brd.h"
 
 
@@ -68,9 +69,15 @@ typedef struct
 }stickStatus_t;
 
 void Stick_Task (void);
+#if (CONTROL_MODE == PWM_CTRL_SUPP)
+#if MINING_MODE_SUPP
 void Stick_Reset (app_cbk_fn sys_cbk, bool mining_mode);
+#else
+void Stick_Reset (app_cbk_fn sys_cbk);
+#endif
 void Stick_Deinit (void);
 void Stick_ProcessEdgeCbk(system_evt_t evt, uint32_t usr_data);
+#endif /* PWM_CTRL_SUPP */
 
 #ifdef __cplusplus
 }

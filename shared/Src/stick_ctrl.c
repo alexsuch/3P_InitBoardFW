@@ -1,18 +1,25 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include "prj_config.h"
 #include "timer.h"
 #include "init_brd.h"
 #include "stick_ctrl.h"
 #include "solution_wrapper.h"
 
+#if (CONTROL_MODE == PWM_CTRL_SUPP)
+
 static stickStatus_t stickStatus[2];
 static bool periodsValid, signalsValid;
 static control_evt_t old_ctrl_evt = CONTROL_EVT_NO_EVT;
+#if MINING_MODE_SUPP
 static control_evt_t old_mining_evt = CONTROL_EVT_NO_EVT;
+#endif
 static app_cbk_fn sys_cbk = NULL;
 static uint8_t pwm_ch;
+#if MINING_MODE_SUPP
 static bool mining_mode_enabled = false;
+#endif
 
 // TODO LOW For some reason we read not expected period and signal value. Once at a time.
 // This has to be investigated. Maybe GPIO interrupt handler got interrupted, or it happens in debug only
@@ -21,7 +28,9 @@ static bool mining_mode_enabled = false;
 static void Stick_Process(void)
 {
 	control_evt_t new_ctrl_evt = old_ctrl_evt;
+#if MINING_MODE_SUPP
 	control_evt_t new_mining_evt = old_mining_evt;
+#endif
 
 	stick_state_t pwm_1_state = stickStatus[PWM_CH_1].new_state;
 	stick_state_t pwm_2_state = stickStatus[PWM_CH_2].new_state;
@@ -36,10 +45,12 @@ static void Stick_Process(void)
 	}
 
 	/* Use PWM1 channel only as control stick for mining mode */
+#if MINING_MODE_SUPP
 	if (mining_mode_enabled != false)
 	{
 		pwm_2_state = STICK_STATE_NO_STICK;
 	}
+#endif
 
 	if (
 			(pwm_1_state < STICK_STATE_ACTIVE_POS_1) ||
@@ -77,11 +88,16 @@ static void Stick_Process(void)
 	}
 	else
 	{
+#if MINING_MODE_SUPP
 		if (mining_mode_enabled == false)
 		{
 			/* We should not hit this place */
 			return;
 		}
+#else
+		/* We should not hit this place */
+		return;
+#endif
 	}
 
 	if (sys_cbk != NULL)
@@ -95,6 +111,7 @@ static void Stick_Process(void)
 		}
 
 		/* Process mining stick */
+#if MINING_MODE_SUPP
 		if (mining_mode_enabled != false)
 		{
 			/* Only stick 3 position can be interpreted as mining */
@@ -107,6 +124,7 @@ static void Stick_Process(void)
 				old_mining_evt = new_mining_evt;
 			}
 		}
+#endif
 	}
 }
 
@@ -139,6 +157,7 @@ static void Stick2_LostCbk (uint8_t timer_id)
 	Stick_HandleLostState(PWM_CH_2);
 }
 
+#if MINING_MODE_SUPP
 void Stick_Reset (app_cbk_fn system_cbk, bool mining_mode)
 {
 	memset(&stickStatus, 0u, sizeof(stickStatus_t));
@@ -152,6 +171,20 @@ void Stick_Reset (app_cbk_fn system_cbk, bool mining_mode)
 	Timer_Start (STICK1_LOST_TMR, STICK_LOST_PERIOD_MS, Stick1_LostCbk);
 	Timer_Start (STICK2_LOST_TMR, STICK_LOST_PERIOD_MS, Stick2_LostCbk);
 }
+#else
+void Stick_Reset (app_cbk_fn system_cbk)
+{
+	memset(&stickStatus, 0u, sizeof(stickStatus_t));
+	sys_cbk = system_cbk;
+	stickStatus[PWM_CH_1].is_stick_scan_enabled = true;
+	stickStatus[PWM_CH_2].is_stick_scan_enabled = true;
+
+	//STICK_LOST_PERIOD_MS has to be less 500ms
+	// Start stick lost timer
+	Timer_Start (STICK1_LOST_TMR, STICK_LOST_PERIOD_MS, Stick1_LostCbk);
+	Timer_Start (STICK2_LOST_TMR, STICK_LOST_PERIOD_MS, Stick2_LostCbk);
+}
+#endif
 
 void Stick_Deinit (void)
 {
@@ -340,3 +373,5 @@ void Stick_Task (void)
 		}
 	}
 }
+
+#endif /* PWM_CTRL_SUPP */

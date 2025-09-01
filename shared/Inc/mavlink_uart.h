@@ -19,11 +19,41 @@
 #define MAVLINK_MAX_MESSAGE_SIZE           0x118   // 280
 #define MAVLINK_MAX_PAYLOAD_SIZE           0xFF    // 255
 
+// Mavlink v2.0 packet structure constants
+#define MAVLINK_V2_HEADER_SIZE             10      // Header size in bytes
+#define MAVLINK_V2_CRC_SIZE                2       // CRC size in bytes
+#define MAVLINK_V2_MIN_PACKET_SIZE         12      // Header + CRC (minimum packet)
+
+// Mavlink v2.0 header byte indices
+#define MAVLINK_V2_MAGIC_INDEX             0       // Magic byte index
+#define MAVLINK_V2_PAYLOAD_LEN_INDEX       1       // Payload length index
+#define MAVLINK_V2_INCOMPAT_FLAGS_INDEX    2       // Incompatible flags index
+#define MAVLINK_V2_COMPAT_FLAGS_INDEX      3       // Compatible flags index
+#define MAVLINK_V2_SEQUENCE_INDEX          4       // Sequence number index
+#define MAVLINK_V2_SYSTEM_ID_INDEX         5       // System ID index
+#define MAVLINK_V2_COMPONENT_ID_INDEX      6       // Component ID index
+#define MAVLINK_V2_MSG_ID_LOW_INDEX        7       // Message ID low byte index
+#define MAVLINK_V2_MSG_ID_MID_INDEX        8       // Message ID mid byte index
+#define MAVLINK_V2_MSG_ID_HIGH_INDEX       9       // Message ID high byte index
+#define MAVLINK_V2_PAYLOAD_START_INDEX     10      // Payload start index
+
+// HEARTBEAT message payload indices (relative to payload start)
+#define HEARTBEAT_TYPE_INDEX               0       // MAV type
+#define HEARTBEAT_AUTOPILOT_INDEX          1       // Autopilot type
+#define HEARTBEAT_BASE_MODE_INDEX          2       // Base mode
+#define HEARTBEAT_CUSTOM_MODE_INDEX        3       // Custom mode (4 bytes)
+#define HEARTBEAT_SYSTEM_STATUS_INDEX      7       // System status
+#define HEARTBEAT_MAVLINK_VERSION_INDEX    8       // Mavlink version
+#define HEARTBEAT_PAYLOAD_SIZE             9       // HEARTBEAT payload size
+
+// COMMAND_ACK message payload indices (relative to payload start)
+#define COMMAND_ACK_COMMAND_INDEX          0       // Command ID (2 bytes)
+#define COMMAND_ACK_RESULT_INDEX           2       // Result code
+#define COMMAND_ACK_PAYLOAD_SIZE           3       // COMMAND_ACK payload size
+
 // System and Component IDs
 #define MAVLINK_SYSTEM_ID_INITBOARD        0x42    // 66 - Initiation Board
-#define MAVLINK_COMP_ID_USER1              0x42    // 66 - Initiation Board
-#define MAVLINK_SYSTEM_ID_GCS              0xFF    // 255
-#define MAVLINK_COMP_ID_GCS                0xBE    // 190
+#define MAVLINK_COMP_ID_INITBOARD          0x42    // 66 - Initiation Board Component
 
 // Message IDs
 #define MAVLINK_MSG_ID_HEARTBEAT           0x00    // 0
@@ -36,41 +66,58 @@
 #define MAV_AUTOPILOT_INVALID              0x08    // 8
 #define MAV_STATE_ACTIVE                   0x04    // 4
 
-// Command IDs
-#define MAV_CMD_USER_1                     0x7922  // 31010
+// MAV Result codes
+#define MAV_RESULT_ACCEPTED                0x00    // 0 - Command accepted
+#define MAV_RESULT_UNSUPPORTED             0x04    // 4 - Command not supported
 
-// Result Codes
-#define MAV_RESULT_ACCEPTED                0x00    // 0
-#define MAV_RESULT_TEMPORARILY_REJECTED    0x01    // 1
-#define MAV_RESULT_DENIED                  0x02    // 2
-#define MAV_RESULT_UNSUPPORTED             0x03    // 3
-#define MAV_RESULT_FAILED                  0x04    // 4
-
-// Custom Command Types (matching ESP32 implementation)
-#define MAVLINK_CMD_DISARM                 0x01    // 1
-#define MAVLINK_CMD_ARM                    0x02    // 2
-#define MAVLINK_CMD_IGNITION               0x03    // 3
-#define MAVLINK_CMD_PREARM_ENABLED         0x04    // 4
-#define MAVLINK_CMD_PREARM_DISABLED        0x05    // 5
+// Command IDs  
+#define MAVLINK_CMD_IGNITION               0x01    // 1 - Only command supported
 
 // ======================= TYPE DEFINITIONS =======================
+
+// Timer mode enumeration
+typedef enum {
+	MAVLINK_TIMER_MODE_NONE = 0x00,         // No active timer
+    MAVLINK_TIMER_MODE_SAFE = 0x01,         // Safe timer active
+    MAVLINK_TIMER_MODE_DESTROY = 0x02       // Self destroy timer active
+} mavlink_timer_mode_t;
+
+// Board state enumeration
+typedef enum {
+    MAVLINK_BOARD_STATE_NO_FC = 0x00,       // No FC connected
+    MAVLINK_BOARD_STATE_DISARMED = 0x01,    // Disarmed
+    MAVLINK_BOARD_STATE_ARMED = 0x02,       // Armed
+    MAVLINK_BOARD_STATE_BOOM = 0x03         // Boom
+} mavlink_board_state_t;
+
+// Autopilot ARM state enumeration
+typedef enum {
+    MAVLINK_AUTOPILOT_ARM_DISARMED = 0x00,  // 0 - Autopilot disarmed
+    MAVLINK_AUTOPILOT_ARM_ARMED = 0x01      // 1 - Autopilot armed
+} mavlink_autopilot_arm_state_t;
+
+// Autopilot PREARM state enumeration
+typedef enum {
+    MAVLINK_AUTOPILOT_PREARM_DISABLED = 0x00,  // 0 - PREARM disabled
+    MAVLINK_AUTOPILOT_PREARM_ENABLED = 0x01    // 1 - PREARM enabled
+} mavlink_autopilot_prearm_state_t;
 
 /**
  * @brief Mavlink Events for system callback
  */
 typedef enum {
-    MAVLINK_EVT_COMMAND_DISARM = 0x01,        // 1 - Disarm command received
-    MAVLINK_EVT_COMMAND_ARM = 0x02,           // 2 - Arm command received
-    MAVLINK_EVT_COMMAND_IGNITION = 0x03,      // 3 - Ignition command received
-    MAVLINK_EVT_COMMAND_PREARM_ENABLED = 0x04, // 4 - PREARM enabled command received
-    MAVLINK_EVT_COMMAND_PREARM_DISABLED = 0x05, // 5 - PREARM disabled command received
-    MAVLINK_EVT_VFR_HUD_RECEIVED = 0x06,      // 6 - VFR_HUD data received
-    MAVLINK_EVT_GCS_CONNECTED = 0x07,         // 7 - GCS connection established
-    MAVLINK_EVT_GCS_DISCONNECTED = 0x08       // 8 - GCS connection lost
+    MAVLINK_EVT_COMMAND_IGNITION = 0x01,           // 1 - Ignition command received
+    MAVLINK_EVT_AUTOPILOT_CONNECTED = 0x02,        // 2 - Autopilot connection established  
+    MAVLINK_EVT_AUTOPILOT_DISCONNECTED = 0x03,     // 3 - Autopilot connection lost
+    MAVLINK_EVT_AUTOPILOT_HEARTBEAT = 0x04,        // 4 - Autopilot HEARTBEAT with ARM/PREARM states received
+    MAVLINK_EVT_AUTOPILOT_ARMED = 0x05,            // 5 - Autopilot changed to ARMED state
+    MAVLINK_EVT_AUTOPILOT_DISARMED = 0x06,         // 6 - Autopilot changed to DISARMED state
+    MAVLINK_EVT_AUTOPILOT_PREARM_ENABLED = 0x07,   // 7 - Autopilot PREARM enabled
+    MAVLINK_EVT_AUTOPILOT_PREARM_DISABLED = 0x08   // 8 - Autopilot PREARM disabled
 } mavlink_event_t;
 
 /**
- * @brief Custom Mode Bitfield Structure (32-bit total)
+ * @brief Custom Mode Bitfield Structure (32-bit total) for InitBoard HEARTBEAT
  * 
  * This structure defines the custom mode bitfield that encodes system state
  * in the InitBoard HEARTBEAT message custom_mode field.
@@ -79,29 +126,34 @@ typedef union {
     struct {
         uint32_t timer_sec      : 14;  // Bits 0-13:  Timer seconds (0-16383)
         uint32_t timer_mode     : 2;   // Bits 14-15: Timer mode (0-3)
-        uint32_t fuse_present   : 1;   // Bit 16:     Fuse present (0-1)
-        uint32_t board_state    : 3;   // Bits 17-19: Board state (0-7)
-        uint32_t battery_level  : 4;   // Bits 20-23: Battery level 0-10 (encoded as 0-15)
-        uint32_t error_code     : 4;   // Bits 24-27: Error code (0-15)
-        uint32_t reserved       : 4;   // Bits 28-31: Reserved for future use
+        uint32_t fc_control_present : 1; // Bit 16:   FC control present (0-1) - autopilot connection status
+        uint32_t fuse_present   : 1;   // Bit 17:     Fuse present (0-1)
+        uint32_t board_state    : 3;   // Bits 18-20: Board state (0-7)
+        uint32_t battery_level  : 4;   // Bits 21-24: Battery level 0-10 (encoded as 0-15)
+        uint32_t error_code     : 4;   // Bits 25-28: Error code (0-15)
+        uint32_t is_ignition_done : 1; // Bit 29:     Ignition done flag (0-1)
+        uint32_t reserved       : 2;   // Bits 30-31: Reserved for future use
     } bitfield;
     uint32_t raw;                      // Raw 32-bit value
 } mavlink_custom_mode_t;
 
 /**
- * @brief VFR_HUD data structure (integer format)
+ * @brief Autopilot ARM/PREARM States Structure (32-bit total) for Autopilot HEARTBEAT
  * 
- * This structure holds VFR_HUD message data converted to integer format
- * for use in integer-only STM32G0 operations.
+ * This structure defines the ARM/PREARM states that autopilot reads from ESP32 GPIO
+ * and encodes in its HEARTBEAT message custom_mode field. 32-bit structure allows
+ * for future expansion with additional states.
  */
-typedef struct {
-    int32_t airspeed_cm_s;       // Airspeed in cm/s (original float * 100)
-    int32_t groundspeed_cm_s;    // Groundspeed in cm/s (original float * 100)
-    int32_t altitude_cm;         // Altitude in cm (original float * 100)
-    int32_t climb_rate_cm_s;     // Climb rate in cm/s (original float * 100)
-    int16_t heading_deg;         // Heading in degrees
-    uint16_t throttle_percent;   // Throttle percentage (0-100)
-} mavlink_vfr_hud_data_t;
+typedef union {
+    struct {
+        uint32_t arm_state      : 4;   // Bits 0-3:   ARM state (mavlink_autopilot_arm_state_t)
+        uint32_t prearm_state   : 4;   // Bits 4-7:   PREARM state (mavlink_autopilot_prearm_state_t)
+        uint32_t reserved1      : 8;   // Bits 8-15:  Reserved for future states
+        uint32_t reserved2      : 8;   // Bits 16-23: Reserved for future use
+        uint32_t reserved3      : 8;   // Bits 24-31: Reserved for future use
+    } bitfield;
+    uint32_t raw;                      // Raw 32-bit value
+} mavlink_autopilot_states_t;
 
 /**
  * @brief RX State Machine States
@@ -125,7 +177,11 @@ typedef struct {
     // Connection state
     uint8_t connected;
     uint8_t initboard_heartbeat_send_flag;     // Flag to send InitBoard heartbeat
-    uint8_t gcs_connection_timeout_flag; // Flag for GCS connection timeout
+    uint8_t autopilot_connection_timeout_flag; // Flag for autopilot connection timeout
+    
+    // Autopilot ARM/PREARM states (received from autopilot HEARTBEAT)
+    uint8_t autopilot_arm_state;               // Last received ARM state from autopilot
+    uint8_t autopilot_prearm_state;            // Last received PREARM state from autopilot
     
     // RX state machine
     mavlink_rx_state_t rx_state;
@@ -156,6 +212,18 @@ void Mavlink_UartRxByte(uint8_t byte);
  * @brief Main periodic processing function (call from main loop)
  */
 void Mavlink_Process(void);
+
+/**
+ * @brief Get autopilot ARM state (from last received HEARTBEAT)
+ * @return mavlink_autopilot_arm_state_t ARM state (0xFF=unknown)
+ */
+uint8_t Mavlink_GetAutopilotArmState(void);
+
+/**
+ * @brief Get autopilot PREARM state (from last received HEARTBEAT)
+ * @return mavlink_autopilot_prearm_state_t PREARM state (0xFF=unknown)
+ */
+uint8_t Mavlink_GetAutopilotPrearmState(void);
 
 // ======================= APPLICATION INTERFACE =======================
 /*
