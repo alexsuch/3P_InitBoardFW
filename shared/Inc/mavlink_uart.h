@@ -61,6 +61,15 @@
 #define MAVLINK_MSG_ID_COMMAND_LONG        0x4C    // 76
 #define MAVLINK_MSG_ID_COMMAND_ACK         0x4D    // 77
 
+// VFR_HUD message payload indices (relative to payload start)
+#define VFR_HUD_AIRSPEED_INDEX             0       // Airspeed (4 bytes float)
+#define VFR_HUD_GROUNDSPEED_INDEX          4       // Groundspeed (4 bytes float)
+#define VFR_HUD_HEADING_INDEX              8       // Heading (2 bytes int16_t)
+#define VFR_HUD_THROTTLE_INDEX             10      // Throttle (2 bytes uint16_t)
+#define VFR_HUD_ALT_INDEX                  12      // Altitude (4 bytes float)
+#define VFR_HUD_CLIMB_INDEX                16      // Climb rate (4 bytes float)
+#define VFR_HUD_PAYLOAD_SIZE               20      // VFR_HUD payload size
+
 // MAV Types and States
 #define MAV_TYPE_GENERIC                   0x00    // 0
 #define MAV_AUTOPILOT_INVALID              0x08    // 8
@@ -133,8 +142,24 @@ typedef enum {
     MAVLINK_EVT_AUTOPILOT_ARMED = 0x05,            // 5 - Autopilot changed to ARMED state
     MAVLINK_EVT_AUTOPILOT_DISARMED = 0x06,         // 6 - Autopilot changed to DISARMED state
     MAVLINK_EVT_AUTOPILOT_PREARM_ENABLED = 0x07,   // 7 - Autopilot PREARM enabled
-    MAVLINK_EVT_AUTOPILOT_PREARM_DISABLED = 0x08   // 8 - Autopilot PREARM disabled
+    MAVLINK_EVT_AUTOPILOT_PREARM_DISABLED = 0x08,  // 8 - Autopilot PREARM disabled
+    MAVLINK_EVT_VFR_HUD_RECEIVED = 0x09            // 9 - VFR_HUD data received from autopilot
 } mavlink_event_t;
+
+/**
+ * @brief VFR_HUD Data Storage Structure (Integer-only for STM32G0)
+ * 
+ * This structure stores VFR_HUD data using integer representations
+ * to avoid floating-point operations on STM32G0 (no FPU).
+ */
+typedef struct {
+    uint16_t airspeed_cm_s;      // Airspeed in cm/s (converted from m/s float)
+    uint16_t groundspeed_cm_s;   // Groundspeed in cm/s (converted from m/s float)
+    int16_t heading_deg;         // Heading in degrees (0-359, -1 for unknown)
+    uint16_t throttle_percent;   // Throttle in percentage (0-100)
+    int32_t altitude_cm;         // Altitude in cm (converted from m float)
+    int16_t climb_rate_cm_s;     // Climb rate in cm/s (converted from m/s float)
+} mavlink_vfr_hud_data_t;
 
 /**
  * @brief Custom Mode Bitfield Structure (32-bit total) for InitBoard HEARTBEAT
@@ -203,6 +228,9 @@ typedef struct {
     uint8_t autopilot_arm_state;               // Last received ARM state from autopilot
     uint8_t autopilot_prearm_state;            // Last received PREARM state from autopilot
     
+    // VFR_HUD data from autopilot
+    mavlink_vfr_hud_data_t vfr_hud_data;
+    
     // RX state machine
     mavlink_rx_state_t rx_state;
     uint16_t rx_index;
@@ -244,6 +272,12 @@ uint8_t Mavlink_GetAutopilotArmState(void);
  * @return mavlink_autopilot_prearm_state_t PREARM state (0xFF=unknown)
  */
 uint8_t Mavlink_GetAutopilotPrearmState(void);
+
+/**
+ * @brief Get last received VFR_HUD data
+ * @return const mavlink_vfr_hud_data_t* - Pointer to VFR_HUD data structure
+ */
+const mavlink_vfr_hud_data_t* Mavlink_GetVfrHudData(void);
 
 // ======================= APPLICATION INTERFACE =======================
 /*

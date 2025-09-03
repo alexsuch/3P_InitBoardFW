@@ -906,6 +906,12 @@ static void App_MavlinkCbk (system_evt_t evt, uint32_t usr_data)
 				sysStatus.prearm_enabled = false;
 				break;
 				
+			case MAVLINK_EVT_VFR_HUD_RECEIVED:
+				// VFR_HUD data received from autopilot
+				// VFR_HUD data is automatically stored in mavlink module
+				// Application can access it via Mavlink_GetVfrHudData() if needed
+				break;
+				
 			default:
 				// Unknown Mavlink event
 				break;

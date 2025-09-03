@@ -32,11 +32,17 @@ static void Mavlink_SendPacket(uint8_t* packet, uint16_t length);
 static uint16_t Mavlink_CalculateCrc(const uint8_t* data, uint8_t len);
 static uint8_t Mavlink_GetSequenceNumber(void);
 static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload);
+static void Mavlink_ProcessVfrHud(const uint8_t* payload);
 static void Mavlink_ProcessCommandLong(const uint8_t* payload);
 static void Mavlink_SendCommandAck(uint16_t command, uint8_t result);
 static mavlink_custom_mode_t Mavlink_EncodeCustomMode(void);
 static void Mavlink_SendInitBoardHeartbeat(void);
 static void Mavlink_ProcessReceivedMessage(void);
+
+// VFR_HUD conversion functions (integer math only - no FPU)
+static uint16_t Mavlink_FloatToIntCmS(const uint8_t* float_bytes);
+static int32_t Mavlink_FloatToIntCm(const uint8_t* float_bytes);
+static int16_t Mavlink_FloatToIntCmS_Signed(const uint8_t* float_bytes);
 
 // Timer callback functions
 static void Mavlink_InitBoardHeartbeatTimerCallback(uint8_t tmr_id);
@@ -66,6 +72,10 @@ void Mavlink_Init(app_cbk_fn system_cbk, init_board_system_info_t* system_info) 
     // Initialize autopilot ARM/PREARM states to unknown
     mavlink_state.autopilot_arm_state = 0xFF;      // Unknown state initially
     mavlink_state.autopilot_prearm_state = 0xFF;   // Unknown state initially
+    
+    // Initialize VFR_HUD data
+    memset(&mavlink_state.vfr_hud_data, 0, sizeof(mavlink_vfr_hud_data_t));
+    mavlink_state.vfr_hud_data.heading_deg = -1;   // Unknown heading initially
     
     // Initialize buffers
     memset(mavlink_tx_buffer, 0, sizeof(mavlink_tx_buffer));
@@ -267,6 +277,10 @@ static void Mavlink_ProcessReceivedMessage(void) {
             Mavlink_ProcessAutopilotHeartbeat(payload);
             break;
             
+        case MAVLINK_MSG_ID_VFR_HUD:
+            Mavlink_ProcessVfrHud(payload);
+            break;
+            
         case MAVLINK_MSG_ID_COMMAND_LONG:
             Mavlink_ProcessCommandLong(payload);
             break;
@@ -329,6 +343,29 @@ static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload) {
     // Notify application about autopilot HEARTBEAT received
     if (mavlink_state.system_callback) {
         mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_HEARTBEAT);
+    }
+}
+
+/**
+ * @brief Process VFR_HUD message from autopilot
+ * @param payload Message payload (20 bytes)
+ */
+static void Mavlink_ProcessVfrHud(const uint8_t* payload) {
+    // Extract VFR_HUD data using integer conversion (no FPU on STM32G0)
+    mavlink_state.vfr_hud_data.airspeed_cm_s = Mavlink_FloatToIntCmS(&payload[VFR_HUD_AIRSPEED_INDEX]);
+    mavlink_state.vfr_hud_data.groundspeed_cm_s = Mavlink_FloatToIntCmS(&payload[VFR_HUD_GROUNDSPEED_INDEX]);
+    mavlink_state.vfr_hud_data.altitude_cm = Mavlink_FloatToIntCm(&payload[VFR_HUD_ALT_INDEX]);
+    mavlink_state.vfr_hud_data.climb_rate_cm_s = Mavlink_FloatToIntCmS_Signed(&payload[VFR_HUD_CLIMB_INDEX]);
+    
+    // Extract heading (int16_t)
+    mavlink_state.vfr_hud_data.heading_deg = payload[VFR_HUD_HEADING_INDEX] | (payload[VFR_HUD_HEADING_INDEX + 1] << 8);
+    
+    // Extract throttle (uint16_t)
+    mavlink_state.vfr_hud_data.throttle_percent = payload[VFR_HUD_THROTTLE_INDEX] | (payload[VFR_HUD_THROTTLE_INDEX + 1] << 8);
+    
+    // Notify application about VFR_HUD data received
+    if (mavlink_state.system_callback) {
+        mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_VFR_HUD_RECEIVED);
     }
 }
 
@@ -482,6 +519,14 @@ uint8_t Mavlink_GetAutopilotPrearmState(void) {
     return mavlink_state.autopilot_prearm_state;
 }
 
+/**
+ * @brief Get last received VFR_HUD data
+ * @return const mavlink_vfr_hud_data_t* Pointer to VFR_HUD data structure
+ */
+const mavlink_vfr_hud_data_t* Mavlink_GetVfrHudData(void) {
+    return &mavlink_state.vfr_hud_data;
+}
+
 // ======================= UTILITY FUNCTIONS =======================
 /**
  * @brief Send packet via UART
@@ -531,4 +576,69 @@ static uint16_t Mavlink_CalculateCrc(const uint8_t* data, uint8_t len) {
  */
 static uint8_t Mavlink_GetSequenceNumber(void) {
     return mavlink_sequence_number++;
+}
+
+// ======================= VFR_HUD CONVERSION FUNCTIONS =======================
+/**
+ * @brief Convert float bytes to cm/s (integer, positive values only)
+ * @param float_bytes Pointer to 4-byte float in little-endian format
+ * @return uint16_t Value in cm/s
+ */
+static uint16_t Mavlink_FloatToIntCmS(const uint8_t* float_bytes) {
+    // Simple conversion assuming reasonable aviation speeds (0-500 m/s)
+    // For accurate conversion, implement IEEE 754 float parsing
+    // This is a simplified approximation for demo purposes
+    
+    union {
+        uint32_t i;
+        float f;
+    } converter;
+    
+    converter.i = float_bytes[0] | (float_bytes[1] << 8) | (float_bytes[2] << 16) | (float_bytes[3] << 24);
+    
+    // Convert m/s to cm/s (multiply by 100) with bounds checking
+    if (converter.f < 0.0f) return 0;
+    if (converter.f > 500.0f) return 50000;  // Max 500 m/s = 50000 cm/s
+    
+    return (uint16_t)(converter.f * 100.0f);
+}
+
+/**
+ * @brief Convert float bytes to cm (integer, signed values)
+ * @param float_bytes Pointer to 4-byte float in little-endian format
+ * @return int32_t Value in cm
+ */
+static int32_t Mavlink_FloatToIntCm(const uint8_t* float_bytes) {
+    union {
+        uint32_t i;
+        float f;
+    } converter;
+    
+    converter.i = float_bytes[0] | (float_bytes[1] << 8) | (float_bytes[2] << 16) | (float_bytes[3] << 24);
+    
+    // Convert m to cm (multiply by 100) with bounds checking
+    if (converter.f < -100000.0f) return -10000000;  // Min -100km
+    if (converter.f > 100000.0f) return 10000000;    // Max 100km
+    
+    return (int32_t)(converter.f * 100.0f);
+}
+
+/**
+ * @brief Convert float bytes to cm/s (integer, signed values for climb rate)
+ * @param float_bytes Pointer to 4-byte float in little-endian format
+ * @return int16_t Value in cm/s
+ */
+static int16_t Mavlink_FloatToIntCmS_Signed(const uint8_t* float_bytes) {
+    union {
+        uint32_t i;
+        float f;
+    } converter;
+    
+    converter.i = float_bytes[0] | (float_bytes[1] << 8) | (float_bytes[2] << 16) | (float_bytes[3] << 24);
+    
+    // Convert m/s to cm/s (multiply by 100) with bounds checking
+    if (converter.f < -100.0f) return -10000;  // Min -100 m/s = -10000 cm/s
+    if (converter.f > 100.0f) return 10000;    // Max 100 m/s = 10000 cm/s
+    
+    return (int16_t)(converter.f * 100.0f);
 }

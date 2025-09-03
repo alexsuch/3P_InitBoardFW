@@ -20,6 +20,8 @@
 
 // Message Timing Configuration
 #define MAVLINK_HEARTBEAT_INTERVAL_MS 1000
+#define MAVLINK_VFR_HUD_INTERVAL_MS 1000
+#define MAVLINK_VFR_HUD_OFFSET_MS 500          // Offset VFR_HUD by 500ms from HEARTBEAT
 
 // Command Configuration
 #define MAVLINK_CMD_IGNITION 1            // Custom ignition command type (sent in param1[0])
@@ -57,8 +59,19 @@ typedef enum {
 // Message timing state
 typedef struct {
     unsigned long heartbeat_last_sent;
+    unsigned long vfr_hud_last_sent;
     unsigned long base_time;
 } mavlink_timing_t;
+
+// VFR_HUD simulation data
+typedef struct {
+    float airspeed;         // m/s
+    float groundspeed;      // m/s  
+    int16_t heading;        // degrees (0-359, -1=unknown)
+    uint16_t throttle;      // percentage (0-100)
+    float altitude;         // meters
+    float climb_rate;       // m/s
+} vfr_hud_sim_data_t;
 
 // ======================= GLOBAL VARIABLES =======================
 // State variables
@@ -73,6 +86,16 @@ unsigned long last_ignition_change = 0;
 mavlink_timing_t msg_timing = {0};
 uint8_t sequence_number = 0;
 
+// VFR_HUD simulation data
+vfr_hud_sim_data_t vfr_hud_data = {
+    .airspeed = 25.5f,      // 25.5 m/s
+    .groundspeed = 24.8f,   // 24.8 m/s
+    .heading = 180,         // 180 degrees (South)
+    .throttle = 75,         // 75%
+    .altitude = 150.0f,     // 150 meters
+    .climb_rate = 2.1f      // 2.1 m/s climb
+};
+
 // ======================= FUNCTION DECLARATIONS =======================
 void debug_mavlink_rx(uint8_t* packet, uint8_t len);
 void debug_arm_state_change(mavlink_arm_state_t new_state);
@@ -80,6 +103,8 @@ void debug_prearm_state_change(mavlink_prearm_state_t new_state);
 void debug_ignition_state_change(mavlink_ignition_state_t new_state);
 void send_ignition_command(void);
 void send_custom_command(uint8_t command_type, uint8_t command_data);
+void send_vfr_hud(void);
+void update_vfr_hud_simulation(void);
 const char* get_timer_mode_description(uint8_t timer_mode);
 const char* get_board_state_description(uint8_t board_state);
 
@@ -155,8 +180,9 @@ void setup_state_inputs() {
 void init_message_timing() {
     msg_timing.base_time = millis();
     msg_timing.heartbeat_last_sent = 0;
+    msg_timing.vfr_hud_last_sent = MAVLINK_VFR_HUD_OFFSET_MS; // Offset VFR_HUD by 500ms
     
-    Serial.println("[INIT] Message timing initialized (HEARTBEAT: 1Hz)");
+    Serial.println("[INIT] Message timing initialized (HEARTBEAT: 1Hz, VFR_HUD: 1Hz offset +500ms)");
 }
 
 // ======================= INPUT PROCESSING =======================
@@ -226,6 +252,66 @@ void send_autopilot_heartbeat() {
     
     // Send via UART2
     Serial2.write(heartbeat_packet, 21);
+}
+
+// Send VFR_HUD message with simulated flight data
+void send_vfr_hud() {
+    uint8_t vfr_hud_packet[32] = {0};  // Mavlink v2.0 header + 20 bytes payload + CRC
+    
+    // Header (10 bytes for Mavlink v2.0)
+    vfr_hud_packet[0] = 0xFD;                          // Magic byte
+    vfr_hud_packet[1] = 20;                            // Payload length (VFR_HUD = 20 bytes)
+    vfr_hud_packet[2] = 0;                             // Incompat flags
+    vfr_hud_packet[3] = 0;                             // Compat flags
+    vfr_hud_packet[4] = get_sequence_number();         // Sequence
+    vfr_hud_packet[5] = 1;                             // System ID (autopilot)
+    vfr_hud_packet[6] = 1;                             // Component ID (autopilot)
+    vfr_hud_packet[7] = 74;                            // Message ID (VFR_HUD = 74)
+    vfr_hud_packet[8] = 0;                             // Message ID (high byte)
+    vfr_hud_packet[9] = 0;                             // Message ID (highest byte)
+    
+    // Payload (20 bytes) - VFR_HUD data
+    // Airspeed (float, 4 bytes)
+    memcpy(&vfr_hud_packet[10], &vfr_hud_data.airspeed, 4);
+    
+    // Groundspeed (float, 4 bytes)  
+    memcpy(&vfr_hud_packet[14], &vfr_hud_data.groundspeed, 4);
+    
+    // Heading (int16_t, 2 bytes)
+    vfr_hud_packet[18] = vfr_hud_data.heading & 0xFF;
+    vfr_hud_packet[19] = (vfr_hud_data.heading >> 8) & 0xFF;
+    
+    // Throttle (uint16_t, 2 bytes)
+    vfr_hud_packet[20] = vfr_hud_data.throttle & 0xFF;
+    vfr_hud_packet[21] = (vfr_hud_data.throttle >> 8) & 0xFF;
+    
+    // Altitude (float, 4 bytes)
+    memcpy(&vfr_hud_packet[22], &vfr_hud_data.altitude, 4);
+    
+    // Climb rate (float, 4 bytes)
+    memcpy(&vfr_hud_packet[26], &vfr_hud_data.climb_rate, 4);
+    
+    // Calculate and add CRC16
+    uint16_t crc = calculate_mavlink_crc(vfr_hud_packet, 30);
+    vfr_hud_packet[30] = crc & 0xFF;
+    vfr_hud_packet[31] = (crc >> 8) & 0xFF;
+    
+    // Send via UART2
+    Serial2.write(vfr_hud_packet, 32);
+}
+
+// Update VFR_HUD simulation data with dynamic values
+void update_vfr_hud_simulation() {
+    unsigned long current_time = millis();
+    float time_sec = (current_time - msg_timing.base_time) / 1000.0f;
+    
+    // Simulate dynamic flight parameters
+    vfr_hud_data.airspeed = 25.0f + 5.0f * sin(time_sec * 0.1f);                    // 20-30 m/s
+    vfr_hud_data.groundspeed = vfr_hud_data.airspeed - 1.0f + 2.0f * sin(time_sec * 0.05f); // Wind effect
+    vfr_hud_data.heading = (int16_t)(180 + 30 * sin(time_sec * 0.02f)) % 360;       // 150-210 degrees
+    vfr_hud_data.throttle = (uint16_t)(75 + 15 * sin(time_sec * 0.08f));            // 60-90%
+    vfr_hud_data.altitude = 150.0f + 50.0f * sin(time_sec * 0.03f);                 // 100-200m
+    vfr_hud_data.climb_rate = 2.0f * cos(time_sec * 0.04f);                         // -2 to +2 m/s
 }
 
 // ======================= MAVLINK MESSAGE PROCESSING =======================
@@ -367,6 +453,24 @@ void process_periodic_heartbeat() {
     }
 }
 
+// Process periodic VFR_HUD transmission (1Hz, offset by 500ms from HEARTBEAT)
+void process_periodic_vfr_hud() {
+    unsigned long current_time = millis();
+    unsigned long elapsed = current_time - msg_timing.base_time;
+    
+    // Send VFR_HUD every 1000ms, offset by 500ms from HEARTBEAT
+    if (elapsed - msg_timing.vfr_hud_last_sent >= MAVLINK_VFR_HUD_INTERVAL_MS) {
+        update_vfr_hud_simulation();  // Update dynamic flight data
+        send_vfr_hud();
+        msg_timing.vfr_hud_last_sent = elapsed;
+        
+        // Debug output for VFR_HUD transmission
+        Serial.printf("[VFR_HUD_TX] AS=%.1f, GS=%.1f, HDG=%d, THR=%d%%, ALT=%.1fm, CLB=%.1fm/s\n",
+                     vfr_hud_data.airspeed, vfr_hud_data.groundspeed, vfr_hud_data.heading,
+                     vfr_hud_data.throttle, vfr_hud_data.altitude, vfr_hud_data.climb_rate);
+    }
+}
+
 // Process input changes with debounce
 void process_input_states() {
     unsigned long current_time = millis();
@@ -474,6 +578,9 @@ void setup() {
 void loop() {
     // Send periodic autopilot HEARTBEAT (1Hz) with ARM/PREARM states
     process_periodic_heartbeat();
+    
+    // Process periodic VFR_HUD transmission  
+    process_periodic_vfr_hud();
     
     // Process input states (ARM and PREARM monitoring)
     process_input_states();
