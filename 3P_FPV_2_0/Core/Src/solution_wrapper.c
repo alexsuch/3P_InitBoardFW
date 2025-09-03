@@ -41,6 +41,11 @@ bool ReadFuseGpio (void)
 	return (HAL_GPIO_ReadPin(FUSE_INPUT_PORT, FUSE_INPUT_PIN) == GPIO_PIN_SET) ? true : false;
 }
 
+bool IsFuseRemoved (void)
+{
+	return (ReadFuseGpio() == GPIO_PIN_RESET) ? true : false;
+}
+
 // ---------------------- DETONATION CONTROL -------------------------------
 
 void DetonHighSideSwithSet (bool state)

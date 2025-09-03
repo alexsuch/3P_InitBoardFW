@@ -56,6 +56,7 @@ void BuzzerDisable(void);
 void DetonHighSideSwithSet (bool state);
 void DetonLowSideSwitchSet (bool state);
 bool ReadFuseGpio (void);
+bool IsFuseRemoved (void);
 bool ReadVusaGpio (void);
 bool ReadExtPwrGpio (void);
 void VusaStart(app_cbk_fn cbk);

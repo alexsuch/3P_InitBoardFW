@@ -458,29 +458,20 @@ static void App_VusaCbk (system_evt_t evt, uint32_t usr_data)
 	}
 }
 
-/***************************************** MAVLINK CONTROL ********************************************************/
-
-static void App_MavlinkCbk (system_evt_t evt, uint32_t usr_data)
-{
-    if (evt == SYSTEM_EVT_READY)
-	{
-
-	}
-}
-
 /***************************************** STICK CONTROL ********************************************************/
 
-static void App_StickDisarmHandler (bool is_stick)
+static void App_DisarmHandler (bool is_stick)
 {
 	/* Stop self destruction timer in case of the stick control */
 	App_SelfDestroyTimerStop();
 
 	/* Disable any detection */
 	AccProc_Stop();
-
+#if (CONTROL_MODE == PWM_CTRL_SUPP)
 	/* Reset block flag and stop the timer */
 	sysStatus.is_ignition_bloked = false;
 	Timer_Stop (BLOCK_IGNITION_TMR);
+#endif
 
 	/* Handle the case when Arm or Ignition signal came while Safe timer is pending and now switched back */
 	if (
@@ -580,7 +571,7 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 				{
 					/* Mining mode disable run only after safe timer  */
 					App_MiningModeDisable();
-					App_StickDisarmHandler(false);
+					App_DisarmHandler(false);
 				}
 
 				/* Check if pending mining error for stick */
@@ -702,7 +693,7 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 				)
 			{
 				/* Signal appeared after was lost in wrong position goto disarm */
-				App_StickDisarmHandler(true);
+				App_DisarmHandler(true);
 
 			}
 			/* Otherwise stick mode */
@@ -712,7 +703,7 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 		if (usr_data == CONTROL_EVT_DISARM)
 		{
 			/* Handle disarm stick */
-			App_StickDisarmHandler(true);
+			App_DisarmHandler(true);
 		}
 		else if ((usr_data == CONTROL_EVT_ARM_WITH_ACC) || (usr_data == CONTROL_EVT_IGNITION))
 		{
@@ -810,7 +801,119 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 		}
 	}
 }
-#endif
+#endif /
+
+/***************************************** MAVLINK CONTROL ********************************************************/
+static bool App_IgnitionTryRun (void)
+{
+	bool ret = false;
+
+	/* If prearm and arm are enabled - run ignition */
+	if (sysStatus.prearm_enabled && sysStatus.arm_enabled)
+	{
+		App_IgnitionRun();
+		ret = true;
+	}
+
+	return ret;
+}
+
+#if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
+static void App_MavlinkCbk (system_evt_t evt, uint32_t usr_data)
+{
+    if (evt == SYSTEM_EVT_READY)
+	{
+		switch ((mavlink_event_t)usr_data)
+		{
+			case MAVLINK_EVT_COMMAND_IGNITION:
+
+				if (
+						(sysStatus.state == SYSTEM_STATE_ARMED) ||
+						(sysStatus.state == SYSTEM_STATE_ARMED_PUMP) ||
+						(sysStatus.self_destroy_mode == SELF_DESTROY_STATE_STARTED)
+					)
+				{
+					/* Try to run ignition */
+					App_IgnitionTryRun();
+				}
+
+				break;
+				
+			case MAVLINK_EVT_AUTOPILOT_CONNECTED:
+				// Autopilot connection established
+				sysStatus.is_ctrl_lost = false;
+				/* Update FC control presence */
+				sysStatus.sys_info.fc_control_present = 1;
+				break;
+				
+			case MAVLINK_EVT_AUTOPILOT_DISCONNECTED:
+				// Autopilot connection lost
+				sysStatus.is_ctrl_lost = true;
+				/* Update FC control presence */
+				sysStatus.sys_info.fc_control_present = 0;
+				break;
+				
+			case MAVLINK_EVT_AUTOPILOT_HEARTBEAT:
+				// Regular autopilot HEARTBEAT received
+				sysStatus.is_ctrl_lost = false;
+				/* Update FC control presence */
+				sysStatus.sys_info.fc_control_present = 1;
+				break;
+				
+			case MAVLINK_EVT_AUTOPILOT_ARMED:
+				// Autopilot changed to ARMED state
+				/* Update arm enabled state */
+				sysStatus.arm_enabled = true;
+
+				if (sysStatus.state == SYSTEM_STATE_DISARM) 
+				{
+					/* Start capacitor charging when ARM command comes */
+					App_ChargingRun(SYSTEM_STATE_CHARGING, true);
+					if (Timer_IsActive(SELF_DESTRUCTION_TMR) == false)
+					{
+						/* Start self destroy timer if ARMed */
+						App_SelfDestroyTimerStart(SELF_DESTROY_MODE_NORMAL);
+					}
+				}
+				else if (sysStatus.state == SYSTEM_STATE_SAFE_TIMER)
+				{
+					/* Pause current Safe timer */
+					App_SafeTmrPause();
+					/* Set application error */
+					App_SetError(ERR_TYPE_RELOADABLE, ERR_CODE_UNEXPECTED_ARM);
+				}
+
+				break;
+				
+			case MAVLINK_EVT_AUTOPILOT_DISARMED:
+				// Autopilot changed to DISARMED state
+				/* Stop hit detection */
+				AccProc_Stop();
+				/* Update arm enabled state */
+				sysStatus.arm_enabled = false;
+
+				/* Handle disarm */
+				App_DisarmHandler(false);
+				break;
+				
+			case MAVLINK_EVT_AUTOPILOT_PREARM_ENABLED:
+				// Autopilot PREARM enabled
+				sysStatus.prearm_enabled = true;
+				break;
+				
+			case MAVLINK_EVT_AUTOPILOT_PREARM_DISABLED:
+				// Autopilot PREARM disabled  
+				sysStatus.prearm_enabled = false;
+				break;
+				
+			default:
+				// Unknown Mavlink event
+				break;
+		}
+	}
+}
+#endif 
+
 /***************************************** ACCELEROMETER PROCESSING  ********************************************************/
 
 static void App_AccProcCbk (system_evt_t evt, uint32_t usr_data)
@@ -1240,7 +1343,7 @@ static void App_ArmRun (void)
 		if (sysStatus.stick_ctrl_stat == CONTROL_EVT_DISARM)
 		{
 			/* Set system to disarm state */
-			App_StickDisarmHandler(false);
+			App_DisarmHandler(false);
 			ret = true;
 		}
 		else if ((sysStatus.stick_ctrl_stat == CONTROL_EVT_IGNITION) && (sysStatus.is_ignition_bloked == false))
@@ -1372,6 +1475,7 @@ static void App_SafeTmrTickCbk (void)
     	/* Set safe timer timeout */
     	sysStatus.safe_tmr_tick = sysStatus.config->safeTimeoutSec;
 	
+#if (CONTROL_MODE == PWM_CTRL_SUPP)
     	if (sysStatus.stick_ctrl_mode != STICK_MODE_STICK_PWM)
     	{
     	    /* Enable initial charging for non-stick control */
@@ -1383,7 +1487,7 @@ static void App_SafeTmrTickCbk (void)
     		if (sysStatus.stick_ctrl_stat == CONTROL_EVT_DISARM)
     		{
     			/* Set system to disarm state */
-    			App_StickDisarmHandler(false);
+    			App_DisarmHandler(false);
     		}
     		else
     		{
@@ -1391,6 +1495,18 @@ static void App_SafeTmrTickCbk (void)
     			App_ChargingRun(SYSTEM_STATE_CHARGING, true);
     		}
     	}
+#elif (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
+		if (sysStatus.sys_info.fc_control_present == 0)
+		{
+			/* Enable initial charging if signal lost */
+			App_ChargingRun(SYSTEM_STATE_CHARGING, true);
+		}
+		else
+		{
+			/* Set system to disarm state */
+			App_DisarmHandler(false);
+		}
+#endif 
     }
     else
     {
@@ -1442,6 +1558,7 @@ static void App_SafeTmrRun (void)
 	/* Reset all system blocks and variables */
 	App_SetSafe(false);
 
+#if (CONTROL_MODE == PWM_CTRL_SUPP)
 	/* Start Self destroy timer for non stick control */
 	if ((sysStatus.stick_ctrl_mode != STICK_MODE_STICK_PWM) || (sysStatus.is_ctrl_lost != false))
 	{
@@ -1453,6 +1570,13 @@ static void App_SafeTmrRun (void)
 	{
 		App_SafeTmrPause();
 	}
+#elif (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
+	/* Start Self destroy timer for non stick control */
+	if (sysStatus.arm_enabled)
+	{
+		App_SelfDestroyTimerStart(SELF_DESTROY_MODE_NORMAL);  //TODO OSAV clarify behaviour
+	}
+#endif
 
 	sysStatus.state         = SYSTEM_STATE_SAFE_TIMER;
 	sysStatus.safe_tmr_tick = sysStatus.config->safeTimeoutSec;
@@ -1477,7 +1601,7 @@ static void App_FusePollCbk (void)
 	bool new_fuse_state = false;
 	uint16_t timer_val_ms = FUSE_CHECK_DELAY_PERIOD_MS;
 
-	new_fuse_state = (ReadFuseGpio() == GPIO_PIN_RESET) ? true : false;
+	new_fuse_state = IsFuseRemoved();
 
 	/* Process changed fuse state. NOTE: Ignore fuse changes during ignition because of schematic specifics */
 	if ((sysStatus.is_fuse_removed != new_fuse_state) && (sysStatus.state != SYSTEM_STATE_IGNITION))
@@ -1530,15 +1654,16 @@ static void App_FusePollCbk (void)
 
 static void App_FuseCheck (void)
 {
-	/* Check if there's no error of stick system */
-	bool stickStat = true;
+	/* Check if there's no control error */
+	bool isCtrlOk = true;
 
+#if (CONTROL_MODE == PWM_CTRL_SUPP)
 	/* Check if stick position is safe */
     if (sysStatus.stick_ctrl_mode == STICK_MODE_STICK_PWM)
     {
     	if ((sysStatus.stick_ctrl_stat > CONTROL_EVT_DISARM) && (sysStatus.stick_ctrl_stat < CONTROL_EVT_MINING_DISABLE) && (sysStatus.is_ctrl_lost == false))
     	{
-    		stickStat = false;
+    		isCtrlOk = false;
     	    /* Set application error */
     	    App_SetError(ERR_TYPE_RELOADABLE, (sysStatus.stick_ctrl_stat == CONTROL_EVT_ARM_WITH_ACC) ? ERR_CODE_UNEXPECTED_ARM : ERR_CODE_UNEXPECTED_IGNITION);
     	}
@@ -1553,7 +1678,7 @@ static void App_FuseCheck (void)
 #if MINING_MODE_SUPP
 			if (sysStatus.mining_stick_ctrl_stat == CONTROL_EVT_MINING_ENABLE)
 			{
-				stickStat = false;
+				isCtrlOk = false;
 				/* Set application error for mining */
 				App_SetError(ERR_TYPE_RELOADABLE, ERR_CODE_UNEXPECTED_MINING);
 			}
@@ -1564,11 +1689,26 @@ static void App_FuseCheck (void)
 #endif /* MINING_MODE_SUPP */
     	}
     }
+#elif (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
+	if (sysStatus.sys_info.fc_control_present != 0)
+	{
+		if (sysStatus.arm_enabled)
+		{
+			isCtrlOk = false;
+			 /* Set application error */
+    	    App_SetError(ERR_TYPE_RELOADABLE, ERR_CODE_UNEXPECTED_ARM);
+		}
+		else
+		{
+			App_ClearError(ERR_CODE_UNEXPECTED_ARM);
+		}
+	}
 
+#endif
 	/* Set validate state by default */
 	Util_SetFlag((uint32_t*)&sysStatus.app_task_mask, APP_TASK_INIT_FUSE_CHECK_CBK);
 
-	if (stickStat != false)
+	if (isCtrlOk != false)
 	{
 		/* If fuse is removed - can proceed */
 		if (sysStatus.is_fuse_removed != false)
@@ -1605,11 +1745,12 @@ static void App_FuseCheckRun (void)
 
 	/* Update timer info */
 	sysStatus.sys_info.timer_seconds = sysStatus.config->safeTimeoutSec;
-	sysStatus.sys_info.fuse_present = !(ReadFuseGpio() == GPIO_PIN_RESET);
+	sysStatus.sys_info.fuse_present = !IsFuseRemoved();
 
 	/* Clear ignition done flag */
 	sysStatus.sys_info.is_ignition_done = 0;
 
+#if (CONTROL_MODE == PWM_CTRL_SUPP)
 	/* Reset Stick SM in case is connection was lost */
 	if (sysStatus.is_ctrl_lost != false)
 	{
@@ -1620,6 +1761,9 @@ static void App_FuseCheckRun (void)
 		sysStatus.mining_stick_ctrl_stat = CONTROL_EVT_NO_CTRL;
 #endif /* MINING_MODE_SUPP */
 	}
+#elif (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
+	//TODO OSAV
+#endif
 
 	sysStatus.state = SYSTEM_STATE_INIT_FUSE_CHECK;
 
@@ -1743,7 +1887,7 @@ void App_InitRun(void)
 		)
 	{
 		/* Set error by default - after successful init error will be erased */
-		//Util_SetFlag((uint32_t*)&sysStatus.err_stat, SYSTEM_BLOCK_ACC);
+		Util_SetFlag((uint32_t*)&sysStatus.err_stat, SYSTEM_BLOCK_ACC);
 		/* Init Acc  handling */
 		AccProc_Reset(App_AccProcCbk);
 		if (sysStatus.config->accEnable != false)

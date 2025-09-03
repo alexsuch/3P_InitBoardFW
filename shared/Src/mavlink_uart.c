@@ -143,7 +143,7 @@ static mavlink_custom_mode_t Mavlink_EncodeCustomMode(void) {
     // Encode bitfield (matching updated REQUIREMENTS.md specification)
     custom_mode.bitfield.timer_sec = state->timer_seconds;           // 14 bits (0-13) - auto-truncated by compiler
     custom_mode.bitfield.timer_mode = state->timer_mode;             // 2 bits (14-15) - auto-truncated by compiler
-    custom_mode.bitfield.fc_control_present = mavlink_state.connected; // 1 bit (16) - autopilot connection status
+    custom_mode.bitfield.fc_control_present = state->fc_control_present; // 1 bit (16) - autopilot connection status
     custom_mode.bitfield.fuse_present = state->fuse_present;         // 1 bit (17) - auto-truncated by compiler
     custom_mode.bitfield.board_state = state->board_state;           // 3 bits (18-20) - auto-truncated by compiler
     custom_mode.bitfield.battery_level = state->battery_level;       // 4 bits (21-24) - auto-truncated by compiler
@@ -337,7 +337,7 @@ static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload) {
  * @param payload Message payload (33 bytes)
  */
 static void Mavlink_ProcessCommandLong(const uint8_t* payload) {
-    // Extract command ID (bytes 28-29)
+    // Extract main command ID (bytes 28-29) - should be MAV_CMD_USER_1 for custom commands
     uint16_t command_id = payload[28] | (payload[29] << 8);
     
     // Extract target system and component  
@@ -347,16 +347,40 @@ static void Mavlink_ProcessCommandLong(const uint8_t* payload) {
     // Check if command is for us (ignore system/component ID checks as per requirements)
     uint8_t result = MAV_RESULT_UNSUPPORTED;
     
-    // Process only IGNITION command (value = 1)
-    if (command_id == MAVLINK_CMD_IGNITION) {
-        // Process IGNITION command via callback
-        if (mavlink_state.system_callback) {
-            mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_COMMAND_IGNITION);
-            result = MAV_RESULT_ACCEPTED;
+    // Process custom commands via MAV_CMD_USER_1
+    if (command_id == 31010) {  // MAV_CMD_USER_1
+        // Extract custom command type from param1 first byte
+        uint8_t custom_command_type = payload[0];  // First byte of param1 - command type
+        uint8_t command_data = payload[1];         // Second byte of param1 - command data
+        uint8_t custom_param2 = payload[2];        // Third byte of param1 (reserved)
+        uint8_t custom_param3 = payload[3];        // Fourth byte of param1 (reserved)
+        
+        // Process custom command based on type
+        switch (custom_command_type) {
+            case MAVLINK_CMD_IGNITION:  // 1 - IGNITION command
+                // Process IGNITION command via callback
+                // command_data can contain ignition type, delay, or other parameters
+                if (mavlink_state.system_callback) {
+                    mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_COMMAND_IGNITION);
+                    result = MAV_RESULT_ACCEPTED;
+                }
+                break;
+                
+            // Future custom commands can be added here:
+            // case 2:  // Custom command type 2
+            //     // command_data specific to command type 2
+            //     break;
+            // case 3:  // Custom command type 3
+            //     // command_data specific to command type 3
+            //     break;
+                
+            default:
+                result = MAV_RESULT_UNSUPPORTED;
+                break;
         }
     }
     
-    // Send acknowledgment
+    // Send acknowledgment with the main command_id (MAV_CMD_USER_1)
     Mavlink_SendCommandAck(command_id, result);
 }
 

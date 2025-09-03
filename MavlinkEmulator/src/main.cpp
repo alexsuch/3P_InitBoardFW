@@ -22,7 +22,8 @@
 #define MAVLINK_HEARTBEAT_INTERVAL_MS 1000
 
 // Command Configuration
-#define MAVLINK_CMD_IGNITION 1            // Only command that autopilot can send
+#define MAVLINK_CMD_IGNITION 1            // Custom ignition command type (sent in param1[0])
+#define MAV_CMD_USER_1 31010              // MAVLink standard user command 1
 
 // ======================= INITBOARD HEARTBEAT CUSTOM MODE STRUCTURE =======================
 // InitBoard HEARTBEAT custom_mode bitfield structure (32-bit):
@@ -78,6 +79,7 @@ void debug_arm_state_change(mavlink_arm_state_t new_state);
 void debug_prearm_state_change(mavlink_prearm_state_t new_state);
 void debug_ignition_state_change(mavlink_ignition_state_t new_state);
 void send_ignition_command(void);
+void send_custom_command(uint8_t command_type, uint8_t command_data);
 const char* get_timer_mode_description(uint8_t timer_mode);
 const char* get_board_state_description(uint8_t board_state);
 
@@ -287,49 +289,57 @@ void debug_mavlink_rx(uint8_t* packet, uint8_t len) {
 
 // Send IGNITION COMMAND_LONG message to InitBoard
 void send_ignition_command(void) {
-    uint8_t command_packet[33] = {0}; // Mavlink v2.0 header + 23 bytes payload + CRC
+    send_custom_command(MAVLINK_CMD_IGNITION, 0); // Send IGNITION command with command_data = 0
+}
+
+// Send custom command with specified type and data
+void send_custom_command(uint8_t command_type, uint8_t command_data) {
+    uint8_t command_packet[45] = {0}; // Mavlink v2.0 header + 33 bytes payload + CRC
     
     // Header (10 bytes for v2.0)
     command_packet[0] = 0xFD;  // Mavlink v2.0 magic
-    command_packet[1] = 23;    // Payload length for COMMAND_LONG
+    command_packet[1] = 33;    // Payload length for COMMAND_LONG
     command_packet[2] = 0;     // Incompat flags
     command_packet[3] = 0;     // Compat flags
     command_packet[4] = get_sequence_number();
-    command_packet[5] = MAVLINK_SYSTEM_ID_INITBOARD;  // Target system
-    command_packet[6] = MAVLINK_COMP_ID_INITBOARD;    // Target component
+    command_packet[5] = MAVLINK_SYSTEM_ID_INITBOARD;  // Source system (we are autopilot)
+    command_packet[6] = MAVLINK_COMP_ID_INITBOARD;    // Source component
     command_packet[7] = 0x4C;  // COMMAND_LONG message ID (low byte)
     command_packet[8] = 0x00;  // COMMAND_LONG message ID (mid byte)
     command_packet[9] = 0x00;  // COMMAND_LONG message ID (high byte)
     
-    // Payload (23 bytes for COMMAND_LONG)
-    // param1 (4 bytes) - IGNITION command
-    uint32_t ignition_param = MAVLINK_CMD_IGNITION;
-    command_packet[10] = ignition_param & 0xFF;
-    command_packet[11] = (ignition_param >> 8) & 0xFF;
-    command_packet[12] = (ignition_param >> 16) & 0xFF;
-    command_packet[13] = (ignition_param >> 24) & 0xFF;
+    // Payload (33 bytes for COMMAND_LONG)
+    // param1 (4 bytes) - Custom command structure
+    command_packet[10] = command_type;              // Custom command type (MAVLINK_CMD_IGNITION = 1)
+    command_packet[11] = command_data;              // Command data (additional parameters)
+    command_packet[12] = 0;                         // Custom param2 (reserved)
+    command_packet[13] = 0;                         // Custom param3 (reserved)
     
-    // param2-param7 (4 bytes each) - zeros
-    for(int i = 14; i < 30; i++) {
+    // param2-param7 (24 bytes) - zeros (not used)
+    for(int i = 14; i < 38; i++) {
         command_packet[i] = 0;
     }
     
-    // command (2 bytes) - MAV_CMD_USER_1
-    command_packet[30] = 0x22;  // MAV_CMD_USER_1 low byte (0x7922)
-    command_packet[31] = 0x79;  // MAV_CMD_USER_1 high byte
+    // command (2 bytes) - MAV_CMD_USER_1 (31010)
+    command_packet[38] = 31010 & 0xFF;        // Command low byte (0x22)
+    command_packet[39] = (31010 >> 8) & 0xFF; // Command high byte (0x79)
     
     // target_system and target_component
-    command_packet[32] = MAVLINK_SYSTEM_ID_INITBOARD;  // target_system
+    command_packet[40] = MAVLINK_SYSTEM_ID_INITBOARD;  // target_system
+    command_packet[41] = MAVLINK_COMP_ID_INITBOARD;    // target_component
     
-    // Calculate and add CRC16
-    uint16_t crc = calculate_mavlink_crc(command_packet, 31);
-    command_packet[31] = crc & 0xFF;
-    command_packet[32] = (crc >> 8) & 0xFF;
+    // confirmation (1 byte)
+    command_packet[42] = 0;  // No confirmation required
+    
+    // Calculate and add CRC16 
+    uint16_t crc = calculate_mavlink_crc(command_packet, 43); // Header + payload
+    command_packet[43] = crc & 0xFF;
+    command_packet[44] = (crc >> 8) & 0xFF;
     
     // Send via UART2
-    Serial2.write(command_packet, 33);
+    Serial2.write(command_packet, 45);
     
-    Serial.println("[TX] IGNITION COMMAND_LONG sent to InitBoard");
+    Serial.printf("[TX] Custom command sent: type=%u, data=%u\n", command_type, command_data);
 }
 
 // ======================= PERIODIC MESSAGE PROCESSING =======================

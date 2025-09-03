@@ -258,6 +258,7 @@ typedef struct {
     uint8_t battery_level;       // Battery level (0-10, where 10 = 100%)
     uint8_t error_code;          // Error code (0-15)
     uint8_t is_ignition_done;    // Ignition done flag (0-1)
+    uint8_t fc_control_present;  // FC control connection status (0-1)
 } init_board_system_info_t;
 
 typedef struct
@@ -281,6 +282,9 @@ typedef struct
 	control_evt_t mining_stick_ctrl_stat;
 	bool is_ctrl_lost;
 	bool is_ignition_bloked;
+	// Prearm
+	bool prearm_enabled;  // Mavlink autopilot PREARM state
+	bool arm_enabled;     // Mavlink autopilot ARM state
 	// Fuse
 	bool is_fuse_removed;
 	uint8_t fuse_detect_retry;

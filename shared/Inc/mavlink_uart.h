@@ -68,10 +68,29 @@
 
 // MAV Result codes
 #define MAV_RESULT_ACCEPTED                0x00    // 0 - Command accepted
-#define MAV_RESULT_UNSUPPORTED             0x04    // 4 - Command not supported
+#define MAV_RESULT_TEMPORARILY_REJECTED    0x01    // 1 - Command temporarily rejected
+#define MAV_RESULT_DENIED                  0x02    // 2 - Command denied
+#define MAV_RESULT_UNSUPPORTED             0x03    // 3 - Command not supported
+#define MAV_RESULT_FAILED                  0x04    // 4 - Command failed
+#define MAV_RESULT_IN_PROGRESS             0x05    // 5 - Command in progress
+#define MAV_RESULT_CANCELLED               0x06    // 6 - Command cancelled
 
 // Command IDs  
-#define MAVLINK_CMD_IGNITION               0x01    // 1 - Only command supported
+#define MAVLINK_CMD_IGNITION               0x01    // 1 - Custom ignition command (used in param1[0])
+#define MAV_CMD_USER_1                     31010   // MAVLink standard user command 1
+
+/**
+ * @brief Custom Command Structure via MAV_CMD_USER_1
+ * 
+ * ESP32 sends custom commands using MAV_CMD_USER_1 (31010) with custom data in param1:
+ * - command field = MAV_CMD_USER_1 (31010)
+ * - param1[0] = custom_command_type (MAVLINK_CMD_IGNITION = 1, future commands = 2,3,etc.)
+ * - param1[1] = command_data (additional parameters specific to command type)
+ * - param1[2] = reserved for future use
+ * - param1[3] = reserved for future use
+ * 
+ * STM32 processes by checking command_id == 31010, then switching on param1[0] for command type.
+ */
 
 // ======================= TYPE DEFINITIONS =======================
 
@@ -106,6 +125,7 @@ typedef enum {
  * @brief Mavlink Events for system callback
  */
 typedef enum {
+    MAVLINK_EVT_NO_EVT = 0x00,                     // 0 - No event
     MAVLINK_EVT_COMMAND_IGNITION = 0x01,           // 1 - Ignition command received
     MAVLINK_EVT_AUTOPILOT_CONNECTED = 0x02,        // 2 - Autopilot connection established  
     MAVLINK_EVT_AUTOPILOT_DISCONNECTED = 0x03,     // 3 - Autopilot connection lost
