@@ -201,7 +201,7 @@ typedef enum
 typedef enum {
 	TIMER_MODE_NONE = 0x00,         // No active timer
     TIMER_MODE_SAFE = 0x01,         // Safe timer active
-    TIMER_MODE_SELF_DESTROY = 0x02       // Self destroy timer active
+    TIMER_MODE_SELF_DESTROY = 0x02  // Self destroy timer active
 } timer_mode_t;
 
 // Board state enumeration

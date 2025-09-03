@@ -103,21 +103,6 @@
 
 // ======================= TYPE DEFINITIONS =======================
 
-// Timer mode enumeration
-typedef enum {
-	MAVLINK_TIMER_MODE_NONE = 0x00,         // No active timer
-    MAVLINK_TIMER_MODE_SAFE = 0x01,         // Safe timer active
-    MAVLINK_TIMER_MODE_DESTROY = 0x02       // Self destroy timer active
-} mavlink_timer_mode_t;
-
-// Board state enumeration
-typedef enum {
-    MAVLINK_BOARD_STATE_NO_FC = 0x00,       // No FC connected
-    MAVLINK_BOARD_STATE_DISARMED = 0x01,    // Disarmed
-    MAVLINK_BOARD_STATE_ARMED = 0x02,       // Armed
-    MAVLINK_BOARD_STATE_BOOM = 0x03         // Boom
-} mavlink_board_state_t;
-
 // Autopilot ARM state enumeration
 typedef enum {
     MAVLINK_AUTOPILOT_ARM_DISARMED = 0x00,  // 0 - Autopilot disarmed
