@@ -21,6 +21,7 @@
 #include "solution_wrapper.h"
 #include <string.h>
 
+#if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 // ======================= GLOBAL VARIABLES =======================
 static mavlink_state_t mavlink_state = {0};
 static uint8_t mavlink_tx_buffer[MAVLINK_MAX_MESSAGE_SIZE];
@@ -642,3 +643,4 @@ static int16_t Mavlink_FloatToIntCmS_Signed(const uint8_t* float_bytes) {
     
     return (int16_t)(converter.f * 100.0f);
 }
+#endif /*  MAVLINK_V2_CTRL_SUPP */

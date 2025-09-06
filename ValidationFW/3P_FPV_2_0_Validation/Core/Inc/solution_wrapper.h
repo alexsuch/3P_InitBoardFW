@@ -19,6 +19,7 @@ extern "C" {
 #include <stdbool.h>
 #include "init_brd.h"
 #include "prj_config.h"
+#include "hal_cfg.h"
 
 #define LIS2DH12_ACC_DATA_READ_SIZE          (7u)
 #define LIS2DH12_ACC_DATA_ZERO_BYTE          (0xE8u)
@@ -30,14 +31,6 @@ extern "C" {
 
 #define SET_ERROR_LED(status)             LedErrorSet(status)
 #define SET_STATUS_LED(status)            LedStatusSet(status)
-
-#define PWM1_IN_Pin GPIO_PIN_14
-#define PWM1_IN_GPIO_Port GPIOB
-#define PWM1_IN_EXTI_IRQn EXTI4_15_IRQn
-
-#define PWM2_IN_Pin GPIO_PIN_10
-#define PWM2_IN_GPIO_Port GPIOA
-#define PWM2_IN_EXTI_IRQn EXTI4_15_IRQn
 
 /* External Variables --------------------------------------------------------*/
 extern TIM_HandleTypeDef htim14;
@@ -51,6 +44,7 @@ extern uint8_t vusaUartRxTempByte;
 extern uint8_t uartRxTempByte;
 
 /* Exported functions prototypes ---------------------------------------------*/
+void Solution_HalInit (void);
 bool SpiReadRegister(uint8_t address, uint8_t* value, uint8_t num);
 bool SpiWriteSingleRegister(uint8_t address, uint8_t value);
 bool ReadAccIntGpio (void);
@@ -63,6 +57,7 @@ void BuzzerDisable(void);
 void DetonHighSideSwithSet (bool state);
 void DetonLowSideSwitchSet (bool state);
 bool ReadFuseGpio (void);
+bool IsFuseRemoved (void);
 bool ReadVusaGpio (void);
 bool ReadExtPwrGpio (void);
 void VusaStart(app_cbk_fn cbk);
@@ -89,7 +84,6 @@ void Test3LedToggle ();
 void PWM_IN_GPIO_Init(void);
 bool UartSendData(uint8_t* wrBuff, uint8_t len);
 bool UartGetOneByteRx(void);
-void Acc_ReportStatus(system_evt_t evt);
 void VusaUart_IRQ_Cbk(uint8_t vusa_byte);
 bool VusaUartGetOneByteRx(void);
 void GpioIntHandler(uint16_t GPIO_Pin, bool is_rise_edge);

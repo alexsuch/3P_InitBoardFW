@@ -8,6 +8,12 @@
 		},
 		{
 			"path": "../MavlinkEmulator"
+		},
+		{
+			"path": "../ValidationFW/3P_FPV_2_0_Validation"
+		},
+		{
+			"path": "../ValidationFW/sharedValidation"
 		}
 	],
 	"settings": {
@@ -22,7 +28,11 @@
 			"prj_config.h": "c",
 			"solution_wrapper.h": "c",
 			"stm32g0xx_it.h": "c",
-			"hal_cfg.h": "c"
+			"hal_cfg.h": "c",
+			"array": "c",
+			"string": "c",
+			"string_view": "c",
+			"span": "c"
 		}
 	}
 }

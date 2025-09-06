@@ -78,9 +78,7 @@ uint8_t App_GetAppStatusConfiguration(void)
 		stat |= IS_APP_READY_STATUS_MASK;
 	}
 
-    if (!prim) {
-        __enable_irq();
-    }
+	__set_PRIMASK(prim);
 
     return stat;
 }
@@ -88,6 +86,8 @@ uint8_t App_GetAppStatusConfiguration(void)
 uint8_t*  App_GetConfiguration(uint8_t* size)
 {
 	uint8_t* ret = NULL;
+
+	if (size == NULL) {return ret;}
 
 	ret = (uint8_t*)sysStatus.config;
 	*size = sizeof(config_data_t);
@@ -98,6 +98,8 @@ uint8_t*  App_GetConfiguration(uint8_t* size)
 bool App_SetConfiguration(uint8_t* data, uint8_t size)
 {
 	bool ret = false;
+
+	if (data == NULL) {return ret;}
 
 	/* Configuration can be done only when Fuse is populated/ app version match/ sizes are match */
 	if (
@@ -1027,9 +1029,7 @@ void App_SetSafe (bool ind_enable)
 	}
 
 	/* Enable interrupts */
-    if (!prim) {
-        __enable_irq();
-    }
+	__set_PRIMASK(prim);
 }
 
 /***************************************** ADC Battery measurement *****************************************************/
@@ -1147,7 +1147,7 @@ static void App_AdcDataAnalyze(void)
 		/* Low down threshold to 100mV considering fuse not populated and LED + Buzzer consume additional current */
 		if (Util_IsFlagChecked((uint32_t*)&sysStatus.app_err_stat, ERR_CODE_FUSE_INCORRECT_STATE))
 		{
-			low_threshold_mV -= 100;
+			low_threshold_mV -= BATTERY_THRESHOLD_ADJUSTMENT_MV;
 		}
 	}
 	else if ((sysStatus.low_pwr_self_dest_allowed != false) && (sysStatus.self_destroy_mode == SELF_DESTROY_STATE_NONE))
@@ -1679,7 +1679,7 @@ static void App_FuseCheck (void)
     		App_ClearError(ERR_CODE_UNEXPECTED_IGNITION);
     	}
 
-    	if (stickStat != false)
+    	if (isCtrlOk != false)
     	{
 #if MINING_MODE_SUPP
 			if (sysStatus.mining_stick_ctrl_stat == CONTROL_EVT_MINING_ENABLE)
@@ -1951,6 +1951,7 @@ void App_Process ()
 			    case APP_TASK_VUSA_DETECTED_CBK:
 			    	/* Vusa detected */
 			    	App_VusaHandleCbk(true);
+					break;
 			    case APP_TASK_VUSA_RUN_TMR_CBK:
 			    	/* Run Vusa check timer */
 			    	App_VusaRunCheckTmrCbk();

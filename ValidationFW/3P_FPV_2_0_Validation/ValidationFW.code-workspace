@@ -1,0 +1,22 @@
+{
+	"folders": [
+		{
+			"name": "ValidationFW",
+			"path": "."
+		}
+	],
+	"settings": {
+		"cortex-debug.openocdPath": "C:/ST/STM32CubeCLT_1.18.0/STLink-gdb-server",
+		"cortex-debug.armToolchainPath": "C:/ST/STM32CubeCLT_1.18.0/GNU-tools-for-STM32/bin",
+		"cmake.buildDirectory": "${workspaceFolder}/build/Debug",
+		"cmake.generator": "Ninja"
+	},
+	"extensions": {
+		"recommendations": [
+			"ms-vscode.cpptools",
+			"ms-vscode.cmake-tools",
+			"marus25.cortex-debug",
+			"STMicroelectronics.stm32-vscode-extension"
+		]
+	}
+}

@@ -411,7 +411,7 @@ static void AccProc_Processing(void)
 			            if (!accProcStatus.hitDetected)
 			            {
 			                accProcStatus.hitDetected = true;
-			                //if (acc_sys_cbk != NULL)  acc_sys_cbk(SYSTEM_EVT_READY, ACC_EVT_HIT_DETECTED);
+			                if (acc_sys_cbk != NULL)  acc_sys_cbk(SYSTEM_EVT_READY, ACC_EVT_HIT_DETECTED);
 			            }
 			        }
 			    }

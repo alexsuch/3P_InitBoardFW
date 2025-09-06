@@ -44,6 +44,7 @@ extern uint8_t vusaUartRxTempByte;
 extern uint8_t uartRxTempByte;
 
 /* Exported functions prototypes ---------------------------------------------*/
+void Solution_HalInit (void);
 bool SpiReadRegister(uint8_t address, uint8_t* value, uint8_t num);
 bool SpiWriteSingleRegister(uint8_t address, uint8_t value);
 bool ReadAccIntGpio (void);

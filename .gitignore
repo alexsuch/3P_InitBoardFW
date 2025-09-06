@@ -76,3 +76,32 @@
 !**/README*
 !**/CHANGELOG*
 !**/LICENSE*
+
+# ValidationFW - ignore only build artifacts and generated files
+ValidationFW/**/build/
+ValidationFW/**/Debug/
+ValidationFW/**/Release/
+ValidationFW/**/*.elf
+ValidationFW/**/*.hex
+ValidationFW/**/*.bin
+ValidationFW/**/*.map
+ValidationFW/**/*.o
+ValidationFW/**/*.obj
+ValidationFW/**/*.d
+ValidationFW/**/.ninja_deps
+ValidationFW/**/.ninja_log
+ValidationFW/**/build.ninja
+ValidationFW/**/CMakeCache.txt
+ValidationFW/**/CMakeFiles/
+ValidationFW/**/cmake_install.cmake
+ValidationFW/**/compile_commands.json
+
+# Keep ValidationFW source code and important files
+!ValidationFW/**/*.c
+!ValidationFW/**/*.h
+!ValidationFW/**/CMakeLists.txt
+!ValidationFW/**/*.ioc
+!ValidationFW/**/*.md
+!ValidationFW/**/.vscode/launch.json
+!ValidationFW/**/.vscode/tasks.json
+!ValidationFW/**/*.code-workspace
