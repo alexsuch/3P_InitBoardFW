@@ -135,6 +135,8 @@ int main(void)
   /* Init application layer */
   App_InitRun();
 
+  
+
   /* USER CODE END 2 */
 
   /* Infinite loop */

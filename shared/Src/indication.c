@@ -61,7 +61,7 @@ static void Indication_PeriodicCbk (uint8_t timer_id)
 
 static void Indication_HandleTmrCbk (uint8_t timer_id)
 {
-	uint8_t * retry_cnt   = (timer_id == INDICATION_STATUS_TMR) ? (&indStatus.stat_retry_cnt) : (&indStatus.err_retry_cnt);
+	volatile uint8_t * retry_cnt   = (timer_id == INDICATION_STATUS_TMR) ? (&indStatus.stat_retry_cnt) : (&indStatus.err_retry_cnt);
 	ind_pattern_t pattern = (timer_id == INDICATION_STATUS_TMR) ? (indStatus.stat_pattern) : (indStatus.err_pattern);
 
 	switch (pattern)
@@ -411,7 +411,6 @@ void Indication_SetStatus (ind_status_t status_code, uint32_t user_data)
 		    	break;
 		    case IND_STATUS_DESTRUCTION_START:
 		    	Indication_SetIndication(IND_PATTERN_PERIODIC_50_50, ERROR_TYPE);
-		    	Indication_SetIndication(IND_PATTERN_PERIODIC_50_50, STATUS_TYPE);
 		    	break;
 		    case IND_STATUS_DESTRUCTION_STOP:
 		    case IND_STATUS_BOOM_STOP:

@@ -41,9 +41,9 @@ static void Mavlink_SendInitBoardHeartbeat(void);
 static void Mavlink_ProcessReceivedMessage(void);
 
 // VFR_HUD conversion functions (integer math only - no FPU)
-static uint16_t Mavlink_FloatToIntCmS(const uint8_t* float_bytes);
-static int32_t Mavlink_FloatToIntCm(const uint8_t* float_bytes);
-static int16_t Mavlink_FloatToIntCmS_Signed(const uint8_t* float_bytes);
+static uint16_t Mavlink_FloatToIntMS(const uint8_t* float_bytes);
+static int32_t Mavlink_FloatToIntM(const uint8_t* float_bytes);
+static int16_t Mavlink_FloatToIntMS_Signed(const uint8_t* float_bytes);
 
 // Timer callback functions
 static void Mavlink_InitBoardHeartbeatTimerCallback(uint8_t tmr_id);
@@ -55,7 +55,7 @@ static void Mavlink_AutopilotConnectionTimeoutCallback(uint8_t tmr_id);
  * @param system_cbk Callback function for system events
  * @param system_info Pointer to system state structure (will be read when sending InitBoard HEARTBEAT)
  */
-void Mavlink_Init(app_cbk_fn system_cbk, init_board_system_info_t* system_info) {
+void Mavlink_Init(app_ext_cbk_fn system_cbk, init_board_system_info_t* system_info) {
     // Initialize state structure
     memset(&mavlink_state, 0, sizeof(mavlink_state_t));
     
@@ -145,7 +145,7 @@ static mavlink_custom_mode_t Mavlink_EncodeCustomMode(void) {
     
     // Call callback to refresh system_info structure on the upper layer
     if (mavlink_state.system_callback) {
-        mavlink_state.system_callback(SYSTEM_EVT_INIT_DONE, 0);
+        mavlink_state.system_callback(SYSTEM_EVT_INIT_DONE, 0, NULL);
     }
     
     // Get current system state from the structure
@@ -160,7 +160,8 @@ static mavlink_custom_mode_t Mavlink_EncodeCustomMode(void) {
     custom_mode.bitfield.battery_level = state->battery_level;       // 4 bits (21-24) - auto-truncated by compiler
     custom_mode.bitfield.error_code = state->error_code;             // 4 bits (25-28) - auto-truncated by compiler
     custom_mode.bitfield.is_ignition_done = state->is_ignition_done; // 1 bit (29) - auto-truncated by compiler
-    custom_mode.bitfield.reserved = 0;                               // 2 bits (30-31)
+    custom_mode.bitfield.prearm_flag = state->prearm_flag;           // 1 bit (30) - autopilot prearm state
+    custom_mode.bitfield.speed_altitude_flag = state->speed_altitude_flag; // 1 bit (31) - autopilot speed/altitude control state
     
     return custom_mode;
 }
@@ -263,7 +264,7 @@ static void Mavlink_ProcessReceivedMessage(void) {
         mavlink_state.connected = 1;
         // Notify application about autopilot connection
         if (mavlink_state.system_callback) {
-            mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_CONNECTED);
+            mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_CONNECTED, NULL);
         }
     }
     
@@ -319,9 +320,9 @@ static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload) {
         mavlink_state.autopilot_arm_state = new_arm_state;
         if (mavlink_state.system_callback) {
             if (new_arm_state == MAVLINK_AUTOPILOT_ARM_ARMED) {
-                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_ARMED);
+                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_ARMED, NULL);
             } else if (new_arm_state == MAVLINK_AUTOPILOT_ARM_DISARMED) {
-                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_DISARMED);
+                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_DISARMED, NULL);
             }
         }
     }
@@ -331,9 +332,9 @@ static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload) {
         mavlink_state.autopilot_prearm_state = new_prearm_state;
         if (mavlink_state.system_callback) {
             if (new_prearm_state == MAVLINK_AUTOPILOT_PREARM_ENABLED) {
-                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_PREARM_ENABLED);
+                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_PREARM_ENABLED, NULL);
             } else if (new_prearm_state == MAVLINK_AUTOPILOT_PREARM_DISABLED) {
-                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_PREARM_DISABLED);
+                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_PREARM_DISABLED, NULL);
             }
         }
     }
@@ -343,7 +344,7 @@ static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload) {
     
     // Notify application about autopilot HEARTBEAT received
     if (mavlink_state.system_callback) {
-        mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_HEARTBEAT);
+        mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_HEARTBEAT, NULL);
     }
 }
 
@@ -353,10 +354,11 @@ static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload) {
  */
 static void Mavlink_ProcessVfrHud(const uint8_t* payload) {
     // Extract VFR_HUD data using integer conversion (no FPU on STM32G0)
-    mavlink_state.vfr_hud_data.airspeed_cm_s = Mavlink_FloatToIntCmS(&payload[VFR_HUD_AIRSPEED_INDEX]);
-    mavlink_state.vfr_hud_data.groundspeed_cm_s = Mavlink_FloatToIntCmS(&payload[VFR_HUD_GROUNDSPEED_INDEX]);
-    mavlink_state.vfr_hud_data.altitude_cm = Mavlink_FloatToIntCm(&payload[VFR_HUD_ALT_INDEX]);
-    mavlink_state.vfr_hud_data.climb_rate_cm_s = Mavlink_FloatToIntCmS_Signed(&payload[VFR_HUD_CLIMB_INDEX]);
+    // Data is stored directly in meters/m per second as integers
+    mavlink_state.vfr_hud_data.airspeed_ms = Mavlink_FloatToIntMS(&payload[VFR_HUD_AIRSPEED_INDEX]);
+    mavlink_state.vfr_hud_data.groundspeed_ms = Mavlink_FloatToIntMS(&payload[VFR_HUD_GROUNDSPEED_INDEX]);
+    mavlink_state.vfr_hud_data.altitude_m = Mavlink_FloatToIntM(&payload[VFR_HUD_ALT_INDEX]);
+    mavlink_state.vfr_hud_data.climb_rate_ms = Mavlink_FloatToIntMS_Signed(&payload[VFR_HUD_CLIMB_INDEX]);
     
     // Extract heading (int16_t)
     mavlink_state.vfr_hud_data.heading_deg = payload[VFR_HUD_HEADING_INDEX] | (payload[VFR_HUD_HEADING_INDEX + 1] << 8);
@@ -366,7 +368,13 @@ static void Mavlink_ProcessVfrHud(const uint8_t* payload) {
     
     // Notify application about VFR_HUD data received
     if (mavlink_state.system_callback) {
-        mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_VFR_HUD_RECEIVED);
+        mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_VFR_HUD_RECEIVED, NULL);
+        
+        // Send speed data (already in m/s - no conversion needed)
+        mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_SPEED_RECEIVED, &mavlink_state.vfr_hud_data.groundspeed_ms);
+        
+        // Send altitude data (already in m - no conversion needed)  
+        mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_ALTITUDE_RECEIVED, &mavlink_state.vfr_hud_data.altitude_m);
     }
 }
 
@@ -386,7 +394,7 @@ static void Mavlink_ProcessCommandLong(const uint8_t* payload) {
     uint8_t result = MAV_RESULT_UNSUPPORTED;
     
     // Process custom commands via MAV_CMD_USER_1
-    if (command_id == 31010) {  // MAV_CMD_USER_1
+    if (command_id == MAV_CMD_USER_1) {
         // Extract custom command type from param1 first byte
         uint8_t custom_command_type = payload[0];  // First byte of param1 - command type
         uint8_t command_data = payload[1];         // Second byte of param1 - command data
@@ -399,8 +407,10 @@ static void Mavlink_ProcessCommandLong(const uint8_t* payload) {
                 // Process IGNITION command via callback
                 // command_data can contain ignition type, delay, or other parameters
                 if (mavlink_state.system_callback) {
-                    mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_COMMAND_IGNITION);
-                    result = MAV_RESULT_ACCEPTED;
+                    uint8_t callback_result = mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_COMMAND_IGNITION, NULL);
+                    // If callback returns 0, command was denied/rejected
+                    // If callback returns non-zero, command was accepted
+                    result = (callback_result == 0u) ? MAV_RESULT_DENIED : MAV_RESULT_ACCEPTED;
                 }
                 break;
                 
@@ -474,7 +484,7 @@ void Mavlink_Process(void) {
             mavlink_state.connected = 0;
             // Notify application about autopilot disconnection via callback
             if (mavlink_state.system_callback) {
-                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_DISCONNECTED);
+                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_DISCONNECTED, NULL);
             }
         }
     }
@@ -581,11 +591,11 @@ static uint8_t Mavlink_GetSequenceNumber(void) {
 
 // ======================= VFR_HUD CONVERSION FUNCTIONS =======================
 /**
- * @brief Convert float bytes to cm/s (integer, positive values only)
+ * @brief Convert float bytes to m/s (integer, positive values only)
  * @param float_bytes Pointer to 4-byte float in little-endian format
- * @return uint16_t Value in cm/s
+ * @return uint16_t Value in m/s
  */
-static uint16_t Mavlink_FloatToIntCmS(const uint8_t* float_bytes) {
+static uint16_t Mavlink_FloatToIntMS(const uint8_t* float_bytes) {
     // Simple conversion assuming reasonable aviation speeds (0-500 m/s)
     // For accurate conversion, implement IEEE 754 float parsing
     // This is a simplified approximation for demo purposes
@@ -597,19 +607,19 @@ static uint16_t Mavlink_FloatToIntCmS(const uint8_t* float_bytes) {
     
     converter.i = float_bytes[0] | (float_bytes[1] << 8) | (float_bytes[2] << 16) | (float_bytes[3] << 24);
     
-    // Convert m/s to cm/s (multiply by 100) with bounds checking
+    // Convert float m/s to integer m/s with bounds checking
     if (converter.f < 0.0f) return 0;
-    if (converter.f > 500.0f) return 50000;  // Max 500 m/s = 50000 cm/s
+    if (converter.f > 500.0f) return 500;  // Max 500 m/s
     
-    return (uint16_t)(converter.f * 100.0f);
+    return (uint16_t)(converter.f + 0.5f);  // Round to nearest integer
 }
 
 /**
- * @brief Convert float bytes to cm (integer, signed values)
+ * @brief Convert float bytes to m (integer, signed values)
  * @param float_bytes Pointer to 4-byte float in little-endian format
- * @return int32_t Value in cm
+ * @return int32_t Value in m
  */
-static int32_t Mavlink_FloatToIntCm(const uint8_t* float_bytes) {
+static int32_t Mavlink_FloatToIntM(const uint8_t* float_bytes) {
     union {
         uint32_t i;
         float f;
@@ -617,19 +627,19 @@ static int32_t Mavlink_FloatToIntCm(const uint8_t* float_bytes) {
     
     converter.i = float_bytes[0] | (float_bytes[1] << 8) | (float_bytes[2] << 16) | (float_bytes[3] << 24);
     
-    // Convert m to cm (multiply by 100) with bounds checking
-    if (converter.f < -100000.0f) return -10000000;  // Min -100km
-    if (converter.f > 100000.0f) return 10000000;    // Max 100km
+    // Convert float m to integer m with bounds checking
+    if (converter.f < -100000.0f) return -100000;  // Min -100km
+    if (converter.f > 100000.0f) return 100000;    // Max 100km
     
-    return (int32_t)(converter.f * 100.0f);
+    return (int32_t)(converter.f + (converter.f >= 0 ? 0.5f : -0.5f));  // Round to nearest integer
 }
 
 /**
- * @brief Convert float bytes to cm/s (integer, signed values for climb rate)
+ * @brief Convert float bytes to m/s (integer, signed values for climb rate)
  * @param float_bytes Pointer to 4-byte float in little-endian format
- * @return int16_t Value in cm/s
+ * @return int16_t Value in m/s
  */
-static int16_t Mavlink_FloatToIntCmS_Signed(const uint8_t* float_bytes) {
+static int16_t Mavlink_FloatToIntMS_Signed(const uint8_t* float_bytes) {
     union {
         uint32_t i;
         float f;
@@ -637,10 +647,10 @@ static int16_t Mavlink_FloatToIntCmS_Signed(const uint8_t* float_bytes) {
     
     converter.i = float_bytes[0] | (float_bytes[1] << 8) | (float_bytes[2] << 16) | (float_bytes[3] << 24);
     
-    // Convert m/s to cm/s (multiply by 100) with bounds checking
-    if (converter.f < -100.0f) return -10000;  // Min -100 m/s = -10000 cm/s
-    if (converter.f > 100.0f) return 10000;    // Max 100 m/s = 10000 cm/s
+    // Convert float m/s to integer m/s with bounds checking
+    if (converter.f < -100.0f) return -100;  // Min -100 m/s
+    if (converter.f > 100.0f) return 100;    // Max 100 m/s
     
-    return (int16_t)(converter.f * 100.0f);
+    return (int16_t)(converter.f + (converter.f >= 0 ? 0.5f : -0.5f));  // Round to nearest integer
 }
 #endif /*  MAVLINK_V2_CTRL_SUPP */

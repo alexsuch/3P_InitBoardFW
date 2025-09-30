@@ -40,8 +40,6 @@ extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
 extern SPI_HandleTypeDef hspi1;
 extern ADC_HandleTypeDef hadc1;
-extern uint8_t vusaUartRxTempByte;
-extern uint8_t uartRxTempByte;
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Solution_HalInit (void);

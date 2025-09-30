@@ -6,7 +6,7 @@
 
 
 static timers_t timers[MAX_TIMER_NUMB];
-static bool tmr_tick_ready = false;
+static volatile bool tmr_tick_ready = false;
 static uint8_t gl_tmr_idx;
 static timers_t* gl_curr_tmr = NULL;
 
@@ -36,9 +36,7 @@ bool Timer_IsActive(uint8_t timer_id)
     }
     
     /* Enable interrupts back */
-    if (!prim) {
-        __enable_irq();
-    }
+    __set_PRIMASK(prim);
 
     return ret;
 }
@@ -73,9 +71,7 @@ bool Timer_Start(uint8_t timer_id, uint32_t timer_period_ms, tmr_cbk cbk)
     }
 
     /* Enable interrupts back */
-    if (!prim) {
-        __enable_irq();
-    }
+    __set_PRIMASK(prim);
         
     return stat;
 }
@@ -98,9 +94,7 @@ void Timer_Stop(uint8_t timer_id)
     }
 
     /* Enable interrupts back */
-    if (!prim) {
-        __enable_irq();
-    }
+    __set_PRIMASK(prim);
 }
 
 uint32_t Timer_GetTime(uint8_t timer_id)
@@ -162,9 +156,7 @@ void Util_SetFlag(uint32_t *event_map, uint8_t event_sel)
 
     *event_map |= (uint32_t)(1UL << event_sel);
 
-    if (!prim) {
-        __enable_irq();
-    }
+    __set_PRIMASK(prim);
 }
 
 bool Util_IsFlagChecked(uint32_t *event_map, uint8_t event_sel)
@@ -180,9 +172,7 @@ bool Util_IsFlagChecked(uint32_t *event_map, uint8_t event_sel)
 	if ((evt_stat & (uint32_t)(1UL << event_sel)) != 0U)
 		 ret = true;
 
-	if (!prim) {
-		__enable_irq();
-	}
+    __set_PRIMASK(prim);
 
     return ret;
 }
@@ -195,9 +185,7 @@ void Util_RemoveFlag(uint32_t *event_map, uint8_t event_sel)
 
 	*event_map &= (uint32_t)(~(1UL << event_sel));
 
-    if (!prim) {
-        __enable_irq();
-    }
+    __set_PRIMASK(prim);
 }
 
 /* [] END OF FILE */

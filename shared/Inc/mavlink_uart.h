@@ -128,7 +128,9 @@ typedef enum {
     MAVLINK_EVT_AUTOPILOT_DISARMED = 0x06,         // 6 - Autopilot changed to DISARMED state
     MAVLINK_EVT_AUTOPILOT_PREARM_ENABLED = 0x07,   // 7 - Autopilot PREARM enabled
     MAVLINK_EVT_AUTOPILOT_PREARM_DISABLED = 0x08,  // 8 - Autopilot PREARM disabled
-    MAVLINK_EVT_VFR_HUD_RECEIVED = 0x09            // 9 - VFR_HUD data received from autopilot
+    MAVLINK_EVT_VFR_HUD_RECEIVED = 0x09,           // 9 - VFR_HUD data received from autopilot
+    MAVLINK_EVT_SPEED_RECEIVED = 0x0A,             // 10 - Speed data received from autopilot
+    MAVLINK_EVT_ALTITUDE_RECEIVED = 0x0B           // 11 - Altitude data received from autopilot
 } mavlink_event_t;
 
 /**
@@ -136,14 +138,15 @@ typedef enum {
  * 
  * This structure stores VFR_HUD data using integer representations
  * to avoid floating-point operations on STM32G0 (no FPU).
+ * All values are stored directly in meters/meters per second as integers.
  */
 typedef struct {
-    uint16_t airspeed_cm_s;      // Airspeed in cm/s (converted from m/s float)
-    uint16_t groundspeed_cm_s;   // Groundspeed in cm/s (converted from m/s float)
+    uint16_t airspeed_ms;        // Airspeed in m/s (converted from float)
+    uint16_t groundspeed_ms;     // Groundspeed in m/s (converted from float)
     int16_t heading_deg;         // Heading in degrees (0-359, -1 for unknown)
     uint16_t throttle_percent;   // Throttle in percentage (0-100)
-    int32_t altitude_cm;         // Altitude in cm (converted from m float)
-    int16_t climb_rate_cm_s;     // Climb rate in cm/s (converted from m/s float)
+    int32_t altitude_m;          // Altitude in m (converted from float)
+    int16_t climb_rate_ms;       // Climb rate in m/s (converted from float)
 } mavlink_vfr_hud_data_t;
 
 /**
@@ -162,7 +165,8 @@ typedef union {
         uint32_t battery_level  : 4;   // Bits 21-24: Battery level 0-10 (encoded as 0-15)
         uint32_t error_code     : 4;   // Bits 25-28: Error code (0-15)
         uint32_t is_ignition_done : 1; // Bit 29:     Ignition done flag (0-1)
-        uint32_t reserved       : 2;   // Bits 30-31: Reserved for future use
+        uint32_t prearm_flag    : 1;   // Bit 30:    Autopilot prearm flag
+        uint32_t speed_altitude_flag : 1; // Bit 31: Autopilot speed/altitude flag
     } bitfield;
     uint32_t raw;                      // Raw 32-bit value
 } mavlink_custom_mode_t;
@@ -206,8 +210,8 @@ typedef struct {
     
     // Connection state
     uint8_t connected;
-    uint8_t initboard_heartbeat_send_flag;     // Flag to send InitBoard heartbeat
-    uint8_t autopilot_connection_timeout_flag; // Flag for autopilot connection timeout
+    volatile uint8_t initboard_heartbeat_send_flag;     // Flag to send InitBoard heartbeat
+    volatile uint8_t autopilot_connection_timeout_flag; // Flag for autopilot connection timeout
     
     // Autopilot ARM/PREARM states (received from autopilot HEARTBEAT)
     uint8_t autopilot_arm_state;               // Last received ARM state from autopilot
@@ -217,13 +221,13 @@ typedef struct {
     mavlink_vfr_hud_data_t vfr_hud_data;
     
     // RX state machine
-    mavlink_rx_state_t rx_state;
-    uint16_t rx_index;
+    volatile mavlink_rx_state_t rx_state;
+    volatile uint16_t rx_index;
     uint8_t payload_length;
     uint16_t expected_length;
     
     // Callback function and system state pointer
-    app_cbk_fn system_callback;
+    app_ext_cbk_fn system_callback;
     init_board_system_info_t* system_info;  // Pointer to system state data
 } mavlink_state_t;
 
@@ -233,7 +237,7 @@ typedef struct {
  * @param system_cbk Callback function for system events
  * @param system_state Pointer to system info structure (will be read when sending InitBoard HEARTBEAT)
  */
-void Mavlink_Init(app_cbk_fn system_cbk, init_board_system_info_t* system_info);
+void Mavlink_Init(app_ext_cbk_fn system_cbk, init_board_system_info_t* system_info);
 
 /**
  * @brief Process received UART byte (call from UART interrupt)

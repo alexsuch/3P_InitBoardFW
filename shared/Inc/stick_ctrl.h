@@ -50,17 +50,17 @@ typedef enum
 typedef struct
 {
 	stick_state_t state;
-	uint16_t countVal;
+	volatile uint16_t countVal;
 	stick_state_t new_state;
 	stick_state_t old_state;
 	bool is_stick_scan_enabled;
-	uint16_t fallingIdx;
+	volatile uint16_t fallingIdx;
 	uint16_t processedIdx;
 	uint16_t signalInvalidCount;
 	uint16_t periodInvalidCount;
-	uint16_t lastRisingVal;
-	uint16_t periodValue;
-	uint16_t signalValue;
+	volatile uint16_t lastRisingVal;
+	volatile uint16_t periodValue;
+	volatile uint16_t signalValue;
 	uint8_t pos1Counts;
 	uint8_t pos2Counts;
 	uint8_t pos3Counts;

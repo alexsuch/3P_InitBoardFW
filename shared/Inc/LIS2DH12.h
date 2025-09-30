@@ -24,12 +24,8 @@ extern "C" {
 /** Device Identification (Who am I) **/
 #define LIS2DH12_ID                    0x33U
 #define LIS2DH12_CTRL_REG1             0x20U
-#if ACC_12_BIT
 #define LIS2DH12_CTRL_REG1_VAL         0x97U //Normal mode  + 1.344 kHz
 #define LIS2DH12_CTRL_REG1_MOVE_VAL    0x27U //Normal mode  + 10Hz
-#else
-#define LIS2DH12_CTRL_REG1_VAL         0x8FU //Enable Low power + 1620Hz  //0x8FU
-#endif
 #define LIS2DH12_CTRL_REG4             0x23U
 //#define LIS2DH12_CTRL_REG4_VAL         0x30U //16G 10bit
 #define LIS2DH12_CTRL_REG4_VAL         0xB8U //16G 12bit
@@ -48,6 +44,7 @@ typedef enum
 	LIS2DH12_STATE_CHECK_ID,
 	LIS2DH12_STATE_SET_HIT_PARAMS,
 	LIS2DH12_STATE_SET_MOVE_PARAMS,
+	LIS2DH12_STATE_SET_SHAKE_PARAMS,
 	LIS2DH12_STATE_GET_DATA,
 	LIS2DH12_STATE_ERROR
 
@@ -56,7 +53,7 @@ typedef enum
 typedef struct
 {
 	lis2dh12_state_t state;
-	bool wait_flag;
+	volatile bool wait_flag;
 	bool read_flag;
 	uint8_t retry_cnt;
 	uint8_t rd_buff[LIS2DH12_MAX_BUF_SIZE];
@@ -72,6 +69,9 @@ void Lis2dh12_ResetData(void);
 void Lis2dh12_Deinit (void);
 void Lis2dh12_GotoMoveMode (void);
 void Lis2dh12_GotoHitMode (void);
+#if ACC_SHAKE_DETECTION_ENABLE
+void Lis2dh12_GotoShakeMode (void);
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
 #ifdef __cplusplus
 }
 #endif

@@ -25,7 +25,7 @@ extern "C" {
 
 
 
-#define RELEASE_CONFIGURATION_ENABLE                  (0u)
+#define RELEASE_CONFIGURATION_ENABLE                  (1u)
 
 
 #if (RELEASE_CONFIGURATION_ENABLE == 0u) //TEST CONFIGURATION
@@ -38,7 +38,7 @@ extern "C" {
 
 /*-------------------------- Main Configuration parameters -----------------------*/
 /* Safe Timer Timeout Value is seconds */
-#define SAFE_TIMEOUT_SEC_DEFAULT                      (5u) // RELEASE VALUE - 120u
+#define SAFE_TIMEOUT_SEC_DEFAULT                      (7u) // RELEASE VALUE - 120u
 
 /* Ignition delay in milliseconds */
 #define IGNITION_DELAY_MILISEC_DEFAULT                (0u) // RELEASE VALUE - 0u
@@ -54,7 +54,7 @@ extern "C" {
 
 /*------------------------ Mining Mode Configuration -----------------------*/
 
-#define MINING_MODE_SUPP                              (1u)
+#define MINING_MODE_SUPP                              (0u)
 
 /* Enable/disable mining mode  */
 #define MINING_MODE_ENABLE_DEFAULT                    MINING_MODE_NONE //MINING_MODE_MANUAL//MINING_MODE_AUTO //RELEASE VALUE - MINING_MODE_NONE
@@ -68,11 +68,11 @@ extern "C" {
 
 #define ACC_NO_DIVIDE_ENABLE                          (1u)
 
-#define NET_DETECTION_ENABLE                          (1u)
+#define NET_DETECTION_ENABLE                          (0u)
 
 #define ACC_NET_BUFF_SIZE                             (100u) //RELEASE VALUE - WINDOW SIZE = 100u
 
-#define ACC_HIT_NET_DIFF_THRESHOLD_MG                 (5000u)  // units in mili G //RELEASE VALUE - 4G - 5000u
+#define ACC_HIT_NET_DIFF_THRESHOLD_MG                 (4500u)  // units in mili G //RELEASE VALUE - 4G - 4500u
 
 #define ACC_NET_DECIMATION_RATE                       (5u)
 
@@ -105,7 +105,7 @@ extern "C" {
 #define TEMP_OFFSET                                   (8u)
 
 /* Disable Buzzer */
-#define BUZZER_DISABLE                                (1u)
+#define BUZZER_DISABLE                                (0u)
 
 
 /*----------------------------- Mavlink parameters -----------------------*/
@@ -154,7 +154,7 @@ extern "C" {
 #define ACC_ENABLE_DEFAULT                            (1u) // RELEASE VALUE - 1u
 
 /*------------------------ Mining Mode Configuration -----------------------*/
-#define MINING_MODE_SUPP                              (1u)  // Production Enable
+#define MINING_MODE_SUPP                              (1u)  // Production Enable - 1u
 
 /* Enable/disable mining mode  */
 #define MINING_MODE_ENABLE_DEFAULT                    MINING_MODE_NONE //MINING_MODE_MANUAL//MINING_MODE_AUTO //RELEASE VALUE - MINING_MODE_NONE
@@ -172,25 +172,27 @@ extern "C" {
 #define SELF_DESTROY_INDICATE_LAST_SECONDS            (15u) //RELEASE VALUE - 15
 
 /* Capacitor charging timeout in milliseconds */
-#define CHARGING_TMR_TIMEOUT_MS  		     	      (9000u) //RELEASE VALUE - 10000u
+#define CHARGING_TMR_TIMEOUT_MS  		     	      (9000u) //RELEASE VALUE - 9000u
 
 /* Ignition time in milliseconds */
 #define IGNITION_OFF_TMR_PERIOD_MS  		 		  (1000u) //RELEASE VALUE - 1000u
 
 /* Disarm -> Ignition timeout */
-#define DISARM_IGNITION_BLOCK_TIMEOUT_MS              (3000u) // RELEASE VALUE - 3000u
+#define DISARM_IGNITION_BLOCK_TIMEOUT_MS              (4000u) // RELEASE VALUE - 4000u
 
-#define BUZZER_DISABLE                                (1u)
+#define BUZZER_DISABLE                                (0u)
 
-/*-------------------------- BATTERY THRESHOLDS -----------------------------------*/
-#define BATTERY_VOLTAGE_100_PERCENT_THRESHOLD_MILIVOLTS      (4200u)
-#define BATTERY_VOLTAGE_0_PERCENT_THRESHOLD_MILIVOLTS        (900u)
-#define BATTERY_THRESHOLD_ADJUSTMENT_MV                      (100u)
+/*------------------------ Battery Configuration parameters -----------------------*/
 
-/* Battery low threshold in milivolts */
+// Battery level calculation thresholds for AAA battery
+#define BATTERY_VOLTAGE_100_PERCENT_THRESHOLD_MILIVOLTS      (1450u)  // 100% - 1.45V
+#define BATTERY_VOLTAGE_0_PERCENT_THRESHOLD_MILIVOLTS        (900u)   // 0% - 0.9V
+
 #define BATTERY_VOLTAGE_VERY_LOW_SD_LOW_THRESHOLD_MILIVOLTS  (1000u) //RELEASE VALUE - 1000 mV
 #define BATTERY_VOLTAGE_LOW_SD_LOW_THRESHOLD_MILIVOLTS       (1200u) //RELEASE VALUE - 1200 mV
 #define SELF_VOLTAGE_LOW_SD_LOW_THRESHOLD_MILIVOLTS          (2500u) //RELEASE VALUE - 2400 mV
+
+#define BATTERY_THRESHOLD_ADJUSTMENT_MV                      (100u) //RELEASE VALUE - 100 mV
 
 /* Internal temperature sensor offset */
 #define TEMP_OFFSET                                          (8u)

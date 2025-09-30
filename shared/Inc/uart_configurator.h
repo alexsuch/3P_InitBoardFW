@@ -10,6 +10,8 @@
 
 #include "init_brd.h"
 
+#define CONFIG_DATA_SIZE_BYTES                 (31u)
+
 #define START_BYTE                             (0xFFu)
 #define END_BYTE                               (0xFFu)
 #define STUFF_BYTE                             (0x7Du)

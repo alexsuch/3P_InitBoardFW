@@ -113,8 +113,8 @@ void LedStatusSet (bool state)
 
 // PWM Control Variables
 app_cbk_fn fc_pwm_cbk = NULL;
-bool pwm1_rise_edge = false;
-bool pwm2_rise_edge = false;
+volatile bool pwm1_rise_edge = false;
+volatile bool pwm2_rise_edge = false;
 
 uint32_t ReadStickCounter10Us (void)
 {
@@ -263,7 +263,7 @@ void PumpDisable(void)
 // ---------------------- UART COMMUNICATION -------------------------------
 
 // UART Communication Variables
-uint8_t uartRxTempByte;
+volatile uint8_t uartRxTempByte;
 uint8_t uartRxTempBuff[UART_RX_TEMP_BUFFER_SIZE];
 
 bool UartSendData(uint8_t* wrBuff, uint8_t len)
@@ -277,13 +277,13 @@ bool UartGetOneByteRx(void)
 	__HAL_UART_CLEAR_OREFLAG(&MAIN_UART_HANDLE);
 	__HAL_UART_CLEAR_FLAG(&MAIN_UART_HANDLE, UART_FLAG_RXNE);
 
-	return (HAL_UART_Receive_IT(&MAIN_UART_HANDLE, &uartRxTempByte, 1) == HAL_OK) ? true : false;
+	return (HAL_UART_Receive_IT(&MAIN_UART_HANDLE, (uint8_t*)&uartRxTempByte, 1) == HAL_OK) ? true : false;
 }
 
 // ---------------------- VUSA BLOCK ---------------------------------
 
 // VUSA Communication Variables
-uint8_t vusaUartRxTempByte;
+volatile uint8_t vusaUartRxTempByte;
 app_cbk_fn vusa_cbk = NULL;
 
 #define SYNC_BYTE 0xA5
@@ -299,7 +299,7 @@ bool VusaUartGetOneByteRx(void)
 	__HAL_UART_CLEAR_OREFLAG(&VUSA_UART_HANDLE);
 	__HAL_UART_CLEAR_FLAG(&VUSA_UART_HANDLE, UART_FLAG_RXNE);
 
-	return (HAL_UART_Receive_IT(&VUSA_UART_HANDLE, &vusaUartRxTempByte, 1) == HAL_OK) ? true : false;
+	return (HAL_UART_Receive_IT(&VUSA_UART_HANDLE, (uint8_t*)&vusaUartRxTempByte, 1) == HAL_OK) ? true : false;
 }
 
 void VusaStart(app_cbk_fn cbk)
@@ -470,7 +470,7 @@ bool SpiReadRegister(uint8_t address, uint8_t* value, uint8_t num)
 // ADC Variables
 app_cbk_fn adc_cbk = NULL;
 uint8_t adc_idx = 0u;
-uint16_t adc_buff[ADC_CHANNELS_COUNT];
+volatile uint16_t adc_buff[ADC_CHANNELS_COUNT];
 uint16_t cpuVoltagemV, actualMillivolts;
 
 static uint16_t adcResultToMillivolts(uint16_t adcValue)

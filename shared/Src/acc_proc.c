@@ -4,6 +4,9 @@
 #include <string.h>
 #include "init_brd.h"
 #include "acc_proc.h"
+#if	LIS2DH12_ACC_ENABLE
+#include "LIS2DH12.h"
+#endif /* LIS2DH12_ACC_ENABLE */
 #include "prj_config.h"
 
 static accProcStatus_t accProcStatus;
@@ -19,7 +22,13 @@ const uint64_t accSqrtThreshold = ACC_SQRT_TRESHOLD * ACC_BUFF_SIZE * ACC_BUFF_S
 const uint32_t accSqrtThreshold = ACC_SQRT_TRESHOLD;
 #endif
 
-
+#if ACC_SHAKE_DETECTION_ENABLE
+#if ACC_NO_DIVIDE_ENABLE
+const uint64_t accShakeSqrtThreshold = ACC_SHAKE_SQRT_TRESHOLD * ACC_BUFF_SIZE * ACC_BUFF_SIZE;
+#else
+const uint32_t accShakeSqrtThreshold = ACC_SHAKE_SQRT_TRESHOLD;
+#endif
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
 
 #if ACC_NO_DIVIDE_ENABLE
 static uint64_t tmp32;
@@ -30,15 +39,8 @@ static int16_t y_tmp;
 static int16_t z_tmp;
 #endif
 
-static int16_t x_tmp;
-static int16_t y_tmp;
-static int16_t z_tmp;
-
-static uint8_t prev_idx;
-
 #if NET_DETECTION_ENABLE
 const int32_t accNetThreshold = ACC_NET_TRESHOLD;
-static int32_t accNetThreshold1 = ACC_NET_TRESHOLD;
 static uint8_t oldest_idx;
 static int32_t x_new, y_new, z_new, x_old, y_old, z_old, norm_new, norm_old, delta;
 #endif
@@ -148,7 +150,7 @@ int64_t acosFastFixed(int64_t x) {
 }
 
 uint8_t calcVectorSpeed(int16_t x, int16_t y, int16_t z, uint32_t currentTimeMillis) {
-    if (firstMeasure == 1) {
+    if ((firstMeasure == 1) || (currentTimeMillis == 0)) {
         xl = x;
         yl = y;
         zl = z;
@@ -284,12 +286,22 @@ static void App_AccCbk (system_evt_t evt, uint32_t usr_data)
 			/* Start movement detect processing */
 			accProcStatus.move_detection_enabled = true;
 		}
+#if ACC_SHAKE_DETECTION_ENABLE
+		else if (usr_data == ACC_EVT_SHAKE_INIT_OK)
+		{
+			/* Start shake detect processing */
+			accProcStatus.shake_detection_enabled = true;
+		}
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
 		else if (usr_data == ACC_EVT_DATA_READY)
 		{
 			/* Data is ready for processing */
 			if (
 					(accProcStatus.hit_detection_enabled != false) ||
                     (accProcStatus.move_detection_enabled != false)
+#if ACC_SHAKE_DETECTION_ENABLE
+					|| (accProcStatus.shake_detection_enabled != false)
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
 				)
 			{
 				/* Process the data */
@@ -309,7 +321,11 @@ static void AccProc_Processing(void)
 	{
 		if (accProcStatus.init_skip_counts == 0)
 		{
-			if (accProcStatus.hit_detection_enabled != false)
+			if ((accProcStatus.hit_detection_enabled != false)
+#if ACC_SHAKE_DETECTION_ENABLE
+				|| (accProcStatus.shake_detection_enabled != false)
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
+				)
 			{
 			    // 1. Вилучаємо старе значення з суми
 			    accProcStatus.x_sum -= accProcStatus.x_buff[accProcStatus.idx];
@@ -347,23 +363,39 @@ static void AccProc_Processing(void)
 			        tmp32 = x_tmp * x_tmp + y_tmp * y_tmp + z_tmp * z_tmp;
 #endif
 
-			        // 6. Порівняння з порогом
-			        if (tmp32 > accSqrtThreshold)
-			        {
-			            if (!accProcStatus.hitDetected)
-			            {
-			                accProcStatus.hitDetected = true;
-			                 if (acc_sys_cbk != NULL)  acc_sys_cbk(SYSTEM_EVT_READY, ACC_EVT_HIT_DETECTED);
-			            }
-			        }
-			        else
-			        {
-			            accProcStatus.hitDetected = false;
-			        }
-			    }
+		        // 6. Порівняння з порогом для детекції удару
+		        if (accProcStatus.hit_detection_enabled)
+		        {
+		            if (tmp32 > accSqrtThreshold)
+		            {
+		                if (!accProcStatus.hitDetected)
+		                {
+		                    accProcStatus.hitDetected = true;
+		                     if (acc_sys_cbk != NULL)  acc_sys_cbk(SYSTEM_EVT_READY, ACC_EVT_HIT_DETECTED);
+		                }
+		            }
+		            else
+		            {
+		                accProcStatus.hitDetected = false;
+		            }
+		        }
 
-			    // 7. Перехід до наступного індексу в циклічному буфері
-			    accProcStatus.idx = (accProcStatus.idx + 1) % ACC_BUFF_SIZE;
+#if ACC_SHAKE_DETECTION_ENABLE
+		        // Shake detection for startup mode
+		        if (accProcStatus.shake_detection_enabled)
+		        {
+		            if (tmp32 > accShakeSqrtThreshold)
+		            {
+		                /* Disable shake detection after first detection */
+		                accProcStatus.shake_detection_enabled = false;
+		                if (acc_sys_cbk != NULL) acc_sys_cbk(SYSTEM_EVT_READY, ACC_EVT_STARTUP_SHAKE_DETECTED);
+		            }
+		        }
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
+		    }
+
+			// 7. Перехід до наступного індексу в циклічному буфері
+			accProcStatus.idx = (accProcStatus.idx + 1) % ACC_BUFF_SIZE;
 
 #if NET_DETECTION_ENABLE
 
@@ -485,6 +517,19 @@ void AccProc_HitDetectionStart (void)
 {
 	if ((accProcStatus.hit_detection_enabled == false) && (acc_sys_cbk != NULL))
 	{
+#if ACC_SHAKE_DETECTION_ENABLE
+		/* If shake detection is already running, just enable hit detection */
+		if (accProcStatus.shake_detection_enabled != false)
+		{
+			accProcStatus.hit_detection_enabled = true;
+			if (acc_sys_cbk != NULL)
+			{
+				acc_sys_cbk(SYSTEM_EVT_READY, ACC_EVT_HIT_INIT_OK);
+			}
+			return;
+		}
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
+
 		/* Reset all data and SM */
 		AccProc_Stop();
 #if	LIS2DH12_ACC_ENABLE
@@ -510,6 +555,32 @@ void AccProc_MoveDetectionStart (uint32_t move_threshold)
 	}
 }
 #endif /* MINING_MODE_SUPP */
+
+#if ACC_SHAKE_DETECTION_ENABLE
+void AccProc_ShakeDetectionStart (void)
+{
+	if ((accProcStatus.shake_detection_enabled == false) && (acc_sys_cbk != NULL))
+	{
+		/* If hit detection is already running, just enable shake detection */
+		if (accProcStatus.hit_detection_enabled != false)
+		{
+			accProcStatus.shake_detection_enabled = true;
+			if (acc_sys_cbk != NULL)
+			{
+				acc_sys_cbk(SYSTEM_EVT_READY, ACC_EVT_SHAKE_INIT_OK);
+			}
+			return;
+		}
+
+		/* Reset all data and SM */
+		AccProc_Stop();
+#if	LIS2DH12_ACC_ENABLE
+		/* Set shake mode parameters - same as hit detection */
+		Lis2dh12_GotoShakeMode();
+#endif
+	}
+}
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
 
 void AccProc_Task ()
 {

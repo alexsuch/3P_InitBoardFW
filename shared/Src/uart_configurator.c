@@ -131,7 +131,7 @@ static uint8_t UartConfig_DecodePkt(uint8_t *encoded_packet, uint8_t *decoded_pa
     return 0;
 }
 
-static uint8_t data_len;
+static volatile uint8_t data_len;  // Змінюється в interrupt context (UartConfig_ByteReceived)
 
 void UartConfig_ByteReceived(uint8_t byte)
 {

@@ -125,6 +125,7 @@ void PWM_IN_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
 
+#if (TESTER_FW == 0u)
   /* Deinit UART */
   HAL_UART_DeInit(&MAIN_UART_HANDLE);
   /* Wait for some time */
@@ -135,6 +136,7 @@ void PWM_IN_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(PWM2_INPUT_PORT, &GPIO_InitStruct);
+#endif
 
   /*Configure GPIO pin : PWM1_IN_Pin */
   GPIO_InitStruct.Pin = PWM1_INPUT_PIN;

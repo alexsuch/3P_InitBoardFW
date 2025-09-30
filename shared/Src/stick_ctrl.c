@@ -233,9 +233,7 @@ void Stick_ProcessEdgeCbk (system_evt_t idx, uint32_t usr_data)
 	}
 
 	// enable interrupts
-	if (!prim) {
-		__enable_irq();
-	}
+	__set_PRIMASK(prim);
 
 }
 

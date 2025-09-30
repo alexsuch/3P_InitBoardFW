@@ -9,7 +9,7 @@
 
 static lis2dh12_Status_t lis2dh12_Stat;
 static app_cbk_fn  lis2dh12_sys_cbk = NULL;
-static uint16_t timeoutCnt = 0u;
+static volatile uint16_t timeoutCnt = 0u;
 
 static void Lis2dh12_ErrHandler (void);
 
@@ -44,6 +44,14 @@ void Lis2dh12_GotoMoveMode (void)
 	/* Set move detection parameters */
 	lis2dh12_Stat.state = LIS2DH12_STATE_SET_MOVE_PARAMS;
 }
+
+#if ACC_SHAKE_DETECTION_ENABLE
+void Lis2dh12_GotoShakeMode (void)
+{
+	/* Set shake detection parameters - same as hit detection */
+	lis2dh12_Stat.state = LIS2DH12_STATE_SET_SHAKE_PARAMS;
+}
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
 
 void Lis2dh12_Deinit (void)
 {
@@ -234,13 +242,23 @@ static void Lis2dh12_SetHitParams (void)
 	}
 	else
 	{
-		lis2dh12_Stat.retry_cnt = 0u;
-		lis2dh12_Stat.state = LIS2DH12_STATE_GET_DATA;
-		/* Init is done */
+		/* Init is done - send appropriate callback based on current state */
 		if (lis2dh12_sys_cbk != NULL)
 		{
-			lis2dh12_sys_cbk(SYSTEM_EVT_READY, ACC_EVT_HIT_INIT_OK);
+#if ACC_SHAKE_DETECTION_ENABLE
+			if (lis2dh12_Stat.state == LIS2DH12_STATE_SET_SHAKE_PARAMS)
+			{
+				lis2dh12_sys_cbk(SYSTEM_EVT_READY, ACC_EVT_SHAKE_INIT_OK);
+			}
+			else
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
+			{
+				lis2dh12_sys_cbk(SYSTEM_EVT_READY, ACC_EVT_HIT_INIT_OK);
+			}
 		}
+
+		lis2dh12_Stat.retry_cnt = 0u;
+		lis2dh12_Stat.state = LIS2DH12_STATE_GET_DATA;
 	}
 }
 
@@ -362,43 +380,13 @@ static void Lis2dh12_GetDataCbk (system_evt_t evt, uint32_t usr_data)
 	int16_t tmp;
 	if (evt == SYSTEM_EVT_READY)
 	{
-		//TestLedToggle();
 		/* Convert data: signed 12bit into signed 8bit */
-#if 0
-		lis2dh12_Stat.x_axis = lis2dh12_Stat.rd_buff[2];
-		lis2dh12_Stat.y_axis = lis2dh12_Stat.rd_buff[4];
-		lis2dh12_Stat.z_axis = lis2dh12_Stat.rd_buff[6];
-#endif
-		//adxl345Status.x_axis = adxl345Status.rd_buff[1] >> 2 | adxl345Status.rd_buff[2] << 6;
-		//adxl345Status.y_axis = adxl345Status.rd_buff[3] >> 2 | adxl345Status.rd_buff[4] << 6;
-		//adxl345Status.z_axis = adxl345Status.rd_buff[5] >> 2 | adxl345Status.rd_buff[6] << 6;
-
-		//lis2dh12_Stat.x_axis = convert_lis2dh12_data(lis2dh12_Stat.rd_buff[1], lis2dh12_Stat.rd_buff[2]);
-		//lis2dh12_Stat.y_axis = convert_lis2dh12_data(lis2dh12_Stat.rd_buff[3], lis2dh12_Stat.rd_buff[4]);;
-		//lis2dh12_Stat.z_axis = convert_lis2dh12_data(lis2dh12_Stat.rd_buff[5], lis2dh12_Stat.rd_buff[6]);
-
-
-		//lis2dh12_Stat.x_axis = (*(int16_t*) &lis2dh12_Stat.rd_buff[1]) >> 6;//lis2dh12_Stat.rd_buff[1] >> 2 | lis2dh12_Stat.rd_buff[2] << 6;
-		//lis2dh12_Stat.y_axis = (*(int16_t*) &lis2dh12_Stat.rd_buff[3]) >> 6;//lis2dh12_Stat.rd_buff[3] >> 2 | lis2dh12_Stat.rd_buff[4] << 6;
-		//lis2dh12_Stat.z_axis = (*(int16_t*) &lis2dh12_Stat.rd_buff[5]) >> 6;//lis2dh12_Stat.rd_buff[5] >> 2 | lis2dh12_Stat.rd_buff[6] << 6;
-
-		//float x,y,z;
-		//x = convert_lis2dh12_acceleration(lis2dh12_Stat.rd_buff[2], lis2dh12_Stat.rd_buff[1]);
-		//y = convert_lis2dh12_acceleration(lis2dh12_Stat.rd_buff[4], lis2dh12_Stat.rd_buff[3]);
-		//z = convert_lis2dh12_acceleration(lis2dh12_Stat.rd_buff[6], lis2dh12_Stat.rd_buff[5]);
-
 		tmp = ((int16_t)lis2dh12_Stat.rd_buff[2] << 8) + lis2dh12_Stat.rd_buff[1];
 		lis2dh12_Stat.x_axis = tmp >> 4;
 		tmp = ((int16_t)lis2dh12_Stat.rd_buff[4] << 8) + lis2dh12_Stat.rd_buff[3];
 		lis2dh12_Stat.y_axis = tmp >> 4;
 		tmp = ((int16_t)lis2dh12_Stat.rd_buff[6] << 8) + lis2dh12_Stat.rd_buff[5];
 		lis2dh12_Stat.z_axis = tmp >> 4;
-
-#if 0
-		x = lis2dh12_Stat.x_axis * 12;
-		y = lis2dh12_Stat.y_axis * 12;
-		z = lis2dh12_Stat.z_axis * 12;
-#endif
 
 		/* Report data is ready */
 		if (lis2dh12_sys_cbk != NULL)
@@ -444,6 +432,9 @@ void Lis2dh12_Task (void)
 		    case LIS2DH12_STATE_CHECK_ID:
 		    	Lis2dh12_CheckID();
 		    	break;
+#if ACC_SHAKE_DETECTION_ENABLE
+		    case LIS2DH12_STATE_SET_SHAKE_PARAMS:
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
 		    case LIS2DH12_STATE_SET_HIT_PARAMS:
 		    	Lis2dh12_SetHitParams();
 		    	break;

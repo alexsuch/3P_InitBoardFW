@@ -421,8 +421,6 @@ void App_InitRun(void)
 
 	// Generate 32-bit unique ID
 	uid = App_CreateUniqueId (HAL_GetUIDw0(), HAL_GetUIDw1(), HAL_GetUIDw2());
-
-	SET_STATUS_LED(true);
 }
 
 /**************************************** Config test cases************************************/
@@ -522,7 +520,7 @@ void App_TestProcess (void)
     		sysStatus.pending_test_cmd = sysStatus.run_test_cmd;
     		break;
     	case TEST_CMD_BAT_LVL:
-    		UartConfig_SendTwoByteData (sysStatus.run_test_cmd, TEST_CMD_STATUS_RESULT, (sysStatus.vbat_voltage_mv >> 8), (sysStatus.vbat_voltage_mv & 0xFF));
+    		UartConfig_SendTwoByteData (sysStatus.run_test_cmd, TEST_CMD_STATUS_RESULT, (sysStatus.self_voltage_mv >> 8), (sysStatus.self_voltage_mv & 0xFF));
     		break;
     	case TEST_CMD_DETONATOR_SWITCH:
     		App_IgnitionSwitchOn();

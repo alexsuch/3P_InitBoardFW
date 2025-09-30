@@ -7,10 +7,14 @@
 #include "init_brd.h"
 #include "acc_proc.h"
 #include "indication.h"
-#include "stick_ctrl.h"
 #include "app_config.h"
 #include "uart_configurator.h"
+#if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 #include "mavlink_uart.h"
+#endif /* (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP) */
+#if (CONTROL_MODE == PWM_CTRL_SUPP)
+#include "stick_ctrl.h"
+#endif /* (CONTROL_MODE == PWM_CTRL_SUPP) */
 
 static system_status_t sysStatus;
 static uint8_t idx = 0u;
@@ -22,24 +26,32 @@ static void App_SetError(err_type_t err_type, uint32_t usr_data);
 static void App_SafeTmrPause (void);
 static void App_SafeTmrRelease (void);
 static void App_ArmRun (void);
+#if VBAT_MEASURE_FEATURE
 static void App_AdcGetDataCbk (system_evt_t evt, uint32_t usr_data);
 static void App_AdcStop (void);
-#if 0
-static void App_PumpTmrCbk (uint8_t timer_id);
-#endif
+#endif /* VBAT_MEASURE_FEATURE */
 static void App_IgnitionRun(void);
 static void App_DisarmRun (bool ind_enable);
 static void App_FuseCheckRun (void);
 static void App_SafeTmrTick (uint8_t timer_id);
-static void App_SelfDestroyTmrTick (uint8_t timer_id);
-static void App_SelfDestroyTmrTickCbk (void);
 static void App_ChargingRun (system_state_t charge_state, bool reset_var);
 static void App_IgnitionSwitchOff (void);
 static void App_IgnitionRun(void);
 static void App_ArmConfigurationSet (void);
+#if !SELF_DESTROY_DISABLE
+static void App_SelfDestroyTmrTick (uint8_t timer_id);
+static void App_SelfDestroyTmrTickCbk (void);
+#endif /* !SELF_DESTROY_DISABLE */
 #if MINING_MODE_SUPP
 static void App_MiningModeEnableCbk (uint8_t timer_id);
 #endif /* MINING_MODE_SUPP */
+#if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
+static bool App_MavlinkIsAble2Arm(void);
+static bool App_MavlinkIgnitionTryRun(void);
+static bool App_MavlinkTry2Arm(void);
+static void App_MavlinkFlightParamsTimerCbk(uint8_t timer_id);
+static void App_MavlinkFlightParamsCheck(void);
+#endif /* (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP) */
 
 /***************************************** SET/GET CONFIGURATION HANDLERS HANDLERS ******************************/
 void App_RefreshConfig (void)
@@ -193,6 +205,7 @@ static void App_ClearError(uint32_t err_code)
 	Indication_ClearError(err_code);
 }
 
+#if !SELF_DESTROY_DISABLE
 /***************************************** SELF DESTRUCTION TIMER ********************************************/
 static void App_SelfDestructionCbk (uint8_t timer_id)
 {
@@ -345,6 +358,7 @@ static void App_SelfDestroyTimerStop (void)
 	/* Reset self destroy timer counter */
 	sysStatus.self_destroy_tmr_tick = sysStatus.config->selfDestroyTimeoutMin * SECONDS_IN_MINUTE;
 }
+#endif /* !SELF_DESTROY_DISABLE */
 
 #if MINING_MODE_SUPP
 static void App_MiningModeEnableCbk (uint8_t timer_id)
@@ -464,8 +478,10 @@ static void App_VusaCbk (system_evt_t evt, uint32_t usr_data)
 
 static void App_DisarmHandler (bool is_stick)
 {
+#if !SELF_DESTROY_DISABLE
 	/* Stop self destruction timer in case of the stick control */
 	App_SelfDestroyTimerStop();
+#endif /* !SELF_DESTROY_DISABLE */
 
 	/* Disable any detection */
 	AccProc_Stop();
@@ -641,6 +657,7 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 			/* Signal was lost */
 			if (sysStatus.stick_ctrl_mode == STICK_MODE_STICK_PWM)
 			{
+#if !SELF_DESTROY_DISABLE
 				if (
 						(sysStatus.state == SYSTEM_STATE_DISARM) 
 #if MINING_MODE_SUPP
@@ -651,7 +668,7 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 					/* Start self destroy timer if stick connection is lost when system was in disarm state */
 					App_SelfDestroyTimerStart(SELF_DESTROY_MODE_CTRL_LOST);
 				}
-
+#endif /* !SELF_DESTROY_DISABLE */
 				/* Don't safe new state if control was lost */
 				sysStatus.is_ctrl_lost = true;
 				sysStatus.is_ignition_bloked = false;
@@ -732,12 +749,13 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 					{
 						/* Start capacitor charging when ARM command comes */
 						App_ChargingRun(SYSTEM_STATE_CHARGING, true);
-
+#if !SELF_DESTROY_DISABLE
 						if (Timer_IsActive(SELF_DESTRUCTION_TMR) == false)
 						{
 							/* Start self destroy timer if ARMed */
 							App_SelfDestroyTimerStart(SELF_DESTROY_MODE_NORMAL);
 						}
+#endif /* !SELF_DESTROY_DISABLE */
 					}
 					else if (
 								(sysStatus.stick_ctrl_stat == CONTROL_EVT_IGNITION) ||
@@ -756,8 +774,10 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 			}
 			else if (
 					    (sysStatus.state == SYSTEM_STATE_ARMED) ||
-						(sysStatus.state == SYSTEM_STATE_ARMED_PUMP) ||
-						(sysStatus.self_destroy_mode == SELF_DESTROY_STATE_STARTED)
+						(sysStatus.state == SYSTEM_STATE_ARMED_PUMP)
+#if !SELF_DESTROY_DISABLE
+						|| (sysStatus.self_destroy_mode == SELF_DESTROY_STATE_STARTED)
+#endif /* !SELF_DESTROY_DISABLE */
 					)
 			{
 				/* Process stick control when system is ready */
@@ -803,15 +823,61 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 		}
 	}
 }
-#endif /
+#endif /* (CONTROL_MODE == PWM_CTRL_SUPP) */
 
 /***************************************** MAVLINK CONTROL ********************************************************/
-static bool App_IgnitionTryRun (void)
+#if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
+static bool App_MavlinkIsAble2Arm(void)
+{
+	return (sysStatus.sys_info.prearm_flag != 0) && 
+	       (sysStatus.arm_enabled != false) && 
+#if ACC_SHAKE_DETECTION_ENABLE
+	       (sysStatus.sys_info.shake_detected != 0) &&
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
+	       (sysStatus.sys_info.speed_altitude_flag != 0);
+}
+
+static void App_MavlinkFlightParamsTimerCbk(uint8_t timer_id)
+{
+	(void)timer_id;
+	sysStatus.sys_info.speed_altitude_flag = 1;
+
+	/* Try to arm and start charging */
+	App_MavlinkTry2Arm();
+}
+
+static void App_MavlinkFlightParamsCheck(void)
+{
+	// Skip check if speed_altitude_flag is already set (stable flight detected)
+	if (sysStatus.sys_info.speed_altitude_flag == 1) {
+		return;
+	}
+	
+	// Check if both speed and altitude are above minimum thresholds
+	if (
+			(sysStatus.current_speed_ms >= FLIGHT_SPEED_MINIMUM_THRESHOLD_M_S) && 
+	    	(sysStatus.current_altitude_m >= FLIGHT_ALTITUDE_MINIMUM_THRESHOLD_M)
+		) 
+	{
+		// Both parameters are stable - start stability timer if not already running
+		if (!Timer_IsActive(FLIGHT_PARAMS_UPDATE_TMR))
+		{
+			Timer_Start(FLIGHT_PARAMS_UPDATE_TMR, (FLIGHT_STABLE_PARAMETERS_TIMEOUT_SEC * ONE_SECOND_TICK_TMR_PERIOD_MS), App_MavlinkFlightParamsTimerCbk);
+		}
+	} 
+	else 
+	{
+		// At least one parameter is below threshold - stop stability timer
+		Timer_Stop(FLIGHT_PARAMS_UPDATE_TMR);
+	}
+}
+
+static bool App_MavlinkIgnitionTryRun (void)
 {
 	bool ret = false;
 
 	/* If prearm and arm are enabled - run ignition */
-	if (sysStatus.prearm_enabled && sysStatus.arm_enabled)
+	if (sysStatus.sys_info.prearm_flag && sysStatus.arm_enabled)
 	{
 		App_IgnitionRun();
 		ret = true;
@@ -820,23 +886,48 @@ static bool App_IgnitionTryRun (void)
 	return ret;
 }
 
-#if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
-static void App_MavlinkCbk (system_evt_t evt, uint32_t usr_data)
+static bool App_MavlinkTry2Arm(void)
 {
+	bool ret = false;
+
+	/* Check if able to arm and start charging */
+	if (App_MavlinkIsAble2Arm())
+	{
+		App_ChargingRun(SYSTEM_STATE_CHARGING, true);
+		ret = true;
+	}
+	else
+	{
+		/* Set system to disarm state if system is not able to arm */
+		App_DisarmHandler(false);
+	}
+
+	return ret;
+}
+
+static uint8_t App_MavlinkCbk (system_evt_t evt, uint32_t usr_data, void* usr_ptr)
+{
+	uint8_t ret = TRUE;
+
     if (evt == SYSTEM_EVT_READY)
 	{
 		switch ((mavlink_event_t)usr_data)
 		{
 			case MAVLINK_EVT_COMMAND_IGNITION:
+				/* Set false by default */
+				ret = FALSE;
 
+				/* Go through conditions if we able to run ignition */
 				if (
 						(sysStatus.state == SYSTEM_STATE_ARMED) ||
-						(sysStatus.state == SYSTEM_STATE_ARMED_PUMP) ||
-						(sysStatus.self_destroy_mode == SELF_DESTROY_STATE_STARTED)
+						(sysStatus.state == SYSTEM_STATE_ARMED_PUMP)
+#if !SELF_DESTROY_DISABLE
+						|| (sysStatus.self_destroy_mode == SELF_DESTROY_STATE_STARTED)
+#endif /* !SELF_DESTROY_DISABLE */
 					)
 				{
 					/* Try to run ignition */
-					App_IgnitionTryRun();
+					App_IgnitionRun();
 				}
 
 				break;
@@ -869,13 +960,16 @@ static void App_MavlinkCbk (system_evt_t evt, uint32_t usr_data)
 
 				if (sysStatus.state == SYSTEM_STATE_DISARM) 
 				{
-					/* Start capacitor charging when ARM command comes */
-					App_ChargingRun(SYSTEM_STATE_CHARGING, true);
+					/* Try to arm and start charging */
+					App_MavlinkTry2Arm();
+
+#if !SELF_DESTROY_DISABLE
 					if (Timer_IsActive(SELF_DESTRUCTION_TMR) == false)
 					{
 						/* Start self destroy timer if ARMed */
 						App_SelfDestroyTimerStart(SELF_DESTROY_MODE_NORMAL);
 					}
+#endif /* !SELF_DESTROY_DISABLE */
 				}
 				else if (sysStatus.state == SYSTEM_STATE_SAFE_TIMER)
 				{
@@ -900,12 +994,16 @@ static void App_MavlinkCbk (system_evt_t evt, uint32_t usr_data)
 				
 			case MAVLINK_EVT_AUTOPILOT_PREARM_ENABLED:
 				// Autopilot PREARM enabled
-				sysStatus.prearm_enabled = true;
+				sysStatus.sys_info.prearm_flag = 1;
+				/* Try to arm and start charging */
+				App_MavlinkTry2Arm();
 				break;
 				
 			case MAVLINK_EVT_AUTOPILOT_PREARM_DISABLED:
 				// Autopilot PREARM disabled  
-				sysStatus.prearm_enabled = false;
+				sysStatus.sys_info.prearm_flag = 0;
+				/* Set system to disarm state if system is not able to arm */
+				App_DisarmHandler(false); // TODO OSAV
 				break;
 				
 			case MAVLINK_EVT_VFR_HUD_RECEIVED:
@@ -914,11 +1012,35 @@ static void App_MavlinkCbk (system_evt_t evt, uint32_t usr_data)
 				// Application can access it via Mavlink_GetVfrHudData() if needed
 				break;
 				
+			case MAVLINK_EVT_SPEED_RECEIVED:
+				// Speed data received from autopilot
+				if (usr_ptr != NULL) 
+				{
+					sysStatus.current_speed_ms = *(uint16_t*)usr_ptr;
+					
+					// Check flight parameters stability
+					App_MavlinkFlightParamsCheck();
+				}
+				break;
+				
+			case MAVLINK_EVT_ALTITUDE_RECEIVED:
+				// Altitude data received from autopilot
+				if (usr_ptr != NULL) 
+				{
+					sysStatus.current_altitude_m = *(int32_t*)usr_ptr;
+					
+					// Check flight parameters stability  
+					App_MavlinkFlightParamsCheck();
+				}
+				break;
+				
 			default:
 				// Unknown Mavlink event
 				break;
 		}
 	}
+	
+	return ret;
 }
 #endif 
 
@@ -931,6 +1053,14 @@ static void App_AccProcCbk (system_evt_t evt, uint32_t usr_data)
 	{
 		/* Remove initial error flag */
 		Util_RemoveFlag((uint32_t*)&sysStatus.err_stat, SYSTEM_BLOCK_ACC);
+		
+#if ACC_SHAKE_DETECTION_ENABLE
+		/* Start shake detection immediately after accelerometer initialization */
+		if (usr_data == ACC_EVT_INIT_OK)
+		{
+			AccProc_ShakeDetectionStart();
+		}
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
 	}
 	else if ((evt == SYSTEM_EVT_ERROR) && (sysStatus.state == SYSTEM_STATE_INIT))
 	{
@@ -983,6 +1113,13 @@ static void App_AccProcCbk (system_evt_t evt, uint32_t usr_data)
 			}
 		}
 #endif /* MINING_MODE_SUPP */
+#if ACC_SHAKE_DETECTION_ENABLE
+		else if (usr_data == ACC_EVT_STARTUP_SHAKE_DETECTED)
+		{
+			/* Set shake detected flag in system info */
+			sysStatus.sys_info.shake_detected = 1;
+		}
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
 	}
 }
 
@@ -1003,8 +1140,10 @@ void App_SetSafe (bool ind_enable)
 	/* Reset all flags */
 	sysStatus.safe_tmr_tick = sysStatus.config->safeTimeoutSec;
 	sysStatus.safe_tmr_pause = false;
+#if !SELF_DESTROY_DISABLE
 	sysStatus.self_destroy_mode = SELF_DESTROY_STATE_NONE;
 	sysStatus.low_pwr_self_dest_allowed = false;
+#endif /* !SELF_DESTROY_DISABLE */
 
 #if MINING_MODE_SUPP
 	sysStatus.mining_state = MINING_STATE_NONE;
@@ -1033,7 +1172,7 @@ void App_SetSafe (bool ind_enable)
 }
 
 /***************************************** ADC Battery measurement *****************************************************/
-
+#if VBAT_MEASURE_FEATURE
 static void App_AdcStop (void)
 {
 	Timer_Stop (ADC_MEASURE_TMR);
@@ -1150,6 +1289,7 @@ static void App_AdcDataAnalyze(void)
 			low_threshold_mV -= BATTERY_THRESHOLD_ADJUSTMENT_MV;
 		}
 	}
+#if !SELF_DESTROY_DISABLE
 	else if ((sysStatus.low_pwr_self_dest_allowed != false) && (sysStatus.self_destroy_mode == SELF_DESTROY_STATE_NONE))
 	{
 		/* If system is already charged threshold can be 100mV higher as we don't need to charge the capacitor */
@@ -1158,6 +1298,7 @@ static void App_AdcDataAnalyze(void)
 			low_threshold_mV = BATTERY_VOLTAGE_VERY_LOW_SD_LOW_THRESHOLD_MILIVOLTS;
 		}
 	}
+#endif /* !SELF_DESTROY_DISABLE */
 
 	/* Check if battery is low charge */
 	if (sysStatus.vbat_voltage_mv < low_threshold_mV)
@@ -1173,6 +1314,7 @@ static void App_AdcDataAnalyze(void)
 			sysStatus.is_battery_low = true;
 			sysStatus.adc_measure_retry_cnt = 0u;
 
+#if !SELF_DESTROY_DISABLE
 			/* If self destroy for low battery is allowed - run self destroy */
 			if (
 					(sysStatus.low_pwr_self_dest_allowed != false)           &&
@@ -1184,6 +1326,7 @@ static void App_AdcDataAnalyze(void)
 				/* Do not run Battery level measurement again */
 				return;
 			}
+#endif /* !SELF_DESTROY_DISABLE */
 		}
 	}
 	else
@@ -1198,7 +1341,7 @@ static void App_AdcDataAnalyze(void)
 	/* Run next measurement */
 	Timer_Start (ADC_MEASURE_TMR, ADC_START_MEASURE_TMR_PERIOD_MS, App_AdcTmrCbk);
 }
-
+#endif /* VBAT_MEASURE_FEATURE */
 
 
 /***************************************** IGNITION STATE ********************************************************/
@@ -1227,8 +1370,10 @@ static void App_IgnitionOffCbk(void)
 	/* Set system to disarm state */
 	App_DisarmRun(false);
 
+#if !SELF_DESTROY_DISABLE
 	/* Stop self destroy timer */
 	App_SelfDestroyTimerStop();
+#endif /* !SELF_DESTROY_DISABLE */
 }
 
 static void App_IgnitionExitTmrCbk (uint8_t timer_id)
@@ -1239,8 +1384,10 @@ static void App_IgnitionExitTmrCbk (uint8_t timer_id)
 
 static void App_IgnitionOnCbk(void)
 {
+#if !SELF_DESTROY_DISABLE
 	/* Clear self destruction flag */
 	sysStatus.self_destroy_mode = SELF_DESTROY_STATE_NONE;
+#endif /* !SELF_DESTROY_DISABLE */
 
 	/* Set ignition done flag */
 	sysStatus.sys_info.is_ignition_done = 1;
@@ -1267,7 +1414,10 @@ static void App_IgnitionDelayTmrCbk (uint8_t timer_id)
 
 static void App_IgnitionRun(void)
 {
+#if !SELF_DESTROY_DISABLE
 	App_SelfDestroyTimerStop();
+#endif /* !SELF_DESTROY_DISABLE */
+	/* Reset related times and variables */
 	App_ArmConfigurationSet();
 
 #if MINING_MODE_SUPP
@@ -1277,7 +1427,12 @@ static void App_IgnitionRun(void)
 
 	sysStatus.state = SYSTEM_STATE_IGNITION;
 
-	if ((sysStatus.config->ignitionDelayMiliSec != 0u) && (sysStatus.self_destroy_mode == SELF_DESTROY_STATE_NONE))
+	if (
+			(sysStatus.config->ignitionDelayMiliSec != 0u) 
+#if !SELF_DESTROY_DISABLE
+			&& (sysStatus.self_destroy_mode == SELF_DESTROY_STATE_NONE)
+#endif /* !SELF_DESTROY_DISABLE */
+		)
 	{
 		/* Delay ignition if required. */
 		Timer_Start (IGNITION_TMR, sysStatus.config->ignitionDelayMiliSec, App_IgnitionDelayTmrCbk);
@@ -1313,8 +1468,10 @@ static void App_ArmRun (void)
 
 	/* Check if any ignition controls is already triggered */
 	if (
-			(sysStatus.vusa_state == VUSA_STATE_SHORTED) ||
-			(sysStatus.self_destroy_mode == SELF_DESTROY_STATE_CHARGING)
+			(sysStatus.vusa_state == VUSA_STATE_SHORTED)
+#if !SELF_DESTROY_DISABLE
+			|| (sysStatus.self_destroy_mode == SELF_DESTROY_STATE_CHARGING)
+#endif /* !SELF_DESTROY_DISABLE */
 		)
 	{
 		/* Vusa is shorted */
@@ -1365,18 +1522,6 @@ static void App_ArmRun (void)
 		/* Start hit accelerometer measurement */
 		AccProc_HitDetectionStart();
 	}
-
-#if 0
-	if (sysStatus.state != SYSTEM_STATE_ARMED)
-	{
-		/* System state changed - exit */
-		return;
-	}
-
-	/* Start timer to monitor capacitor self discharge */
-	sysStatus.adc_state = ADC_MONITOR_VCAP;
-	Timer_Start (VBAT_TEMP_MEASURE_TMR, VCAP_MONITOR_MEASURE_TMR_PERIOD_MS, App_PumpTmrCbk);
-#endif
 }
 
 /***************************************** CHARGING STATE **************************************************/
@@ -1468,6 +1613,7 @@ static void App_SafeTmrTickCbk (void)
 
     if (sysStatus.safe_tmr_tick == 0u)
     {
+#if !SELF_DESTROY_DISABLE
 		/* Set Self Destruction timer in sys info*/
 		if (Timer_IsActive(SELF_DESTRUCTION_TMR))
 		{
@@ -1477,6 +1623,7 @@ static void App_SafeTmrTickCbk (void)
 		{
 			sysStatus.sys_info.timer_seconds = sysStatus.config->selfDestroyTimeoutMin * SECONDS_IN_MINUTE;
 		}
+#endif /* !SELF_DESTROY_DISABLE */
 
     	/* Set safe timer timeout */
     	sysStatus.safe_tmr_tick = sysStatus.config->safeTimeoutSec;
@@ -1502,16 +1649,8 @@ static void App_SafeTmrTickCbk (void)
     		}
     	}
 #elif (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
-		if (sysStatus.sys_info.fc_control_present == 0)
-		{
-			/* Enable initial charging if signal lost */
-			App_ChargingRun(SYSTEM_STATE_CHARGING, true);
-		}
-		else
-		{
-			/* Set system to disarm state */
-			App_DisarmHandler(false);
-		}
+		/* Try to arm the system */
+		App_MavlinkTry2Arm();
 #endif 
     }
     else
@@ -1565,22 +1704,18 @@ static void App_SafeTmrRun (void)
 	App_SetSafe(false);
 
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
+#if !SELF_DESTROY_DISABLE
 	/* Start Self destroy timer for non stick control */
 	if ((sysStatus.stick_ctrl_mode != STICK_MODE_STICK_PWM) || (sysStatus.is_ctrl_lost != false))
 	{
 		App_SelfDestroyTimerStart(SELF_DESTROY_MODE_NORMAL);
 	}
+#endif /* !SELF_DESTROY_DISABLE */
 
 	/* Check if stick is in disarm state, else pause safe timer. Note if signal lost - we continue with safe timer */
 	if ((sysStatus.stick_ctrl_mode == STICK_MODE_STICK_PWM) && (sysStatus.stick_ctrl_stat > CONTROL_EVT_DISARM))
 	{
 		App_SafeTmrPause();
-	}
-#elif (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
-	/* Start Self destroy timer for non stick control */
-	if (sysStatus.arm_enabled)
-	{
-		App_SelfDestroyTimerStart(SELF_DESTROY_MODE_NORMAL);  //TODO OSAV clarify behaviour
 	}
 #endif
 
@@ -1741,8 +1876,10 @@ static void App_FuseCheckRun (void)
 	/* Set application to the Safe state */
 	App_SetSafe(false);
 
+#if !SELF_DESTROY_DISABLE
 	/* Stop self destroy timer every time fuse is populated */
 	App_SelfDestroyTimerStop();
+#endif /* !SELF_DESTROY_DISABLE */
 
 #if MINING_MODE_SUPP
 	/* Disable mining */
@@ -1752,7 +1889,6 @@ static void App_FuseCheckRun (void)
 	/* Update timer info */
 	sysStatus.sys_info.timer_seconds = sysStatus.config->safeTimeoutSec;
 	sysStatus.sys_info.fuse_present = !IsFuseRemoved();
-
 	/* Clear ignition done flag */
 	sysStatus.sys_info.is_ignition_done = 0;
 
@@ -1768,7 +1904,9 @@ static void App_FuseCheckRun (void)
 #endif /* MINING_MODE_SUPP */
 	}
 #elif (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
-	//TODO OSAV
+	/* Reset flight parameters flag and stop related timer */
+	sysStatus.sys_info.speed_altitude_flag = 0;
+	Timer_Stop(FLIGHT_PARAMS_UPDATE_TMR);
 #endif
 
 	sysStatus.state = SYSTEM_STATE_INIT_FUSE_CHECK;
@@ -1840,14 +1978,14 @@ void App_InitFinish (void)
 #if MINING_MODE_SUPP
 	Stick_Reset(App_StickCbk, (sysStatus.config->miningMode == MINING_MODE_MANUAL));
 #else
-	Stick_Reset(App_StickCbk, false);
+	Stick_Reset(App_StickCbk);
 #endif /* MINING_MODE_SUPP */
 	/* Set callback for FC PWM */
 	FcPwmSetCbk(Stick_ProcessEdgeCbk);
 #elif (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 	/* Init Mavlink processing */
 	Mavlink_Init(App_MavlinkCbk, &sysStatus.sys_info);
-#endif
+#endif /* CONTROL_MODE == MAVLINK_V2_CTRL_SUPP */
 
 	/* Start Vusa functionality */
 	VusaStart(App_VusaCbk);
@@ -1867,6 +2005,18 @@ void App_InitRun(void)
 
 	/* Load configuration */
 	App_RefreshConfig();
+
+#if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
+	/* Initialize flight parameters */
+	sysStatus.current_speed_ms = 0;
+	sysStatus.current_altitude_m = 0;
+	sysStatus.sys_info.speed_altitude_flag = 0;
+#endif /* (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP) */
+
+#if ACC_SHAKE_DETECTION_ENABLE
+	/* Initialize shake detection flag */
+	sysStatus.sys_info.shake_detected = 0;
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
 
 	/* Set application to the Safe state */
 	App_SetSafe(false);
@@ -1976,6 +2126,7 @@ void App_Process ()
 			    	/* Safe timer tick handling */
 			    	App_SafeTmrTickCbk();
 			    	break;
+#if !SELF_DESTROY_DISABLE
 			    case APP_TASK_SELF_DESTROY_TMR_TICK_CBK:
 			    	/* Self destroy timer tick handling */
 			    	App_SelfDestroyTmrTickCbk();
@@ -1984,6 +2135,7 @@ void App_Process ()
 			    	/* Initialize self destroy */
 			    	App_SelfDestroyInit();
 			    	break;
+#endif /* !SELF_DESTROY_DISABLE */
 			    default:
 			    	break;
 			}

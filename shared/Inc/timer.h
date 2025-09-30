@@ -73,6 +73,8 @@ extern "C" {
 #define UART_CONFIGURATOR_INIT_TIMEOUT_MS            (300u)
 #define UART_CONFIGURATOR_PING_TIMEOUT_MS            (2500u)
 
+#define FLIGHT_PARAMS_UPDATE_TMR                     (17u)
+
 #define MILISECONDS_IN_SECOND                        (1000u)
 #define MILISECONDS_IN_MINUTE                        (MILISECONDS_IN_SECOND * 60u)
 #define MILISECONDS_IN_HOUR                          (MILISECONDS_IN_MINUTE * 60u)

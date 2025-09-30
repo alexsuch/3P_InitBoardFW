@@ -80,8 +80,8 @@ static bool AppGonfig_ReadFlashConfig(uint32_t addr, config_data_t* cfg_data)
 	{
         /* Check if config is empty */
         if (
-               (AppGonfig_IsAllElements((uint8_t*)&addr, sizeof(config_save_data_t), 0x00)) ||
-               (AppGonfig_IsAllElements((uint8_t*)&addr, sizeof(config_save_data_t), 0xFF))
+               (AppGonfig_IsAllElements((uint8_t*)addr, sizeof(config_save_data_t), 0x00)) ||
+               (AppGonfig_IsAllElements((uint8_t*)addr, sizeof(config_save_data_t), 0xFF))
             )
         {
             return status;

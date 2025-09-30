@@ -12,6 +12,8 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 
+#define TESTER_FW                                     (1u)
+
 /*-------------------------- APP VERSION & DEVICE TYPE-----------------------------------------*/
 #define APP_MINOR_VERSION                             (0u)
 #define APP_MAJOR_VERSION                             (2u)
@@ -22,8 +24,6 @@ extern "C" {
 #define NO_CTRL                                       (0u)
 #define PWM_CTRL_SUPP                                 (1u)
 #define MAVLINK_V2_CTRL_SUPP                          (2u)
-
-
 
 #define RELEASE_CONFIGURATION_ENABLE                  (0u)
 

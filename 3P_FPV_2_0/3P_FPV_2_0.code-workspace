@@ -32,7 +32,10 @@
 			"array": "c",
 			"string": "c",
 			"string_view": "c",
-			"span": "c"
+			"span": "c",
+			"stdlib.h": "c",
+			"compare": "c",
+			"cstdint": "c"
 		}
 	}
 }

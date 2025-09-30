@@ -25,12 +25,12 @@ extern "C" {
 
 
 
-#define RELEASE_CONFIGURATION_ENABLE                  (1u)
+#define RELEASE_CONFIGURATION_ENABLE                  (0u)
 
 
 #if (RELEASE_CONFIGURATION_ENABLE == 0u) //TEST CONFIGURATION
 /*-------------------------- BUILD MACROS -----------------------------------------*/
-#define CONTROL_MODE                                  (PWM_CTRL_SUPP)
+#define CONTROL_MODE                                  (MAVLINK_V2_CTRL_SUPP)
 #define VBAT_MEASURE_FEATURE                          (0u)
 #define LIS2DH12_ACC_ENABLE                           (1u)
 #define START_UP_DELAY_ENABLE                         (1u)
@@ -52,6 +52,9 @@ extern "C" {
 /* Magic number chosen by experimental way */
 #define MOVEMENT_THRESHOLD_DEFAULT                    (72089LL) //RELEASE VALUE - 72089LL
 
+/* Self destruction disable */
+#define SELF_DESTROY_DISABLE                          (1u) //RELEASE VALUE - 1u
+
 /*------------------------ Mining Mode Configuration -----------------------*/
 
 #define MINING_MODE_SUPP                              (0u)
@@ -62,19 +65,23 @@ extern "C" {
 #define MINING_ENABLE_DELAY_SEC                       (5u)  //RELEASE VALUE - 30u
 
 /*------------------------ Accelerometer Parameters -----------------------------------*/
+// HIT
 #define ACC_HIT_THRESHOLD_MG                          (12000u)  // units in mili G //RELEASE VALUE - 12G - 12000u
-
 #define ACC_BUFF_SIZE                                 (6u) //RELEASE VALUE - WINDOW SIZE = 6u
-
 #define ACC_NO_DIVIDE_ENABLE                          (1u)
-
 #define NET_DETECTION_ENABLE                          (0u)
+
+//NET
 
 #define ACC_NET_BUFF_SIZE                             (100u) //RELEASE VALUE - WINDOW SIZE = 100u
 
 #define ACC_HIT_NET_DIFF_THRESHOLD_MG                 (4500u)  // units in mili G //RELEASE VALUE - 4G - 4500u
 
 #define ACC_NET_DECIMATION_RATE                       (5u)
+
+// SHAKE
+#define ACC_SHAKE_DETECTION_ENABLE                    (1u)   // Enable shake detection
+#define ACC_SHAKE_THRESHOLD_MG                        (5000u)   // units in mili G - Shake detection threshold
 
 /*------------------------ Battery Configuration parameters -----------------------*/
 
@@ -113,13 +120,16 @@ extern "C" {
 // Timing Configuration
 #define MAVLINK_INITBOARD_HEARTBEAT_INTERVAL_MS       (750u)
 #define MAVLINK_CONNECTION_TIMEOUT_MS                 (3000u)
-#endif /* MAVLINK_V2_CTRL_SUPP */
 
+#define FLIGHT_STABLE_PARAMETERS_TIMEOUT_SEC          (7u)  // 7 seconds speed and altitude must be higher than minimum thresholds
+#define FLIGHT_SPEED_MINIMUM_THRESHOLD_M_S            (17u) // 17 m/s
+#define FLIGHT_ALTITUDE_MINIMUM_THRESHOLD_M           (100u)  // 100 meters
+#endif /* MAVLINK_V2_CTRL_SUPP */
 /*----------------------------- Test parameters -----------------------*/
+
+
 #define TEST_SELF_DESTROY_ONLY_MODE                   (0u) //RELEASE VALUE - 0u
 #define TEST_SELF_DESTROY_MINING_MODE                 (0u) //RELEASE VALUE - 0u
-
-#define SELF_DESTROY_DISABLE                          (0u) //RELEASE VALUE - 0u
 
 #define ACC_HIT_DETECTED_STICKY_LED_FEATURE           (0u) //RELEASE VALUE - 0u
 #define MOVE_DETECTED_STICKY_LED_FEATURE              (0u) //RELEASE VALUE - 0u
@@ -136,9 +146,17 @@ extern "C" {
 #define ACC_NO_DIVIDE_ENABLE                          (1u)
 
 #define ACC_HIT_THRESHOLD_MG                          (12000u)  // units in mili G //RELEASE VALUE - 12G - 12000u
+
+#if ACC_SHAKE_DETECTION_ENABLE
+#define ACC_SHAKE_THRESHOLD_MG                        (5000u)   // units in mili G - Shake detection threshold
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
+
 #define ACC_BUFF_SIZE                                 (6u) //RELEASE VALUE - WINDOW SIZE = 6u
 
 #define NET_DETECTION_ENABLE                          (0u)
+
+#define ACC_SHAKE_DETECTION_ENABLE                    (0u)   // Enable shake detection - RELEASE: disabled
+
 #define ACC_NET_BUFF_SIZE                             (100u)
 #define ACC_HIT_NET_DIFF_THRESHOLD_MG                 (5000u)
 #define ACC_NET_DECIMATION_RATE                       (5u)

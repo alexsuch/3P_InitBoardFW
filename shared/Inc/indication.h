@@ -41,12 +41,12 @@ typedef struct
 	uint32_t err_code_mask;
 	uint32_t warn_code_mask;
 	ind_status_t curr_status;
-	uint8_t stat_retry_cnt;
-	uint8_t err_retry_cnt;
+	volatile uint8_t stat_retry_cnt;
+	volatile uint8_t err_retry_cnt;
 	ind_pattern_t stat_pattern;
 	ind_pattern_t err_pattern;
-	bool handle_err_tmr_cbk;
-	bool handle_stat_tmr_cbk;
+	volatile bool handle_err_tmr_cbk;
+	volatile bool handle_stat_tmr_cbk;
 	uint8_t* system_error_code_ptr;  // Pointer to system error code in app layer
 }indication_status_t;
 

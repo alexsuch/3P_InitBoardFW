@@ -19,13 +19,14 @@ extern "C" {
 
 #define MOVE_DETECT_INIT_DELAY_SKIP_CNT    (5u)
 
-#if ACC_12_BIT
 #define ACC_RES_MG_PER_BIT                 (12u)
-#else
-#define ACC_RES_MG_PER_BIT                 (192u)
-#endif
+
 
 #define ACC_SQRT_TRESHOLD                  ((ACC_HIT_THRESHOLD_MG/ACC_RES_MG_PER_BIT) * (ACC_HIT_THRESHOLD_MG/ACC_RES_MG_PER_BIT))
+
+#if ACC_SHAKE_DETECTION_ENABLE
+#define ACC_SHAKE_SQRT_TRESHOLD            ((ACC_SHAKE_THRESHOLD_MG/ACC_RES_MG_PER_BIT) * (ACC_SHAKE_THRESHOLD_MG/ACC_RES_MG_PER_BIT))
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
 
 #define APPROX_G_TO_RAW_FACTOR             0.9f      // компенсація похибки апроксимації
 #define ACC_NET_TRESHOLD                   ((ACC_HIT_NET_DIFF_THRESHOLD_MG/ACC_RES_MG_PER_BIT) * ACC_NET_BUFF_SIZE * APPROX_G_TO_RAW_FACTOR)
@@ -62,16 +63,20 @@ typedef struct
     uint8_t net_check_counter;
 #endif
 	// handling data
-	bool data_ready;
+	volatile bool data_ready;
 	uint8_t init_skip_counts;
 	// hit detect status
 	bool hitDetected;
-	bool hit_detection_enabled;
+	volatile bool hit_detection_enabled;
 	// move detect status
-	bool move_detection_enabled;
+	volatile bool move_detection_enabled;
 	bool move_detected;
 	uint8_t move_detection_retry_cnt;
 	uint32_t move_threshold;
+#if ACC_SHAKE_DETECTION_ENABLE
+	// shake detect status
+	volatile bool shake_detection_enabled;
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
 
 }accProcStatus_t;
 
@@ -80,6 +85,9 @@ void AccProc_Task (void);
 void AccProc_HitDetectionStart (void);
 void AccProc_Stop (void);
 void AccProc_MoveDetectionStart (uint32_t move_threshold);
+#if ACC_SHAKE_DETECTION_ENABLE
+void AccProc_ShakeDetectionStart (void);
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
 
 #ifdef __cplusplus
 }

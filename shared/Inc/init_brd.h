@@ -13,10 +13,6 @@ extern "C" {
 #include <stdint.h>
 #include <string.h>
 
-#define ACC_12_BIT                              (1u)
-
-#define CONFIG_DATA_SIZE_BYTES                  (31u)
-
 #define IS_FUSE_PRESENT_STATUS_MASK             (0x01u)
 #define IS_BATTERY_LOW_STATUS_MASK              (0x02u)
 #define IS_LOG_DATA_READY_STATUS_MASK           (0x04u)
@@ -97,6 +93,8 @@ typedef enum
 	ACC_EVT_DATA_READY,
 	ACC_EVT_HIT_DETECTED,
 	ACC_EVT_MOVE_DETECTED,
+	ACC_EVT_SHAKE_INIT_OK,
+	ACC_EVT_STARTUP_SHAKE_DETECTED,
 }acc_evt_t;
 
 typedef enum
@@ -259,13 +257,16 @@ typedef struct {
     uint8_t error_code;          // Error code (0-15)
     uint8_t is_ignition_done;    // Ignition done flag (0-1)
     uint8_t fc_control_present;  // FC control connection status (0-1)
+	uint8_t prearm_flag;         // Autopilot PREARM state (0-1)
+	uint8_t speed_altitude_flag; // Autopilot speed/altitude control state (0-1)
+	uint8_t shake_detected;      // Startup shake detection flag (0-1)
 } init_board_system_info_t;
 
 typedef struct
 {
 	// Application
-	system_state_t state;
-	uint32_t app_task_mask;
+	volatile system_state_t state;
+	volatile uint32_t app_task_mask;
 	// Errors
 	uint32_t err_stat;
 	uint32_t app_err_stat;
@@ -283,20 +284,19 @@ typedef struct
 	bool is_ctrl_lost;
 	bool is_ignition_bloked;
 	// Prearm
-	bool prearm_enabled;  // Mavlink autopilot PREARM state
 	bool arm_enabled;     // Mavlink autopilot ARM state
 	// Fuse
 	bool is_fuse_removed;
 	uint8_t fuse_detect_retry;
 	// VUSA
 	bool is_vusa_present;
-	vusa_state_t vusa_state;
+	volatile vusa_state_t vusa_state;
 	// ADC block
-	uint16_t adc_raw_data;
+	volatile uint16_t adc_raw_data;
 	uint16_t adc_milivolts;
-	uint8_t adc_measure_retry_cnt;
-	uint16_t self_voltage_mv;
-	uint16_t vbat_voltage_mv;
+	volatile uint8_t adc_measure_retry_cnt;
+	volatile uint16_t self_voltage_mv;
+	volatile uint16_t vbat_voltage_mv;
 	uint16_t adc_temp;
 	float temperature;
 	bool is_battery_low;
@@ -304,6 +304,9 @@ typedef struct
 	bool low_pwr_self_dest_allowed;
 	self_destroy_state_t self_destroy_mode;
 	mining_state_t mining_state;
+	// Mavlink data
+	uint16_t current_speed_ms;      // Current speed in m/s (from VFR_HUD)
+	int32_t current_altitude_m;     // Current altitude in meters (from VFR_HUD)
 	// Board info
 	init_board_system_info_t sys_info;
 	// Configuration
@@ -311,6 +314,7 @@ typedef struct
 }system_status_t;
 
 typedef void (*app_cbk_fn)      (system_evt_t evt, uint32_t usr_data);
+typedef uint8_t (*app_ext_cbk_fn)      (system_evt_t evt, uint32_t usr_data, void* usr_ptr);
 
 system_status_t* get_status(void);
 
