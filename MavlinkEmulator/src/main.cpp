@@ -16,6 +16,7 @@
 #define MAVLINK_ESP32_ARM_PIN 4           // ARM state pin (0=DISARMED, 1=ARMED)
 #define MAVLINK_ESP32_PREARM_PIN 15       // PREARM state pin (0=PREARM_DISABLED, 1=PREARM_ENABLED)
 #define MAVLINK_ESP32_IGNITION_PIN 0      // IGNITION state pin (0=OFF, 1=IGNITION)
+#define MAVLINK_ESP32_VFR_BUTTON_PIN 25   // VFR control button pin (0=NOT_PRESSED, 1=PRESSED)
 #define MAVLINK_ESP32_DEBOUNCE_MS 300
 
 // Message Timing Configuration
@@ -56,6 +57,11 @@ typedef enum {
     MAVLINK_IGNITION_STATE_ON = 1       // GPIO2=1 (IGNITION_ON)
 } mavlink_ignition_state_t;
 
+typedef enum {
+    MAVLINK_VFR_BUTTON_NOT_PRESSED = 0, // GPIO25=0 (Button not pressed)
+    MAVLINK_VFR_BUTTON_PRESSED = 1      // GPIO25=1 (Button pressed)
+} mavlink_vfr_button_state_t;
+
 // Message timing state
 typedef struct {
     unsigned long heartbeat_last_sent;
@@ -78,9 +84,11 @@ typedef struct {
 mavlink_arm_state_t current_arm_state = MAVLINK_ARM_STATE_DISARMED;
 mavlink_prearm_state_t current_prearm_state = MAVLINK_PREARM_STATE_DISABLED;
 mavlink_ignition_state_t current_ignition_state = MAVLINK_IGNITION_STATE_OFF;
+mavlink_vfr_button_state_t current_vfr_button_state = MAVLINK_VFR_BUTTON_NOT_PRESSED;
 unsigned long last_arm_change = 0;
 unsigned long last_prearm_change = 0;
 unsigned long last_ignition_change = 0;
+unsigned long last_vfr_button_change = 0;
 
 // Timing
 mavlink_timing_t msg_timing = {0};
@@ -101,6 +109,7 @@ void debug_mavlink_rx(uint8_t* packet, uint8_t len);
 void debug_arm_state_change(mavlink_arm_state_t new_state);
 void debug_prearm_state_change(mavlink_prearm_state_t new_state);
 void debug_ignition_state_change(mavlink_ignition_state_t new_state);
+void debug_vfr_button_state_change(mavlink_vfr_button_state_t new_state);
 void send_ignition_command(void);
 void send_custom_command(uint8_t command_type, uint8_t command_data);
 void send_vfr_hud(void);
@@ -169,11 +178,13 @@ void setup_state_inputs() {
     pinMode(MAVLINK_ESP32_ARM_PIN, INPUT_PULLUP);        // GPIO4 - ARM state with pull-up
     pinMode(MAVLINK_ESP32_PREARM_PIN, INPUT_PULLUP);     // GPIO15 - PREARM state with pull-up
     pinMode(MAVLINK_ESP32_IGNITION_PIN, INPUT_PULLUP);   // GPIO2 - IGNITION state with pull-up
+    pinMode(MAVLINK_ESP32_VFR_BUTTON_PIN, INPUT_PULLUP); // GPIO25 - VFR button with pull-up
     
     Serial.println("[INIT] State inputs configured:");
     Serial.println("  GPIO4 (ARM state) - INPUT_PULLUP");
     Serial.println("  GPIO15 (PREARM state) - INPUT_PULLUP");
     Serial.println("  GPIO0 (IGNITION state) - INPUT_PULLUP");
+    Serial.println("  GPIO25 (VFR button) - INPUT_PULLUP");
 }
 
 // Initialize message timing
@@ -202,6 +213,12 @@ mavlink_prearm_state_t read_prearm_state() {
 mavlink_ignition_state_t read_ignition_state() {
     bool pin0 = digitalRead(MAVLINK_ESP32_IGNITION_PIN);
     return pin0 ? MAVLINK_IGNITION_STATE_OFF : MAVLINK_IGNITION_STATE_ON;  // Inverted logic with pull-up
+}
+
+// Read VFR button state from GPIO25 (with pull-up: LOW=PRESSED, HIGH=NOT_PRESSED)
+mavlink_vfr_button_state_t read_vfr_button_state() {
+    bool pin25 = digitalRead(MAVLINK_ESP32_VFR_BUTTON_PIN);
+    return pin25 ? MAVLINK_VFR_BUTTON_NOT_PRESSED : MAVLINK_VFR_BUTTON_PRESSED;  // Inverted logic with pull-up
 }
 
 // ======================= MAVLINK MESSAGE GENERATION =======================
@@ -305,13 +322,26 @@ void update_vfr_hud_simulation() {
     unsigned long current_time = millis();
     float time_sec = (current_time - msg_timing.base_time) / 1000.0f;
     
-    // Simulate dynamic flight parameters
-    vfr_hud_data.airspeed = 25.0f + 5.0f * sin(time_sec * 0.1f);                    // 20-30 m/s
-    vfr_hud_data.groundspeed = vfr_hud_data.airspeed - 1.0f + 2.0f * sin(time_sec * 0.05f); // Wind effect
+    // Check current VFR button state
+    mavlink_vfr_button_state_t button_state = read_vfr_button_state();
+    
+    if (button_state == MAVLINK_VFR_BUTTON_PRESSED) {
+        // Button pressed: airspeed = 20 m/s, altitude = 150m (fixed values)
+        vfr_hud_data.airspeed = 20.0f;
+        vfr_hud_data.groundspeed = 19.5f;  // Slightly lower groundspeed due to wind
+        vfr_hud_data.altitude = 150.0f;
+        vfr_hud_data.climb_rate = 0.0f;    // Stable altitude
+    } else {
+        // Button not pressed: airspeed < 17 m/s, altitude < 100m
+        vfr_hud_data.airspeed = 15.0f + 2.0f * sin(time_sec * 0.1f);                // 13-17 m/s
+        vfr_hud_data.groundspeed = vfr_hud_data.airspeed - 0.5f + 1.0f * sin(time_sec * 0.05f); // Wind effect
+        vfr_hud_data.altitude = 80.0f + 15.0f * sin(time_sec * 0.03f);              // 65-95m
+        vfr_hud_data.climb_rate = 1.0f * cos(time_sec * 0.04f);                     // -1 to +1 m/s
+    }
+    
+    // Common parameters (not affected by button state)
     vfr_hud_data.heading = (int16_t)(180 + 30 * sin(time_sec * 0.02f)) % 360;       // 150-210 degrees
     vfr_hud_data.throttle = (uint16_t)(75 + 15 * sin(time_sec * 0.08f));            // 60-90%
-    vfr_hud_data.altitude = 150.0f + 50.0f * sin(time_sec * 0.03f);                 // 100-200m
-    vfr_hud_data.climb_rate = 2.0f * cos(time_sec * 0.04f);                         // -2 to +2 m/s
 }
 
 // ======================= MAVLINK MESSAGE PROCESSING =======================
@@ -509,6 +539,16 @@ void process_input_states() {
             }
         }
     }
+    
+    // Process VFR button state
+    mavlink_vfr_button_state_t new_vfr_button_state = read_vfr_button_state();
+    if (new_vfr_button_state != current_vfr_button_state) {
+        if (current_time - last_vfr_button_change >= MAVLINK_ESP32_DEBOUNCE_MS) {
+            current_vfr_button_state = new_vfr_button_state;
+            last_vfr_button_change = current_time;
+            debug_vfr_button_state_change(current_vfr_button_state);
+        }
+    }
 }
 
 // Process incoming UART2 data
@@ -558,18 +598,21 @@ void setup() {
     current_arm_state = read_arm_state();
     current_prearm_state = read_prearm_state();
     current_ignition_state = read_ignition_state();
+    current_vfr_button_state = read_vfr_button_state();
     
     // Debug initial GPIO values
     bool gpio4_initial = digitalRead(MAVLINK_ESP32_ARM_PIN);
     bool gpio15_initial = digitalRead(MAVLINK_ESP32_PREARM_PIN);
     bool gpio0_initial = digitalRead(MAVLINK_ESP32_IGNITION_PIN);
+    bool gpio25_initial = digitalRead(MAVLINK_ESP32_VFR_BUTTON_PIN);
     
-    Serial.printf("[INIT] Initial GPIO values: GPIO4=%d, GPIO15=%d, GPIO0=%d\n", 
-                  gpio4_initial, gpio15_initial, gpio0_initial);
-    Serial.printf("[INIT] Initial states: ARM=%s, PREARM=%s, IGNITION=%s\n",
+    Serial.printf("[INIT] Initial GPIO values: GPIO4=%d, GPIO15=%d, GPIO0=%d, GPIO25=%d\n", 
+                  gpio4_initial, gpio15_initial, gpio0_initial, gpio25_initial);
+    Serial.printf("[INIT] Initial states: ARM=%s, PREARM=%s, IGNITION=%s, VFR_BUTTON=%s\n",
                   current_arm_state == MAVLINK_ARM_STATE_ARMED ? "ARMED" : "DISARMED",
                   current_prearm_state == MAVLINK_PREARM_STATE_ENABLED ? "ENABLED" : "DISABLED",
-                  current_ignition_state == MAVLINK_IGNITION_STATE_ON ? "ON" : "OFF");
+                  current_ignition_state == MAVLINK_IGNITION_STATE_ON ? "ON" : "OFF",
+                  current_vfr_button_state == MAVLINK_VFR_BUTTON_PRESSED ? "PRESSED" : "NOT_PRESSED");
     
     Serial.println("[INIT] Initialization complete!");
     Serial.println("======================================");
@@ -612,5 +655,13 @@ void debug_ignition_state_change(mavlink_ignition_state_t new_state) {
     Serial.printf("[GPIO] IGNITION state changed: %s (GPIO0=%d)\n",
                   new_state == MAVLINK_IGNITION_STATE_ON ? "ON" : "OFF",
                   digitalRead(MAVLINK_ESP32_IGNITION_PIN));
+}
+
+// Debug output for VFR button state changes
+void debug_vfr_button_state_change(mavlink_vfr_button_state_t new_state) {
+    Serial.printf("[GPIO] VFR_BUTTON state changed: %s (GPIO25=%d) - VFR_HUD mode: %s\n",
+                  new_state == MAVLINK_VFR_BUTTON_PRESSED ? "PRESSED" : "NOT_PRESSED",
+                  digitalRead(MAVLINK_ESP32_VFR_BUTTON_PIN),
+                  new_state == MAVLINK_VFR_BUTTON_PRESSED ? "High altitude/speed" : "Low altitude/speed");
 }
 

@@ -381,6 +381,8 @@ void Indication_SetStatus (ind_status_t status_code, uint32_t user_data)
 		    	break;
 		    case IND_STATUS_SAFE_TMR_ELAPSED:
 		    case IND_STATUS_CONFIGURATION_APPLIED:
+			case IND_STATUS_SHAKE_DETECTED:
+			case IND_STATUS_SPEED_ALTITUDE_OK:
 		    	Indication_SetIndication(IND_PATTERN_VERY_LONG, STATUS_TYPE);
 		    	break;
 		    case IND_STATUS_INIT_SUCCESS:

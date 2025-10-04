@@ -149,7 +149,7 @@ static void App_SetError(err_type_t err_type, uint32_t usr_data)
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
 		Stick_Deinit();
 #endif
-		AccProc_Stop();
+		AccProc_Stop(); //TODO OSAV add force condition
 
 		sysStatus.state = SYSTEM_STATE_ERROR;
 
@@ -312,7 +312,9 @@ static void App_SelfDestroyTimerStart (self_destroy_mode_t mode)
 		if (
 				(sysStatus.config->miningMode == MINING_MODE_AUTO)
 #if !TEST_SELF_DESTROY_MINING_MODE
-			  &&(sysStatus.config->selfDestroyTimeoutMin > sysStatus.config->miningAutoActivationMin)
+			  &&((sysStatus.config->selfDestroyTimeoutMin > sysStatus.config->miningAutoActivationMin)
+			  // Low battery self destruction activation 
+			  || (sysStatus.config->selfDestroyTimeoutMin == 0u))
 #endif
 			)
 		{
@@ -842,6 +844,9 @@ static void App_MavlinkFlightParamsTimerCbk(uint8_t timer_id)
 	(void)timer_id;
 	sysStatus.sys_info.speed_altitude_flag = 1;
 
+	// Set indication that stable flight parameters are OK
+	Indication_SetStatus(IND_STATUS_SPEED_ALTITUDE_OK, 0u);
+
 	/* Try to arm and start charging */
 	App_MavlinkTry2Arm();
 }
@@ -971,25 +976,18 @@ static uint8_t App_MavlinkCbk (system_evt_t evt, uint32_t usr_data, void* usr_pt
 					}
 #endif /* !SELF_DESTROY_DISABLE */
 				}
-				else if (sysStatus.state == SYSTEM_STATE_SAFE_TIMER)
-				{
-					/* Pause current Safe timer */
-					App_SafeTmrPause();
-					/* Set application error */
-					App_SetError(ERR_TYPE_RELOADABLE, ERR_CODE_UNEXPECTED_ARM);
-				}
-
 				break;
 				
 			case MAVLINK_EVT_AUTOPILOT_DISARMED:
 				// Autopilot changed to DISARMED state
-				/* Stop hit detection */
-				AccProc_Stop();
 				/* Update arm enabled state */
 				sysStatus.arm_enabled = false;
 
-				/* Handle disarm */
-				App_DisarmHandler(false);
+				/* Set system to disarm state if system is not able to arm */
+				if (sysStatus.state != SYSTEM_STATE_DISARM)
+				{
+					App_DisarmHandler(false);
+				}
 				break;
 				
 			case MAVLINK_EVT_AUTOPILOT_PREARM_ENABLED:
@@ -1003,15 +1001,12 @@ static uint8_t App_MavlinkCbk (system_evt_t evt, uint32_t usr_data, void* usr_pt
 				// Autopilot PREARM disabled  
 				sysStatus.sys_info.prearm_flag = 0;
 				/* Set system to disarm state if system is not able to arm */
-				App_DisarmHandler(false); // TODO OSAV
+				if (sysStatus.state != SYSTEM_STATE_DISARM)
+				{
+					App_DisarmHandler(false);
+				}
 				break;
-				
-			case MAVLINK_EVT_VFR_HUD_RECEIVED:
-				// VFR_HUD data received from autopilot
-				// VFR_HUD data is automatically stored in mavlink module
-				// Application can access it via Mavlink_GetVfrHudData() if needed
-				break;
-				
+								
 			case MAVLINK_EVT_SPEED_RECEIVED:
 				// Speed data received from autopilot
 				if (usr_ptr != NULL) 
@@ -1118,6 +1113,8 @@ static void App_AccProcCbk (system_evt_t evt, uint32_t usr_data)
 		{
 			/* Set shake detected flag in system info */
 			sysStatus.sys_info.shake_detected = 1;
+			/* Indicate shake detected */
+			Indication_SetStatus(IND_STATUS_SHAKE_DETECTED, 0u);
 		}
 #endif /* ACC_SHAKE_DETECTION_ENABLE */
 	}

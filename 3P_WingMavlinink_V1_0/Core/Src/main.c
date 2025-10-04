@@ -667,10 +667,10 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOA, SPI_CS_Pin|CHARGE_EN_OUT_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, LED_YELLOW_OUT_Pin|BOOM_LOW_SIDE_OUT_1_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(BOOM_LOW_SIDE_OUT_1_GPIO_Port, BOOM_LOW_SIDE_OUT_1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, LED_GREEN_OUT_Pin|BOOM_LOW_SIDE_OUT_2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, BOOM_LOW_SIDE_OUT_2_Pin|LED_GREEN_OUT_Pin|LED_YELLOW_OUT_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : EM_BUZZ_Pin */
   GPIO_InitStruct.Pin = EM_BUZZ_Pin;
@@ -704,15 +704,15 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(FC_PWM_GPIO_IN_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LED_YELLOW_OUT_Pin BOOM_LOW_SIDE_OUT_1_Pin */
-  GPIO_InitStruct.Pin = LED_YELLOW_OUT_Pin|BOOM_LOW_SIDE_OUT_1_Pin;
+  /*Configure GPIO pin : BOOM_LOW_SIDE_OUT_1_Pin */
+  GPIO_InitStruct.Pin = BOOM_LOW_SIDE_OUT_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+  HAL_GPIO_Init(BOOM_LOW_SIDE_OUT_1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LED_GREEN_OUT_Pin BOOM_LOW_SIDE_OUT_2_Pin */
-  GPIO_InitStruct.Pin = LED_GREEN_OUT_Pin|BOOM_LOW_SIDE_OUT_2_Pin;
+  /*Configure GPIO pins : BOOM_LOW_SIDE_OUT_2_Pin LED_GREEN_OUT_Pin LED_YELLOW_OUT_Pin */
+  GPIO_InitStruct.Pin = BOOM_LOW_SIDE_OUT_2_Pin|LED_GREEN_OUT_Pin|LED_YELLOW_OUT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;

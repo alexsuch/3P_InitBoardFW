@@ -38,7 +38,7 @@ extern "C" {
 
 /*-------------------------- Main Configuration parameters -----------------------*/
 /* Safe Timer Timeout Value is seconds */
-#define SAFE_TIMEOUT_SEC_DEFAULT                      (7u) // RELEASE VALUE - 120u
+#define SAFE_TIMEOUT_SEC_DEFAULT                      (4u) // RELEASE VALUE - 120u
 
 /* Ignition delay in milliseconds */
 #define IGNITION_DELAY_MILISEC_DEFAULT                (0u) // RELEASE VALUE - 0u
@@ -112,7 +112,7 @@ extern "C" {
 #define TEMP_OFFSET                                   (8u)
 
 /* Disable Buzzer */
-#define BUZZER_DISABLE                                (0u)
+#define BUZZER_DISABLE                                (1u)
 
 
 /*----------------------------- Mavlink parameters -----------------------*/
@@ -121,7 +121,7 @@ extern "C" {
 #define MAVLINK_INITBOARD_HEARTBEAT_INTERVAL_MS       (750u)
 #define MAVLINK_CONNECTION_TIMEOUT_MS                 (3000u)
 
-#define FLIGHT_STABLE_PARAMETERS_TIMEOUT_SEC          (7u)  // 7 seconds speed and altitude must be higher than minimum thresholds
+#define FLIGHT_STABLE_PARAMETERS_TIMEOUT_SEC          (4u)  // 7 seconds speed and altitude must be higher than minimum thresholds
 #define FLIGHT_SPEED_MINIMUM_THRESHOLD_M_S            (17u) // 17 m/s
 #define FLIGHT_ALTITUDE_MINIMUM_THRESHOLD_M           (100u)  // 100 meters
 #endif /* MAVLINK_V2_CTRL_SUPP */

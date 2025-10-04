@@ -485,6 +485,19 @@ static void AccProc_Processing(void)
 
 void AccProc_Stop (void)
 {
+#if ACC_SHAKE_DETECTION_ENABLE
+	/* If shake detection is still active, only disable hit and move detection */
+	if (accProcStatus.shake_detection_enabled != false)
+	{
+		/* Disable only hit and move detection, keep shake detection running */
+		accProcStatus.hit_detection_enabled = false;
+		accProcStatus.hitDetected = false;
+		
+		return; /* Exit early, keep shake detection and accelerometer running */
+	}
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
+
+	/* If shake detection is not active, do full reset */
 	/* Reset all data and SM */
 	memset(&accProcStatus, 0u, sizeof(accProcStatus_t));
 
