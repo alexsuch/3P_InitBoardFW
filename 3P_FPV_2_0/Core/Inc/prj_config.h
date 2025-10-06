@@ -25,20 +25,20 @@ extern "C" {
 
 
 
-#define RELEASE_CONFIGURATION_ENABLE                  (1u)
+#define RELEASE_CONFIGURATION_ENABLE                  (1)
 
 
 #if (RELEASE_CONFIGURATION_ENABLE == 0u) //TEST CONFIGURATION
 /*-------------------------- BUILD MACROS -----------------------------------------*/
 #define CONTROL_MODE                                  (PWM_CTRL_SUPP)
-#define VBAT_MEASURE_FEATURE                          (0u)
+#define VBAT_MEASURE_FEATURE                          (1u)
 #define LIS2DH12_ACC_ENABLE                           (1u)
 #define START_UP_DELAY_ENABLE                         (1u)
 #define UART_ENABLE                                   (1u)
 
 /*-------------------------- Main Configuration parameters -----------------------*/
 /* Safe Timer Timeout Value is seconds */
-#define SAFE_TIMEOUT_SEC_DEFAULT                      (7u) // RELEASE VALUE - 120u
+#define SAFE_TIMEOUT_SEC_DEFAULT                      (5u) // RELEASE VALUE - 120u
 
 /* Ignition delay in milliseconds */
 #define IGNITION_DELAY_MILISEC_DEFAULT                (0u) // RELEASE VALUE - 0u
@@ -54,11 +54,11 @@ extern "C" {
 
 /*------------------------ Mining Mode Configuration -----------------------*/
 
-#define MINING_MODE_SUPP                              (0u)
+#define MINING_MODE_SUPP                              (1u)
 
 /* Enable/disable mining mode  */
-#define MINING_MODE_ENABLE_DEFAULT                    MINING_MODE_NONE //MINING_MODE_MANUAL//MINING_MODE_AUTO //RELEASE VALUE - MINING_MODE_NONE
-#define MINING_SELF_DESTROY_EN_TIMEOUT_MIN_DEFAULT    (30u)  //RELEASE VALUE - 30u
+#define MINING_MODE_ENABLE_DEFAULT                    MINING_MODE_AUTO //MINING_MODE_MANUAL//MINING_MODE_AUTO //RELEASE VALUE - MINING_MODE_NONE
+#define MINING_SELF_DESTROY_EN_TIMEOUT_MIN_DEFAULT    (1u)  //RELEASE VALUE - 30u
 #define MINING_ENABLE_DELAY_SEC                       (5u)  //RELEASE VALUE - 30u
 
 /*------------------------ Accelerometer Parameters -----------------------------------*/
@@ -82,7 +82,7 @@ extern "C" {
 #define BATTERY_VOLTAGE_100_PERCENT_THRESHOLD_MILIVOLTS      (1450u)  // 100% - 1.45V
 #define BATTERY_VOLTAGE_0_PERCENT_THRESHOLD_MILIVOLTS        (900u)   // 0% - 0.9V
 
-#define BATTERY_VOLTAGE_VERY_LOW_SD_LOW_THRESHOLD_MILIVOLTS  (1000u) //RELEASE VALUE - 1000 mV
+#define BATTERY_VOLTAGE_VERY_LOW_SD_LOW_THRESHOLD_MILIVOLTS  (1500u) //RELEASE VALUE - 1000 mV
 #define BATTERY_VOLTAGE_LOW_SD_LOW_THRESHOLD_MILIVOLTS       (1200u) //RELEASE VALUE - 1200 mV
 #define SELF_VOLTAGE_LOW_SD_LOW_THRESHOLD_MILIVOLTS          (2500u) //RELEASE VALUE - 2400 mV
 
@@ -188,7 +188,7 @@ extern "C" {
 #define BATTERY_VOLTAGE_100_PERCENT_THRESHOLD_MILIVOLTS      (1450u)  // 100% - 1.45V
 #define BATTERY_VOLTAGE_0_PERCENT_THRESHOLD_MILIVOLTS        (900u)   // 0% - 0.9V
 
-#define BATTERY_VOLTAGE_VERY_LOW_SD_LOW_THRESHOLD_MILIVOLTS  (1000u) //RELEASE VALUE - 1000 mV
+#define BATTERY_VOLTAGE_VERY_LOW_SD_LOW_THRESHOLD_MILIVOLTS  (1050u) //RELEASE VALUE - 1050 mV
 #define BATTERY_VOLTAGE_LOW_SD_LOW_THRESHOLD_MILIVOLTS       (1200u) //RELEASE VALUE - 1200 mV
 #define SELF_VOLTAGE_LOW_SD_LOW_THRESHOLD_MILIVOLTS          (2500u) //RELEASE VALUE - 2400 mV
 

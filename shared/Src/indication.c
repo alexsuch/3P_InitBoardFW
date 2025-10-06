@@ -25,6 +25,12 @@ static void Indication_Stop (uint8_t timer_id)
 	}
 }
 
+static void Indication_BuzzerStartCbk (uint8_t timer_id)
+{
+	(void) timer_id;
+	BuzzerEnable();
+}
+
 static void Indication_Start (uint8_t timer_id)
 {
 	(timer_id == INDICATION_STATUS_TMR) ? SET_STATUS_LED(true) : SET_ERROR_LED(true);
@@ -75,6 +81,12 @@ static void Indication_HandleTmrCbk (uint8_t timer_id)
 	    			SET_STATUS_LED(true);
 	    			Timer_Start (timer_id, INDICATION_TMR_SHORT_SOUND_PERIOD_MS, Indication_PeriodicCbk);
 	    		}
+				else if (indStatus.curr_status == IND_STATUS_DESTRUCTION_START_NO_SOUND)
+				{
+	    			/* Set only LED for charging indication */
+	    			SET_ERROR_LED(true);
+	    			Timer_Start (timer_id, INDICATION_TMR_SHORT_SOUND_PERIOD_MS, Indication_PeriodicCbk);
+				}
 	    		else
 	    		{
 	    			/* Start indication for 50% of duty time */
@@ -391,9 +403,9 @@ void Indication_SetStatus (ind_status_t status_code, uint32_t user_data)
 		    	Indication_SetIndication(IND_PATTERN_SINGLE_LONG, STATUS_TYPE);
 		    	break;
 		    case IND_STATUS_BOOM_START:
+				// Delay Buzzer to not drop system voltage level
+				Timer_Start (INDICATION_STATUS_TMR, INDICATION_TMR_LONG_SOUND_PERIOD_MS, Indication_BuzzerStartCbk);
 		    	BuzzerEnable();
-		    	//Indication_SetIndication(IND_PATTERN_SOLID, STATUS_TYPE);
-		    	//Indication_SetIndication(IND_PATTERN_SOLID, ERROR_TYPE);
 		    	break;
 		    case IND_STATUS_FUSE_POPULATED:
 		    	if (indStatus.curr_status != status_code)
@@ -412,6 +424,7 @@ void Indication_SetStatus (ind_status_t status_code, uint32_t user_data)
 		    	Indication_SetIndication(IND_PATTERN_PERIODIC_50_50, STATUS_TYPE);
 		    	break;
 		    case IND_STATUS_DESTRUCTION_START:
+			case IND_STATUS_DESTRUCTION_START_NO_SOUND:
 		    	Indication_SetIndication(IND_PATTERN_PERIODIC_50_50, ERROR_TYPE);
 		    	break;
 		    case IND_STATUS_DESTRUCTION_STOP:

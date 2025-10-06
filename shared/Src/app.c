@@ -239,7 +239,7 @@ static void App_SelfDestroyRunCbk (uint8_t timer_id)
 		)
 	{
 		Timer_Start (SELF_DISTRUCTION_IND_TMR, (SELF_DESTROY_INDICATE_LAST_SECONDS * MILISECONDS_IN_SECOND), App_SelfDestructionCbk);
-		Indication_SetStatus(IND_STATUS_DESTRUCTION_START, 0u);
+		Indication_SetStatus((sysStatus.is_battery_low ? IND_STATUS_DESTRUCTION_START_NO_SOUND: IND_STATUS_DESTRUCTION_START), 0u);
 	}
 	else
 	{
