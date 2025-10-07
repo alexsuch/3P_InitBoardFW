@@ -25,7 +25,7 @@ extern "C" {
 
 
 
-#define RELEASE_CONFIGURATION_ENABLE                  (1)
+#define RELEASE_CONFIGURATION_ENABLE                  (1u)
 
 
 #if (RELEASE_CONFIGURATION_ENABLE == 0u) //TEST CONFIGURATION
@@ -175,7 +175,7 @@ extern "C" {
 #define CHARGING_TMR_TIMEOUT_MS  		     	      (9000u) //RELEASE VALUE - 9000u
 
 /* Ignition time in milliseconds */
-#define IGNITION_OFF_TMR_PERIOD_MS  		 		  (1000u) //RELEASE VALUE - 1000u
+#define IGNITION_OFF_TMR_PERIOD_MS  		 		  (2500u) //RELEASE VALUE - 2500u
 
 /* Disarm -> Ignition timeout */
 #define DISARM_IGNITION_BLOCK_TIMEOUT_MS              (4000u) // RELEASE VALUE - 4000u
