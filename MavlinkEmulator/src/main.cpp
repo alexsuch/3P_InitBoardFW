@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <HardwareSerial.h>
 
+#include "mavlink_crc_helper.h"  // ??? ??????????????? CRC-?????? (v2: header ??? magic + payload + crc_extra)
 // ======================= CONFIG SECTION =======================
 // System Configuration - Autopilot reads switch states from ESP32 GPIO  
 #define MAVLINK_SYSTEM_ID_INITBOARD 0x42  // 66 - Initiation Board
@@ -151,17 +152,45 @@ const char* get_board_state_description(uint8_t board_state) {
 uint8_t get_sequence_number() {
     return sequence_number++;
 }
-
-// Simplified CRC calculation for Mavlink
-uint16_t calculate_mavlink_crc(const uint8_t* data, uint8_t len) {
+// [NOTE] ?? «?????» ??????? ??????? ??? ?????????? ? ?????, ??? ?? ?????????????? ??? ?????????? ??????.
+// MAVLink CRC calculation using exact MCRF4XX algorithm from MAVLink library
+uint16_t calculate_mavlink_crc(const uint8_t* data, uint8_t len, uint8_t msg_id) {
     uint16_t crc = 0xFFFF;
+    
+    // Process the packet data using exact MCRF4XX CRC16 algorithm from MAVLink library
     for (int i = 0; i < len; i++) {
-        crc ^= data[i] << 8;
-        for (int j = 0; j < 8; j++) {
-            if (crc & 0x8000) crc = (crc << 1) ^ 0x1021;
-            else crc <<= 1;
-        }
+        uint8_t tmp = data[i] ^ (uint8_t)(crc & 0xFF);
+        tmp ^= (tmp << 4);
+        crc = (crc >> 8) ^ (tmp << 8) ^ (tmp << 3) ^ (tmp >> 4);
     }
+    
+    // Add CRC extra bytes based on message ID
+    uint8_t crc_extra = 0;
+    switch (msg_id) {
+        case 0:   // HEARTBEAT
+            crc_extra = 50;
+            break;
+        case 74:  // VFR_HUD
+            crc_extra = 20;
+            break;
+        case 76:  // COMMAND_LONG
+            crc_extra = 155;
+            break;
+        case 77:  // COMMAND_ACK
+            crc_extra = 143;
+            break;
+        default:
+            crc_extra = 0;
+            break;
+    }
+    
+    // Add the CRC extra byte using exact MCRF4XX algorithm from MAVLink library
+    if (crc_extra != 0) {
+        uint8_t tmp = crc_extra ^ (uint8_t)(crc & 0xFF);
+        tmp ^= (tmp << 4);
+        crc = (crc >> 8) ^ (tmp << 8) ^ (tmp << 3) ^ (tmp >> 4);
+    }
+    
     return crc;
 }
 
@@ -263,9 +292,14 @@ void send_autopilot_heartbeat() {
     heartbeat_packet[18] = 3;    // Mavlink version
     
     // Calculate and add CRC16
-    uint16_t crc = calculate_mavlink_crc(heartbeat_packet, 19);
-    heartbeat_packet[19] = crc & 0xFF;
-    heartbeat_packet[20] = (crc >> 8) & 0xFF;
+    // v2 CRC: header ??? magic (9 ????) + payload (len=9) + crc_extra(HEARTBEAT)
+    uint16_t crc_ours = mavlink2_crc_x25(&heartbeat_packet[1], 9,
+                                         &heartbeat_packet[10], 9,
+                                         mav_crc_extra_lookup_minimal(0));   // msgid=0
+    // ??????/«????????» ?????????? — ???? ??? ?????/??????????
+    uint16_t crc_old  = calculate_mavlink_crc(&heartbeat_packet[1], 18, 0);
+    heartbeat_packet[19] = (uint8_t)(crc_ours & 0xFF);
+    heartbeat_packet[20] = (uint8_t)(crc_ours >> 8);
     
     // Send via UART2
     Serial2.write(heartbeat_packet, 21);
@@ -309,9 +343,14 @@ void send_vfr_hud() {
     memcpy(&vfr_hud_packet[26], &vfr_hud_data.climb_rate, 4);
     
     // Calculate and add CRC16
-    uint16_t crc = calculate_mavlink_crc(vfr_hud_packet, 30);
-    vfr_hud_packet[30] = crc & 0xFF;
-    vfr_hud_packet[31] = (crc >> 8) & 0xFF;
+    // v2 CRC: header ??? magic (9) + payload (20) + crc_extra(VFR_HUD)
+    uint16_t crc_ours = mavlink2_crc_x25(&vfr_hud_packet[1], 9,
+                                         &vfr_hud_packet[10], 20,
+                                         mav_crc_extra_lookup_minimal(74));  // msgid=74
+    // ??????/«????????» — ??? ??????????
+    uint16_t crc_old  = calculate_mavlink_crc(&vfr_hud_packet[1], 29, 74);
+    vfr_hud_packet[30] = (uint8_t)(crc_ours & 0xFF);
+    vfr_hud_packet[31] = (uint8_t)(crc_ours >> 8);
     
     // Send via UART2
     Serial2.write(vfr_hud_packet, 32);
@@ -447,10 +486,15 @@ void send_custom_command(uint8_t command_type, uint8_t command_data) {
     // confirmation (1 byte)
     command_packet[42] = 0;  // No confirmation required
     
-    // Calculate and add CRC16 
-    uint16_t crc = calculate_mavlink_crc(command_packet, 43); // Header + payload
-    command_packet[43] = crc & 0xFF;
-    command_packet[44] = (crc >> 8) & 0xFF;
+    // Calculate and add CRC16 (??? ?????? + ??? ?????????? ?? «??????»)
+    // v2 CRC: header ??? magic (9) + payload (33) + crc_extra(COMMAND_LONG)
+    uint16_t crc_ours = mavlink2_crc_x25(&command_packet[1], 9,
+                                         &command_packet[10], 33,
+                                         mav_crc_extra_lookup_minimal(76));  // msgid=76
+    uint16_t crc_old  = calculate_mavlink_crc(&command_packet[1], 42, 76);
+    command_packet[43] = (uint8_t)(crc_ours & 0xFF);
+    command_packet[44] = (uint8_t)(crc_ours >> 8);
+
     
     // Send via UART2
     Serial2.write(command_packet, 45);

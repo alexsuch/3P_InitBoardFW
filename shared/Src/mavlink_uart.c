@@ -49,6 +49,13 @@ static int16_t Mavlink_FloatToIntMS_Signed(const uint8_t* float_bytes);
 static void Mavlink_InitBoardHeartbeatTimerCallback(uint8_t tmr_id);
 static void Mavlink_AutopilotConnectionTimeoutCallback(uint8_t tmr_id);
 
+// MAVLink CRC functions
+static void Mavlink_CrcAccumulate(uint8_t data, uint16_t *crc);
+static void Mavlink_CrcAccumulateBuffer(uint16_t *crc, const uint8_t *buf, uint16_t len);
+static uint16_t Mavlink_CalculateCrcX25(const uint8_t* header_no_magic, uint8_t header_len, 
+                                        const uint8_t* payload, uint8_t payload_len, uint8_t crc_extra);
+static uint8_t Mavlink_GetCrcExtra(uint32_t msg_id);
+
 // ======================= INITIALIZATION =======================
 /**
  * @brief Initialize Mavlink UART communication
@@ -123,12 +130,12 @@ static void Mavlink_SendInitBoardHeartbeat(void) {
     packet[MAVLINK_V2_PAYLOAD_START_INDEX + HEARTBEAT_MAVLINK_VERSION_INDEX] = MAVLINK_VERSION;       // Mavlink version
     
     // Calculate and add CRC16
-    uint16_t crc = Mavlink_CalculateCrc(packet, MAVLINK_V2_HEADER_SIZE + HEARTBEAT_PAYLOAD_SIZE);
+    uint16_t crc = Mavlink_CalculateCrc(packet, MAVLINK_V2_HEADER_SIZE + HEARTBEAT_PAYLOAD_SIZE + MAVLINK_V2_CRC_SIZE);
     packet[MAVLINK_V2_HEADER_SIZE + HEARTBEAT_PAYLOAD_SIZE] = crc & 0xFF;
     packet[MAVLINK_V2_HEADER_SIZE + HEARTBEAT_PAYLOAD_SIZE + 1] = (crc >> 8) & 0xFF;
     
     // Send packet
-    Mavlink_SendPacket(packet, 21);
+    Mavlink_SendPacket(packet, MAVLINK_V2_HEADER_SIZE + HEARTBEAT_PAYLOAD_SIZE + MAVLINK_V2_CRC_SIZE);
 }
 
 /**
@@ -244,7 +251,7 @@ static void Mavlink_ProcessReceivedMessage(void) {
     // Verify CRC
     uint16_t received_crc = mavlink_rx_buffer[mavlink_state.expected_length - 2] |
                            (mavlink_rx_buffer[mavlink_state.expected_length - 1] << 8);
-    uint16_t calculated_crc = Mavlink_CalculateCrc(mavlink_rx_buffer, mavlink_state.expected_length - 2);
+    uint16_t calculated_crc = Mavlink_CalculateCrc(mavlink_rx_buffer, mavlink_state.expected_length);
     
     if (received_crc != calculated_crc) {
         return;  // Invalid CRC, discard message
@@ -458,12 +465,12 @@ static void Mavlink_SendCommandAck(uint16_t command, uint8_t result) {
     packet[MAVLINK_V2_PAYLOAD_START_INDEX + COMMAND_ACK_RESULT_INDEX] = result;                 // Result
     
     // Calculate and add CRC16
-    uint16_t crc = Mavlink_CalculateCrc(packet, MAVLINK_V2_HEADER_SIZE + COMMAND_ACK_PAYLOAD_SIZE);
+    uint16_t crc = Mavlink_CalculateCrc(packet, MAVLINK_V2_HEADER_SIZE + COMMAND_ACK_PAYLOAD_SIZE + MAVLINK_V2_CRC_SIZE);
     packet[MAVLINK_V2_HEADER_SIZE + COMMAND_ACK_PAYLOAD_SIZE] = crc & 0xFF;
     packet[MAVLINK_V2_HEADER_SIZE + COMMAND_ACK_PAYLOAD_SIZE + 1] = (crc >> 8) & 0xFF;
     
     // Send packet
-    Mavlink_SendPacket(packet, 15);
+    Mavlink_SendPacket(packet, MAVLINK_V2_HEADER_SIZE + COMMAND_ACK_PAYLOAD_SIZE + MAVLINK_V2_CRC_SIZE);
 }
 
 // ======================= PERIODIC FUNCTIONS =======================
@@ -539,6 +546,76 @@ const mavlink_vfr_hud_data_t* Mavlink_GetVfrHudData(void) {
 }
 
 // ======================= UTILITY FUNCTIONS =======================
+
+// ======================= MAVLINK CRC FUNCTIONS =======================
+/**
+ * @brief X.25 CRC accumulate function (MAVLink standard)
+ * @param data Data byte to accumulate
+ * @param crc Pointer to CRC accumulator
+ */
+static void Mavlink_CrcAccumulate(uint8_t data, uint16_t *crc) {
+    uint8_t tmp = data ^ (uint8_t)(*crc & 0xFF);
+    tmp ^= (uint8_t)(tmp << 4);
+    *crc = (uint16_t)((*crc >> 8) ^ ((uint16_t)tmp << 8) ^ ((uint16_t)tmp << 3) ^ ((uint16_t)tmp >> 4));
+}
+
+/**
+ * @brief Accumulate CRC for a buffer
+ * @param crc Pointer to CRC accumulator
+ * @param buf Buffer to process
+ * @param len Buffer length
+ */
+static void Mavlink_CrcAccumulateBuffer(uint16_t *crc, const uint8_t *buf, uint16_t len) {
+    while (len--) {
+        Mavlink_CrcAccumulate(*buf++, crc);
+    }
+}
+
+/**
+ * @brief Get CRC extra byte for specific message ID
+ * @param msg_id MAVLink message ID
+ * @return uint8_t CRC extra byte
+ */
+static uint8_t Mavlink_GetCrcExtra(uint32_t msg_id) {
+    switch (msg_id) {
+        case 0:   // HEARTBEAT
+            return 50;
+        case 74:  // VFR_HUD  
+            return 20;
+        case 76:  // COMMAND_LONG
+            return 152;
+        case 77:  // COMMAND_ACK
+            return 143;
+        default:
+            return 0;  // Unknown message ID - will cause CRC failure
+    }
+}
+
+/**
+ * @brief Calculate MAVLink v2 CRC16 using X.25 algorithm with crc_extra
+ * @param header_no_magic Header without magic byte (starting from LEN)
+ * @param header_len Header length (9 bytes for MAVLink v2)
+ * @param payload Payload data
+ * @param payload_len Payload length
+ * @param crc_extra Message-specific CRC extra byte
+ * @return uint16_t Calculated CRC
+ */
+static uint16_t Mavlink_CalculateCrcX25(const uint8_t* header_no_magic, uint8_t header_len, 
+                                        const uint8_t* payload, uint8_t payload_len, uint8_t crc_extra) {
+    uint16_t crc = 0xFFFF;  // X.25 init value
+    
+    // Accumulate header (without magic byte)
+    Mavlink_CrcAccumulateBuffer(&crc, header_no_magic, (uint16_t)header_len);
+    
+    // Accumulate payload
+    Mavlink_CrcAccumulateBuffer(&crc, payload, (uint16_t)payload_len);
+    
+    // Accumulate crc_extra
+    Mavlink_CrcAccumulate(crc_extra, &crc);
+    
+    return crc;
+}
+
 /**
  * @brief Send packet via UART
  * @param packet Packet data
@@ -559,26 +636,32 @@ static void Mavlink_SendPacket(uint8_t* packet, uint16_t length) {
 }
 
 /**
- * @brief Calculate Mavlink CRC16
- * @param data Data to calculate CRC for
- * @param len Data length
+ * @brief Calculate correct MAVLink v2 CRC16 with crc_extra
+ * @param packet Complete packet buffer (including magic byte)
+ * @param packet_len Total packet length (including magic and CRC bytes)
  * @return uint16_t Calculated CRC
  */
-static uint16_t Mavlink_CalculateCrc(const uint8_t* data, uint8_t len) {
-    uint16_t crc = 0xFFFF;
+static uint16_t Mavlink_CalculateCrc(const uint8_t* packet, uint8_t packet_len) {
+    // Extract message ID to get crc_extra
+    uint32_t msg_id = packet[MAVLINK_V2_MSG_ID_LOW_INDEX] | 
+                     (packet[MAVLINK_V2_MSG_ID_MID_INDEX] << 8) | 
+                     (packet[MAVLINK_V2_MSG_ID_HIGH_INDEX] << 16);
     
-    for (uint8_t i = 0; i < len; i++) {
-        crc ^= data[i] << 8;
-        for (uint8_t j = 0; j < 8; j++) {
-            if (crc & 0x8000) {
-                crc = (crc << 1) ^ 0x1021;
-            } else {
-                crc <<= 1;
-            }
-        }
-    }
+    // Get payload length from packet
+    uint8_t payload_len = packet[MAVLINK_V2_PAYLOAD_LEN_INDEX];
     
-    return crc;
+    // Get CRC extra for this message ID
+    uint8_t crc_extra = Mavlink_GetCrcExtra(msg_id);
+    
+    // Calculate CRC using X.25 algorithm:
+    // - Header without magic (9 bytes starting from LEN byte)  
+    // - Payload (payload_len bytes)
+    // - crc_extra for this message ID
+    return Mavlink_CalculateCrcX25(&packet[MAVLINK_V2_PAYLOAD_LEN_INDEX],  // Header without magic (LEN byte onwards)
+                                  9,                                        // MAVLink v2 core header length (without magic)
+                                  &packet[MAVLINK_V2_PAYLOAD_START_INDEX], // Payload start
+                                  payload_len,                              // Payload length
+                                  crc_extra);                               // crc_extra for this message ID
 }
 
 /**
