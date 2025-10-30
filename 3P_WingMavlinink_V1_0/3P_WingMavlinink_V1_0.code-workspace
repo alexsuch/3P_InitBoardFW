@@ -1,0 +1,24 @@
+{
+	"folders": [
+		{
+			"name": "3P_WingMavlinink_V1_0",
+			"path": "."
+		},
+		{
+			"name": "shared",
+			"path": "../shared"
+		},
+		{
+			"name": "MavlinkEmulator",
+			"path": "../MavlinkEmulator"
+		}
+	],
+	"settings": {
+		"cortex-debug.enableTelemetry": false,
+		"files.associations": {
+			"cstdint": "c",
+			"app_config.h": "c",
+			"stick_ctrl.h": "c"
+		}
+	}
+}

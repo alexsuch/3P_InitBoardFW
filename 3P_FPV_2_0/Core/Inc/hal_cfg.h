@@ -23,15 +23,6 @@ extern "C" {
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
-/* Stick PWM Definitions ---------------------------------------------------------*/
-#define PWM1_IN_Pin GPIO_PIN_14
-#define PWM1_IN_GPIO_Port GPIOB
-#define PWM1_IN_EXTI_IRQn EXTI4_15_IRQn
-
-#define PWM2_IN_Pin GPIO_PIN_10
-#define PWM2_IN_GPIO_Port GPIOA
-#define PWM2_IN_EXTI_IRQn EXTI4_15_IRQn
-
 /* Timer Definitions ---------------------------------------------------------*/
 #define SYS_TICK_TIMER_BASE         TIM3        /* System tick timer instance */
 #define DETON_HIGH_SIDE_SWITH_TIMER_BASE    TIM14       /* Detonation high-side switch PWM timer */
@@ -77,10 +68,20 @@ extern "C" {
 #define ACC_INT_PIN                 ACC_INT_Pin
 
 /* PWM Input Pins (for PWM control mode) */
-#define PWM1_INPUT_PORT             PWM1_IN_GPIO_Port
-#define PWM1_INPUT_PIN              PWM1_IN_Pin
-#define PWM2_INPUT_PORT             PWM2_IN_GPIO_Port
-#define PWM2_INPUT_PIN              PWM2_IN_Pin
+#define PWM1_INPUT_PORT             GPIOA
+#define PWM1_INPUT_PIN              GPIO_PIN_10
+#define PWM1_INPUT_EXTI_IRQn        EXTI4_15_IRQn
+
+/* PWM2 Input Pins (for PWM control mode) */
+#define PWM2_INPUT_PORT             FC_PWM_GPIO_IN_GPIO_Port
+#define PWM2_INPUT_PIN              FC_PWM_GPIO_IN_Pin
+#define PWM2_INPUT_EXTI_IRQn        EXTI4_15_IRQn
+
+/* UART Communication Pins */
+#define COMM_UART_TX_PORT           GPIOA
+#define COMM_UART_TX_PIN            GPIO_PIN_9      /* PA9 - USART1 TX */
+#define COMM_UART_RX_PORT           GPIOA
+#define COMM_UART_RX_PIN            GPIO_PIN_10     /* PA10 - USART1 RX */
 
 /* Buzzer */
 #define BUZZER_PORT                 EM_BUZZ_GPIO_Port

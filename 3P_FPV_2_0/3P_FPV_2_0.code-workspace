@@ -35,7 +35,8 @@
 			"span": "c",
 			"stdlib.h": "c",
 			"compare": "c",
-			"cstdint": "c"
+			"cstdint": "c",
+			"stm32g0xx_hal.h": "c"
 		}
 	}
 }

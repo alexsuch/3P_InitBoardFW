@@ -68,7 +68,9 @@ void AppConfig_SetDefaultConfig (config_data_t* cfg_data)
 	cfg_data->dev_move_threshold                    = MOVEMENT_THRESHOLD_DEFAULT;
 	cfg_data->device_type                           = DEFAULT_DEVICE_TYPE;
 	cfg_data->customer_info                         = DEFAULT_CUSTOMER_INFO;
-}
+	cfg_data->vusaEnable                            = VUSA_ENABLE_DEFAULT;
+	cfg_data->pwm2InputEnable                       = PWM2_INPUT_ENABLE_DEFAULT;
+}  
 
 static bool AppGonfig_ReadFlashConfig(uint32_t addr, config_data_t* cfg_data)
 {

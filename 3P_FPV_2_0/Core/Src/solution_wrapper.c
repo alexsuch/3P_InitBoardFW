@@ -89,10 +89,20 @@ void DetonHighSideSwithSet (bool state)
 	}
 }
 
+void delay_us(uint16_t us)
+{
+    // Калібровано для 24MHz
+    // Кожна ітерація займає приблизно 3-4 такти
+    for (volatile uint16_t i = 0; i < (us * 4); i++) {
+        __NOP();
+    }
+}
+
 void DetonLowSideSwitchSet (bool state)
 {
-	HAL_GPIO_WritePin(DETON_LOW_SIDE_SWITCH_OUT_1_PORT, DETON_LOW_SIDE_SWITCH_OUT_1_PIN, state);
 	HAL_GPIO_WritePin(DETON_LOW_SIDE_SWITCH_OUT_2_PORT, DETON_LOW_SIDE_SWITCH_OUT_2_PIN, state);
+	delay_us(2);
+	HAL_GPIO_WritePin(DETON_LOW_SIDE_SWITCH_OUT_1_PORT, DETON_LOW_SIDE_SWITCH_OUT_1_PIN, state);
 }
 
 // ---------------------- LED INDICATION -----------------------------------
@@ -121,33 +131,100 @@ uint32_t ReadStickCounter10Us (void)
 	return __HAL_TIM_GetCounter(&PWM_STICK_COUNTER_HANDLE);
 }
 
-void PWM_IN_GPIO_Init(void)
+void UART_Configure(bool disable_rx, bool disable_tx)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
 
-  /* Deinit UART */
-  HAL_UART_DeInit(&MAIN_UART_HANDLE);
-  /* Wait for some time */
+  if (disable_rx && disable_tx)
+  {
+    /* Deinit entire UART */
+    HAL_UART_DeInit(&MAIN_UART_HANDLE);
+  }
+  else if (disable_rx && !disable_tx)
+  {
+    /* Disable only UART RX, keep TX active */
+    HAL_UART_AbortReceive_IT(&MAIN_UART_HANDLE);
+    CLEAR_BIT(MAIN_UART_HANDLE.Instance->CR1, USART_CR1_RE);  // Disable RX only
+    
+    /* Reconfigure RX pin as GPIO */
+    GPIO_InitStruct.Pin = COMM_UART_RX_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(COMM_UART_RX_PORT, &GPIO_InitStruct);
+  }
+  else if (!disable_rx && disable_tx)
+  {
+    /* Disable only UART TX, keep RX active */
+    HAL_UART_AbortTransmit_IT(&MAIN_UART_HANDLE);
+    CLEAR_BIT(MAIN_UART_HANDLE.Instance->CR1, USART_CR1_TE);  // Disable TX only
+    
+    /* Reconfigure TX pin as GPIO */
+    GPIO_InitStruct.Pin = COMM_UART_TX_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(COMM_UART_TX_PORT, &GPIO_InitStruct);
+  }
+  
+  /* Wait for configuration to settle */
   HAL_Delay(10);
+}
 
-  /*Configure GPIO pin : PWM2_IN_Pin */
-  GPIO_InitStruct.Pin = PWM2_INPUT_PIN;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(PWM2_INPUT_PORT, &GPIO_InitStruct);
+void PWM_GPIO_Configure(bool configure_pwm1, bool configure_pwm2)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  bool need_exti_init = false;
 
-  /*Configure GPIO pin : PWM1_IN_Pin */
-  GPIO_InitStruct.Pin = PWM1_INPUT_PIN;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(PWM1_INPUT_PORT, &GPIO_InitStruct);
+  if (configure_pwm1)
+  {
+    /*Configure GPIO pin : PWM1_IN_Pin */
+    GPIO_InitStruct.Pin = PWM1_INPUT_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+    HAL_GPIO_Init(PWM1_INPUT_PORT, &GPIO_InitStruct);
+    need_exti_init = true;
+  }
 
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI4_15_IRQn, 0, 1);
-  HAL_NVIC_EnableIRQ(EXTI4_15_IRQn);
+  if (configure_pwm2)
+  {
+    /*Configure GPIO pin : PWM2_IN_Pin */
+    GPIO_InitStruct.Pin = PWM2_INPUT_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+    HAL_GPIO_Init(PWM2_INPUT_PORT, &GPIO_InitStruct);
+    need_exti_init = true;
+  }
 
-  /* Wait for some time */
+  if (need_exti_init)
+  {
+    /* EXTI interrupt init */
+    HAL_NVIC_SetPriority(EXTI4_15_IRQn, 0, 1);
+    HAL_NVIC_EnableIRQ(EXTI4_15_IRQn);
+  }
+
+  /* Wait for configuration to settle */
   HAL_Delay(10);
+}
+
+void PWM_IN_GPIO_Init(void)
+{
+  /* Legacy function - calls new functions with default behavior */
+  UART_Configure(true, true);   // Disable both RX and TX (full UART deinit)
+  PWM_GPIO_Configure(true, true); // Configure both PWM1 and PWM2
+}
+
+void UART_Restore_Configuration(void)
+{
+  /* Disable PWM GPIO interrupts */
+  HAL_NVIC_DisableIRQ(EXTI4_15_IRQn);
+  
+  /* Reinitialize UART with both RX and TX */
+  extern void MX_USART1_UART_Init(void);  // External function from main.c
+  MX_USART1_UART_Init();
+  
+  /* Restart UART reception */
+  UartGetOneByteRx();
 }
 
 bool ReadFcPwm1Gpio (void)

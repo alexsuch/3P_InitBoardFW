@@ -698,12 +698,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(ACC_INT_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : FC_PWM_GPIO_IN_Pin */
-  GPIO_InitStruct.Pin = FC_PWM_GPIO_IN_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(FC_PWM_GPIO_IN_GPIO_Port, &GPIO_InitStruct);
-
   /*Configure GPIO pins : LED_YELLOW_OUT_Pin BOOM_LOW_SIDE_OUT_1_Pin */
   GPIO_InitStruct.Pin = LED_YELLOW_OUT_Pin|BOOM_LOW_SIDE_OUT_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -717,10 +711,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI4_15_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI4_15_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */

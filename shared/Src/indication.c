@@ -23,6 +23,16 @@ static void Indication_Stop (uint8_t timer_id)
 		Timer_Start (timer_id, ONE_SECOND_TICK_TMR_PERIOD_MS, Indication_PeriodicCbk);
 		indStatus.stat_pattern = IND_PATTERN_PERIODIC_2_SHORT_PLUS_LONG_PAUSE;
 	}
+	else if (indStatus.curr_status == IND_STATUS_CHARGING_STOP)
+	{
+		Timer_Start (timer_id, INDICATION_TMR_5SEC_SOUND_PERIOD_MS, Indication_PeriodicCbk);
+		indStatus.stat_pattern = IND_PATTERN_PERIODIC_1_SHORT_PLUS_PAUSE;
+		indStatus.curr_status = IND_STATUS_ARMED;
+	}
+	else
+	{
+		// Empty
+	}
 }
 
 static void Indication_BuzzerStartCbk (uint8_t timer_id)
@@ -114,8 +124,15 @@ static void Indication_HandleTmrCbk (uint8_t timer_id)
 	    case IND_PATTERN_PERIODIC_1_SHORT_PLUS_PAUSE:
 	    	if (*retry_cnt == 0u)
 	    	{
-	    		/* Start indication for sequence 1 short + long pause */
-	    		Indication_Start(timer_id);
+				if ((timer_id == INDICATION_STATUS_TMR) && (indStatus.curr_status == IND_STATUS_ARMED))
+				{
+					SET_STATUS_LED(true);
+				}
+				else
+				{
+					/* Start indication for sequence 1 short + long pause */
+					Indication_Start(timer_id);
+				}
 	    		Timer_Start (timer_id, INDICATION_TMR_SHORT_SOUND_PERIOD_MS, Indication_PeriodicCbk);
 	    		(*retry_cnt)++;
 	    	}
@@ -123,7 +140,14 @@ static void Indication_HandleTmrCbk (uint8_t timer_id)
 	    	{
 	    		/* Stop indication for long pause */
 	    		Indication_Stop(timer_id);
-	    		Timer_Start (timer_id, INDICATION_TMR_VERY_LONG_SOUND_PERIOD_MS, Indication_PeriodicCbk);
+				if ((timer_id == INDICATION_STATUS_TMR) && (indStatus.curr_status == IND_STATUS_ARMED))
+				{
+					Timer_Start (timer_id, INDICATION_TMR_5SEC_SOUND_PERIOD_MS, Indication_PeriodicCbk);
+				}
+				else
+				{
+		    		Timer_Start (timer_id, INDICATION_TMR_VERY_LONG_SOUND_PERIOD_MS, Indication_PeriodicCbk);
+				}
 	    		*retry_cnt = 0;
 	    	}
 	    	break;
@@ -214,7 +238,10 @@ static void Indication_SetIndication (ind_pattern_t ind_pattern, uint8_t ind_typ
 			break;
 		case IND_PATTERN_VERY_LONG:
 			Indication_Start(tmr_id);
-			Timer_Start (tmr_id, INDICATION_TMR_1SEC_SOUND_PERIOD_MS, Indication_Stop);
+			if (indStatus.curr_status == IND_STATUS_CHARGING_START)
+				Timer_Start (tmr_id, INDICATION_TMR_1SEC_SOUND_PERIOD_MS, Indication_Stop);
+			else
+				Timer_Start (tmr_id, INDICATION_TMR_1SEC_SOUND_PERIOD_MS, Indication_Stop);
 			break;
 		case IND_PATTERN_PERIODIC_50_50:
 		case IND_PATTERN_PERIODIC_1_SHORT_PLUS_PAUSE:
@@ -399,7 +426,6 @@ void Indication_SetStatus (ind_status_t status_code, uint32_t user_data)
 		    	break;
 		    case IND_STATUS_INIT_SUCCESS:
 		    case IND_STATUS_CHARGING_STOP:
-		    case IND_STATUS_ARMED:
 		    	Indication_SetIndication(IND_PATTERN_SINGLE_LONG, STATUS_TYPE);
 		    	break;
 		    case IND_STATUS_BOOM_START:
@@ -430,7 +456,13 @@ void Indication_SetStatus (ind_status_t status_code, uint32_t user_data)
 		    case IND_STATUS_DESTRUCTION_STOP:
 		    case IND_STATUS_BOOM_STOP:
 		    	Indication_ClearErrorIndication();
-		    	Indication_ClearStatusIndication();
+				Indication_ClearStatusIndication();
+				break;
+			case IND_STATUS_DISARMED:
+				if (indStatus.curr_status == IND_STATUS_ARMED)
+				{
+					Indication_ClearStatusIndication();
+				}
 		    	break;
 		    case IND_STATUS_CONFIGURATION_MODE:
 		    	Indication_SetIndication(IND_PATTERN_SINGLE_5_SEC, STATUS_TYPE);

@@ -112,7 +112,7 @@ extern "C" {
 #define TEMP_OFFSET                                   (8u)
 
 /* Disable Buzzer */
-#define BUZZER_DISABLE                                (1u)
+#define BUZZER_DISABLE                                (0u)
 
 
 /*----------------------------- Mavlink parameters -----------------------*/

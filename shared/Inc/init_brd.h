@@ -104,6 +104,7 @@ typedef enum
     APP_TASK_INIT_CBK,
 	APP_TASK_SAFE_TMR_TICK_CBK,
 	APP_TASK_SELF_DESTROY_TMR_TICK_CBK,
+	APP_TASK_MINING_ACTIVATE_TMR_TICK_CBK,
 	APP_TASK_PUMP_TMR_CBK,
 	APP_TASK_VUSA_DETECTED_CBK,
 	APP_TASK_VUSA_RUN_TMR_CBK,
@@ -148,6 +149,7 @@ typedef enum
 	IND_STATUS_CHARGING_STOP,
 	IND_STATUS_SET_SAFE_IND,
 	IND_STATUS_ARMED,
+	IND_STATUS_DISARMED,
 	IND_STATUS_BOOM_START,
 	IND_STATUS_BOOM_STOP,
 	IND_STATUS_FUSE_POPULATED,
@@ -202,7 +204,8 @@ typedef enum
 typedef enum {
 	TIMER_MODE_NONE = 0x00,         // No active timer
     TIMER_MODE_SAFE = 0x01,         // Safe timer active
-    TIMER_MODE_SELF_DESTROY = 0x02  // Self destroy timer active
+    TIMER_MODE_SELF_DESTROY = 0x02,  // Self destroy timer active
+    TIMER_MODE_MINING = 0x03          // Mining timer active
 } timer_mode_t;
 
 // Board state enumeration
@@ -211,7 +214,8 @@ typedef enum {
     BOARD_STATE_DISARMED = 0x01,    // Disarmed
 	BOARD_STATE_CHARGING = 0x02,    // Charging
     BOARD_STATE_ARMED = 0x03,       // Armed
-    BOARD_STATE_BOOM = 0x04         // Boom
+    BOARD_STATE_BOOM = 0x04,        // Boom
+    BOARD_STATE_MINING = 0x05       // Mining active
 } board_state_t;
 
 typedef struct __attribute__ ((__packed__))
@@ -229,7 +233,9 @@ typedef struct __attribute__ ((__packed__))
 
 	uint32_t dev_move_threshold; // MOVEMENT_THRESHOLD 72089LL // Граничне значення для детекції руху (наприклад 1.1 радіана.сек = FLOAT_TO_FIXED(1.1) = 72089
 
-	uint8_t rsvd2[12]; // Reserved bytes 
+	uint8_t vusaEnable; // Default - Enable
+	uint8_t pwm2InputEnable; // Default - Enable
+	uint8_t rsvd2[10]; // Reserved bytes 
 	
 	// Device identification
 	uint8_t device_type;    // Device type identifier (see device_type_t enum)
@@ -263,6 +269,7 @@ typedef struct {
 	uint8_t prearm_flag;         // Autopilot PREARM state (0-1)
 	uint8_t speed_altitude_flag; // Autopilot speed/altitude control state (0-1)
 	uint8_t shake_detected;      // Startup shake detection flag (0-1)
+	uint8_t low_pwr_self_dest_allowed; // Low power self-destruct allowed flag (0-1)
 } init_board_system_info_t;
 
 typedef struct
@@ -278,6 +285,8 @@ typedef struct
 	bool safe_tmr_pause;
 	// Self destruction timer
 	uint16_t self_destroy_tmr_tick;
+	// Mining activate timer
+	uint16_t mining_activate_tmr_tick;
 	// Accelerometer
 	bool acc_hit_detection_enabled;
 	// Stick control
@@ -285,7 +294,7 @@ typedef struct
 	control_evt_t stick_ctrl_stat;
 	control_evt_t mining_stick_ctrl_stat;
 	bool is_ctrl_lost;
-	bool is_ignition_bloked;
+	bool is_ignition_blocked;
 	// Prearm
 	bool arm_enabled;     // Mavlink autopilot ARM state
 	// Fuse
@@ -303,8 +312,9 @@ typedef struct
 	uint16_t adc_temp;
 	float temperature;
 	bool is_battery_low;
+	// OSD 
+	bool osd_enabled;
 	// Self destroy
-	bool low_pwr_self_dest_allowed;
 	self_destroy_state_t self_destroy_mode;
 	mining_state_t mining_state;
 	// Mavlink data

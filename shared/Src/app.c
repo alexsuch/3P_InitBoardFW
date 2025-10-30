@@ -15,10 +15,13 @@
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
 #include "stick_ctrl.h"
 #endif /* (CONTROL_MODE == PWM_CTRL_SUPP) */
+#if (OSD_ENABLE == 1u)
+#include "msp_osd.h"
+#endif /* (OSD_ENABLE == 1u) */
 
 static system_status_t sysStatus;
 static uint8_t idx = 0u;
-static bool start_up, uart_active = false;
+static bool start_up, configurator_active = false;
 
 static void App_SafeTmrStop (void);
 static void App_ClearError(uint32_t err_code);
@@ -44,6 +47,8 @@ static void App_SelfDestroyTmrTickCbk (void);
 #endif /* !SELF_DESTROY_DISABLE */
 #if MINING_MODE_SUPP
 static void App_MiningModeEnableCbk (uint8_t timer_id);
+static void App_MiningActivateTmrTick (uint8_t timer_id);
+static void App_MiningActivateTmrTickCbk (void);
 #endif /* MINING_MODE_SUPP */
 #if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 static bool App_MavlinkIsAble2Arm(void);
@@ -149,7 +154,9 @@ static void App_SetError(err_type_t err_type, uint32_t usr_data)
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
 		Stick_Deinit();
 #endif
+#if ACC_SUPPORTED_ENABLE
 		AccProc_Stop(); //TODO OSAV add force condition
+#endif
 
 		sysStatus.state = SYSTEM_STATE_ERROR;
 
@@ -184,8 +191,10 @@ static void App_SetError(err_type_t err_type, uint32_t usr_data)
 #if MINING_MODE_SUPP
 				(usr_data == ERR_CODE_UNEXPECTED_MINING) ||
 #endif /* MINING_MODE_SUPP */
-				(usr_data == ERR_CODE_FUSE_INCORRECT_STATE) ||
-				(usr_data == ERR_CODE_UNEXPECTED_VUSA_SHORTED)
+				(usr_data == ERR_CODE_FUSE_INCORRECT_STATE)
+#if VUSA_ENABLE
+				|| (usr_data == ERR_CODE_UNEXPECTED_VUSA_SHORTED)
+#endif /* VUSA_ENABLE */	
 			)
 		{
 			/* Set error flag for tracking */
@@ -239,7 +248,17 @@ static void App_SelfDestroyRunCbk (uint8_t timer_id)
 		)
 	{
 		Timer_Start (SELF_DISTRUCTION_IND_TMR, (SELF_DESTROY_INDICATE_LAST_SECONDS * MILISECONDS_IN_SECOND), App_SelfDestructionCbk);
-		Indication_SetStatus((sysStatus.is_battery_low ? IND_STATUS_DESTRUCTION_START_NO_SOUND: IND_STATUS_DESTRUCTION_START), 0u);
+
+		if (sysStatus.vbat_voltage_mv < BATTERY_VOLTAGE_LOW_NO_SOUND_THRESHOLD_MILIVOLTS)
+		{
+			/* If battery almost discharged provide indication without sound */
+			Indication_SetStatus(IND_STATUS_DESTRUCTION_START_NO_SOUND, 0u);
+		}
+		else if (sysStatus.is_battery_low == false)
+		{
+			/* Indicate self destruction with sound only if battery is not low */
+			Indication_SetStatus(IND_STATUS_DESTRUCTION_START, 0u);
+		}
 	}
 	else
 	{
@@ -269,11 +288,17 @@ static void App_SelfDestroyTmrTickCbk (void)
 	/* Decrement timer tick */
     sysStatus.self_destroy_tmr_tick--;
 
-	/* Update timer mode */
-	sysStatus.sys_info.timer_mode = TIMER_MODE_SELF_DESTROY;
+#if MINING_MODE_SUPP
+	/* Only update sys_info if Mining timer is not active (Mining has higher priority) */
+	if (!Timer_IsActive(MINING_ACTIVATE_TMR))
+#endif /* MINING_MODE_SUPP */
+	{
+		/* Update timer mode */
+		sysStatus.sys_info.timer_mode = TIMER_MODE_SELF_DESTROY;
 
-	/* Update timer info */
-	sysStatus.sys_info.timer_seconds = sysStatus.self_destroy_tmr_tick;
+		/* Update timer info */
+		sysStatus.sys_info.timer_seconds = sysStatus.self_destroy_tmr_tick;
+	}
 
     if (sysStatus.self_destroy_tmr_tick == 0u)
     {
@@ -297,44 +322,29 @@ static void App_SelfDestroyTimerStart (self_destroy_mode_t mode)
 	{
 		if (sysStatus.config->selfDestroyTimeoutMin != 0u)
 		{
-#if TEST_SELF_DESTROY_ONLY_MODE
-			sysStatus.self_destroy_tmr_tick = 20; //Set 20 sec self destroy for the test
-#elif TEST_SELF_DESTROY_MINING_MODE
-			sysStatus.self_destroy_tmr_tick = 30; //Set 30 sec self destroy for the test
-#else
 			sysStatus.self_destroy_tmr_tick = sysStatus.config->selfDestroyTimeoutMin * SECONDS_IN_MINUTE; // Convert minutes to seconds
-#endif
 			Timer_Start (SELF_DESTRUCTION_TMR, ONE_SECOND_TICK_TMR_PERIOD_MS, App_SelfDestroyTmrTick);
 		}
 
 #if MINING_MODE_SUPP
 		/* Check if mining feature is enabled */
 		if (
-				(sysStatus.config->miningMode == MINING_MODE_AUTO)
-#if !TEST_SELF_DESTROY_MINING_MODE
-			  &&((sysStatus.config->selfDestroyTimeoutMin > sysStatus.config->miningAutoActivationMin)
+				(sysStatus.config->miningMode == MINING_MODE_AUTO) &&
+			    ((sysStatus.config->selfDestroyTimeoutMin > sysStatus.config->miningAutoActivationMin) ||
 			  // Low battery self destruction activation 
-			  || (sysStatus.config->selfDestroyTimeoutMin == 0u))
-#endif
+			    (sysStatus.config->selfDestroyTimeoutMin == 0u))
 			)
 		{
-#if TEST_SELF_DESTROY_MINING_MODE
-			Timer_Start (MINING_ACTIVATE_TMR, 12000, App_MiningModeEnableCbk);
-#else
-			Timer_Start (MINING_ACTIVATE_TMR, (sysStatus.config->miningAutoActivationMin * MILISECONDS_IN_MINUTE), App_MiningModeEnableCbk);
-#endif /* TEST_SELF_DESTROY_MINING_MODE */
+			/* Start mining activate timer with second-by-second countdown */
+			sysStatus.mining_activate_tmr_tick = sysStatus.config->miningAutoActivationMin * SECONDS_IN_MINUTE; // Convert minutes to seconds
+			Timer_Start (MINING_ACTIVATE_TMR, ONE_SECOND_TICK_TMR_PERIOD_MS, App_MiningActivateTmrTick);
 		}
 #endif /* MINING_MODE_SUPP */
 	}
 	else if (mode == SELF_DESTROY_MODE_CTRL_LOST)
 	{
-#if TEST_SELF_DESTROY_MINING_MODE || TEST_SELF_DESTROY_ONLY_MODE
-		//Set 3 hours by default if connection was lost
-		sysStatus.self_destroy_tmr_tick = 10; // 10 seconds for test
-#else
 		//Set 3 hours by default if connection was lost
 		sysStatus.self_destroy_tmr_tick = SELF_DESTRUCTION_TMR_LOST_PERIOD_MINUTES * SECONDS_IN_MINUTE; // Convert minutes to seconds
-#endif
 		Timer_Start (SELF_DESTRUCTION_TMR, ONE_SECOND_TICK_TMR_PERIOD_MS, App_SelfDestroyTmrTick);
 	}
 	else
@@ -359,14 +369,81 @@ static void App_SelfDestroyTimerStop (void)
 	
 	/* Reset self destroy timer counter */
 	sysStatus.self_destroy_tmr_tick = sysStatus.config->selfDestroyTimeoutMin * SECONDS_IN_MINUTE;
+	
+#if MINING_MODE_SUPP
+	/* Reset mining activate timer counter */
+	sysStatus.mining_activate_tmr_tick = sysStatus.config->miningAutoActivationMin * SECONDS_IN_MINUTE;
+#endif /* MINING_MODE_SUPP */
 }
 #endif /* !SELF_DESTROY_DISABLE */
 
 #if MINING_MODE_SUPP
+static void App_MiningActivateTmrTick (uint8_t timer_id)
+{
+    (void)timer_id;
+
+    Util_SetFlag((uint32_t*)&sysStatus.app_task_mask, APP_TASK_MINING_ACTIVATE_TMR_TICK_CBK);
+}
+
+static void App_MiningActivateTmrTickCbk (void)
+{
+	/* Decrement timer tick */
+    sysStatus.mining_activate_tmr_tick--;
+
+	/* Update timer mode to MINING (Mining timer has higher priority than Self Destroy) */
+	sysStatus.sys_info.timer_mode = TIMER_MODE_MINING;
+
+	/* Update timer info */
+	sysStatus.sys_info.timer_seconds = sysStatus.mining_activate_tmr_tick;
+
+    if (sysStatus.mining_activate_tmr_tick == 0u)
+    {
+    	/* Timer expired - enable mining feature */
+		sysStatus.mining_state = MINING_STATE_ENABLING;
+
+		/* Clear indication */
+		Indication_SetStatus(IND_STATUS_NONE, 0u);
+
+		/* Mining timer finished - restore Self Destroy timer info if it's still active */
+		if (Timer_IsActive(SELF_DESTRUCTION_TMR))
+		{
+			sysStatus.sys_info.timer_mode = TIMER_MODE_SELF_DESTROY;
+			sysStatus.sys_info.timer_seconds = sysStatus.self_destroy_tmr_tick;
+		}
+		else
+		{
+			sysStatus.sys_info.timer_mode = TIMER_MODE_NONE;
+			sysStatus.sys_info.timer_seconds = 0u;
+		}
+
+		if (sysStatus.state == SYSTEM_STATE_ARMED)
+		{
+			/* System is already charged */
+			App_ArmRun();
+		}
+		else
+		{
+			/* Goto ARM state */
+			App_ChargingRun(SYSTEM_STATE_CHARGING, true);
+			/* Enable mining feature because of variables reset as a part of App_ChargingRun function */
+			sysStatus.mining_state = MINING_STATE_ENABLING;
+		}
+    }
+    else
+    {
+    	/* Continue countdown - restart timer for next second */
+    	Timer_Start (MINING_ACTIVATE_TMR, ONE_SECOND_TICK_TMR_PERIOD_MS, App_MiningActivateTmrTick);
+    }
+}
+
 static void App_MiningModeEnableCbk (uint8_t timer_id)
 {
+	/* This is the old callback that will be replaced by the timer tick system */
 	/* Enable mining feature */
 	sysStatus.mining_state = MINING_STATE_ENABLING;
+
+	/* Clear indication */
+	Indication_SetStatus(IND_STATUS_NONE, 0u);
 
 	if (sysStatus.state == SYSTEM_STATE_ARMED)
 	{
@@ -398,15 +475,39 @@ static void App_MiningModeDisable (void)
 		/* Disable mining feature */
 		sysStatus.mining_state = MINING_STATE_NONE;
 
+		/* Update board state based on current system state */
+		if ((sysStatus.state == SYSTEM_STATE_ARMED) || (sysStatus.state == SYSTEM_STATE_ARMED_PUMP)) {
+			sysStatus.sys_info.board_state = BOARD_STATE_ARMED;
+		} else if (sysStatus.state == SYSTEM_STATE_CHARGING) {
+			sysStatus.sys_info.board_state = BOARD_STATE_CHARGING;
+		} else {
+			sysStatus.sys_info.board_state = BOARD_STATE_INIT;
+		}
+
+		/* Mining timer stopped - restore Self Destroy timer info if it's still active */
+		if (Timer_IsActive(SELF_DESTRUCTION_TMR))
+		{
+			sysStatus.sys_info.timer_mode = TIMER_MODE_SELF_DESTROY;
+			sysStatus.sys_info.timer_seconds = sysStatus.self_destroy_tmr_tick;
+		}
+		else
+		{
+			sysStatus.sys_info.timer_mode = TIMER_MODE_NONE;
+			sysStatus.sys_info.timer_seconds = 0u;
+		}
+
 		/* Disable low battery self destruction mechanism */
-		sysStatus.low_pwr_self_dest_allowed = false;
+		sysStatus.sys_info.low_pwr_self_dest_allowed = false;
 
 		/* Disable any detection */
+#if ACC_SUPPORTED_ENABLE
 		AccProc_Stop();
+#endif
 	}
 }
 #endif /* MINING_MODE_SUPP */
 
+#if VUSA_ENABLE
 /***************************************** VUSA HANDLERS ********************************************************/
 static void App_VusaHandleCbk (bool vusaShorted);
 
@@ -475,6 +576,30 @@ static void App_VusaCbk (system_evt_t evt, uint32_t usr_data)
     	Util_SetFlag((uint32_t*)&sysStatus.app_task_mask, APP_TASK_VUSA_DETECTED_CBK);
 	}
 }
+#endif /* VUSA_ENABLE */
+
+#if (OSD_ENABLE == 1u)
+/************************************ OSD HANDLERS *******************************************************/
+static uint8_t App_OsdCbk (system_evt_t evt, uint32_t usr_data, void* usr_ptr)
+{
+	uint8_t ret = 0;
+
+    if (evt == SYSTEM_EVT_READY)
+	{
+		ret = 1;
+	}
+
+	return ret;
+}
+
+void App_OsdInit(void)
+{
+	/* Set OSD enabled flag */
+	sysStatus.osd_enabled = true;
+	/* Initialize OSD module */
+	OsdMsp_Init(App_OsdCbk, &sysStatus.sys_info);
+}
+#endif /* (OSD_ENABLE == 1u) */
 
 /***************************************** STICK CONTROL ********************************************************/
 
@@ -486,10 +611,15 @@ static void App_DisarmHandler (bool is_stick)
 #endif /* !SELF_DESTROY_DISABLE */
 
 	/* Disable any detection */
+#if ACC_SUPPORTED_ENABLE
 	AccProc_Stop();
+#endif
+	/* Set indication for disarmed state */
+	Indication_SetStatus(IND_STATUS_DISARMED, 0u);
+
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
 	/* Reset block flag and stop the timer */
-	sysStatus.is_ignition_bloked = false;
+	sysStatus.is_ignition_blocked = false;
 	Timer_Stop (BLOCK_IGNITION_TMR);
 #endif
 
@@ -527,7 +657,7 @@ static void App_DisarmHandler (bool is_stick)
 static void App_StickIgnitionUnblockCbk (uint8_t timer_id)
 {
 	/* If timer elapsed - ignition is ready */
-	sysStatus.is_ignition_bloked = false;
+	sysStatus.is_ignition_blocked = false;
 }
 
 static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
@@ -640,7 +770,9 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 		/* Start hit accelerometer measurement if stick moved from ARM wo acc to ARM with Acc */
 		if ((usr_data == CONTROL_EVT_ARM_WITH_ACC) && (sysStatus.stick_ctrl_stat == CONTROL_EVT_ARM_WITH_ACC))
 		{
+#if ACC_SUPPORTED_ENABLE
 			AccProc_HitDetectionStart();
+#endif
 		}
 	}
 
@@ -673,7 +805,7 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 #endif /* !SELF_DESTROY_DISABLE */
 				/* Don't safe new state if control was lost */
 				sysStatus.is_ctrl_lost = true;
-				sysStatus.is_ignition_bloked = false;
+				sysStatus.is_ignition_blocked = false;
 			}
 
 			if (sysStatus.is_ctrl_lost == false)
@@ -786,7 +918,7 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 				if (
 						(usr_data == CONTROL_EVT_IGNITION) &&
 						(sysStatus.stick_ctrl_stat == CONTROL_EVT_ARM_WITH_ACC) &&
-						(sysStatus.is_ignition_bloked == false)
+						(sysStatus.is_ignition_blocked == false)
 					)
 				{
 					/* Initiate ignition */
@@ -803,7 +935,7 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 			}
 
 			/* Block ignition if block timer not expired */
-			if ((usr_data == CONTROL_EVT_IGNITION) && (sysStatus.is_ignition_bloked != false))
+			if ((usr_data == CONTROL_EVT_IGNITION) && (sysStatus.is_ignition_blocked != false))
 			{
 				/* Run timer to unblock ignition after timeout */
 				Timer_Stop (BLOCK_IGNITION_TMR);
@@ -811,7 +943,7 @@ static void App_StickCbk (system_evt_t evt, uint32_t usr_data)
 			else if (usr_data == CONTROL_EVT_ARM_WITH_ACC)
 			{
 				/* Add condition to ignore Ignition for some time */
-				sysStatus.is_ignition_bloked = true;
+				sysStatus.is_ignition_blocked = true;
 
 				/* Run timer to unblock ignition after timeout */
 				Timer_Start (BLOCK_IGNITION_TMR, DISARM_IGNITION_BLOCK_TIMEOUT_MS, App_StickIgnitionUnblockCbk);
@@ -1139,7 +1271,7 @@ void App_SetSafe (bool ind_enable)
 	sysStatus.safe_tmr_pause = false;
 #if !SELF_DESTROY_DISABLE
 	sysStatus.self_destroy_mode = SELF_DESTROY_STATE_NONE;
-	sysStatus.low_pwr_self_dest_allowed = false;
+	sysStatus.sys_info.low_pwr_self_dest_allowed = false;
 #endif /* !SELF_DESTROY_DISABLE */
 
 #if MINING_MODE_SUPP
@@ -1287,7 +1419,7 @@ static void App_AdcDataAnalyze(void)
 		}
 	}
 #if !SELF_DESTROY_DISABLE
-	else if ((sysStatus.low_pwr_self_dest_allowed != false) && (sysStatus.self_destroy_mode == SELF_DESTROY_STATE_NONE))
+	else if ((sysStatus.sys_info.low_pwr_self_dest_allowed != false) && (sysStatus.self_destroy_mode == SELF_DESTROY_STATE_NONE))
 	{
 		/* If system is already charged threshold can be 100mV higher as we don't need to charge the capacitor */
 		if ((sysStatus.state == SYSTEM_STATE_ARMED) || (sysStatus.state == SYSTEM_STATE_ARMED_PUMP))
@@ -1314,7 +1446,7 @@ static void App_AdcDataAnalyze(void)
 #if !SELF_DESTROY_DISABLE
 			/* If self destroy for low battery is allowed - run self destroy */
 			if (
-					(sysStatus.low_pwr_self_dest_allowed != false)           &&
+					(sysStatus.sys_info.low_pwr_self_dest_allowed != false)           &&
 					(sysStatus.self_destroy_mode == SELF_DESTROY_STATE_NONE)
 				)
 			{
@@ -1344,16 +1476,25 @@ static void App_AdcDataAnalyze(void)
 /***************************************** IGNITION STATE ********************************************************/
 static void App_IgnitionSwitchOn (void)
 {
-	/* Enable High and Low side switches */
-	DetonHighSideSwithSet (true);
+	/* Enable low side first */
 	DetonLowSideSwitchSet (true);
+	delay_us(20);  //20us delay to avoid shoot through
+	DetonHighSideSwithSet (true);
+
+}
+
+static void App_IgnitionDisableLowSideCbk (uint8_t timer_id)
+{
+	/* Disable low side switch */
+	DetonLowSideSwitchSet (false);
 }
 
 static void App_IgnitionSwitchOff (void)
 {
 	/* Disable High and Low side switches */
 	DetonHighSideSwithSet (false);
-	DetonLowSideSwitchSet (false);
+	/* Run timer to disable low side driver */
+	Timer_Start (IGNITION_TMR, IGNITION_TMR_LOW_SIDE_OFF_PERIOD_MS, App_IgnitionDisableLowSideCbk);
 }
 
 static void App_IgnitionOffCbk(void)
@@ -1480,14 +1621,22 @@ static void App_ArmRun (void)
 	/* Process the mining mode if enabled */
 	if (sysStatus.mining_state >= MINING_STATE_ENABLING)
 	{
-		/* Allow low battery self destruction mechanism */
-		sysStatus.low_pwr_self_dest_allowed = true;
+		if (sysStatus.config->selfDestroyTimeoutMin == 0u)
+		{
+			/* Allow low battery self destruction mechanism */
+			sysStatus.sys_info.low_pwr_self_dest_allowed = true; //OSAV TODO: check if required in mining mode
+		}
 
 		/* Activate mining/trap mode  */
 		sysStatus.mining_state = MINING_STATE_ACTIVE;
 
+		/* Update board state in system info */
+		sysStatus.sys_info.board_state = BOARD_STATE_MINING;
+
 		/* Enable move detection */
+#if ACC_SUPPORTED_ENABLE
 		AccProc_MoveDetectionStart(sysStatus.config->dev_move_threshold);
+#endif
 
 #if MOVE_DETECTED_STICKY_LED_FEATURE
 				/* Turn on test LED to indicate that accelerometer detected the hit */
@@ -1506,19 +1655,22 @@ static void App_ArmRun (void)
 			App_DisarmHandler(false);
 			ret = true;
 		}
-		else if ((sysStatus.stick_ctrl_stat == CONTROL_EVT_IGNITION) && (sysStatus.is_ignition_bloked == false))
+		else if ((sysStatus.stick_ctrl_stat == CONTROL_EVT_IGNITION) && (sysStatus.is_ignition_blocked == false))
 		{
 			App_IgnitionRun();
 			return;
 		}
 	}
 
+#if ACC_SUPPORTED_ENABLE
 	/* Enable Hit detection after armed */
 	if ((sysStatus.acc_hit_detection_enabled != false) && (ret == false))
 	{
 		/* Start hit accelerometer measurement */
+
 		AccProc_HitDetectionStart();
 	}
+#endif
 }
 
 /***************************************** CHARGING STATE **************************************************/
@@ -1754,7 +1906,7 @@ static void App_FusePollCbk (void)
 			/* Update fuse sys_info structure */
 			sysStatus.sys_info.fuse_present = !new_fuse_state;
 
-			if (uart_active)
+			if (configurator_active)
 			{
 				if (sysStatus.is_fuse_removed == false)
 				{
@@ -1984,10 +2136,15 @@ void App_InitFinish (void)
 	Mavlink_Init(App_MavlinkCbk, &sysStatus.sys_info);
 #endif /* CONTROL_MODE == MAVLINK_V2_CTRL_SUPP */
 
-	/* Start Vusa functionality */
-	VusaStart(App_VusaCbk);
-	/* Set flag to monitor Vusa */
-	Util_SetFlag((uint32_t*)&sysStatus.app_task_mask, APP_TASK_VUSA_RUN_TMR_CBK);
+#if VUSA_ENABLE
+	if (sysStatus.config->vusaEnable != false)
+	{
+		/* Start Vusa functionality */
+		VusaStart(App_VusaCbk);
+		/* Set flag to monitor Vusa */
+		Util_SetFlag((uint32_t*)&sysStatus.app_task_mask, APP_TASK_VUSA_RUN_TMR_CBK);
+	}
+#endif /* VUSA_ENABLE */
 
 	/* Run systems check timeout */
 	Timer_Start (SYS_INIT_TMR, SYS_INIT_TMR_PERIOD_MS, App_InitTmrCbk);
@@ -2031,6 +2188,7 @@ void App_InitRun(void)
 	/* Set flag to monitor Fuse */
 	Util_SetFlag((uint32_t*)&sysStatus.app_task_mask, APP_TASK_FUSE_POLL_CBK);
 
+#if ACC_SUPPORTED_ENABLE
 	/* Enable accelerometer if required */
 	if (
 			(sysStatus.config->accEnable != false) 
@@ -2042,19 +2200,22 @@ void App_InitRun(void)
 		/* Set error by default - after successful init error will be erased */
 		Util_SetFlag((uint32_t*)&sysStatus.err_stat, SYSTEM_BLOCK_ACC);
 		/* Init Acc  handling */
+
 		AccProc_Reset(App_AccProcCbk);
+
 		if (sysStatus.config->accEnable != false)
 		{
 			sysStatus.acc_hit_detection_enabled = true;
 		}
 	}
+#endif
 
 #if UART_ENABLE
 	/* Set UART flag to wait for UART connection */
 	UartConfig_Init();
 
 	sysStatus.state = SYSTEM_STATE_CONFIGURE;
-	uart_active = true;
+	configurator_active = true;
 #else
 	App_InitFinish();
 #endif
@@ -2095,6 +2256,7 @@ void App_Process ()
 			    	/* Check fuse state */
 			    	App_FusePollCbk();
 			    	break;
+#if VUSA_ENABLE
 			    case APP_TASK_VUSA_DETECTED_CBK:
 			    	/* Vusa detected */
 			    	App_VusaHandleCbk(true);
@@ -2103,6 +2265,7 @@ void App_Process ()
 			    	/* Run Vusa check timer */
 			    	App_VusaRunCheckTmrCbk();
 			    	break;
+#endif /* VUSA_ENABLE */	
 			    case APP_TASK_INIT_FUSE_CHECK_CBK:
 			    	/* Check fuse state */
 			    	App_FuseCheck();
@@ -2133,6 +2296,12 @@ void App_Process ()
 			    	App_SelfDestroyInit();
 			    	break;
 #endif /* !SELF_DESTROY_DISABLE */
+#if MINING_MODE_SUPP
+			    case APP_TASK_MINING_ACTIVATE_TMR_TICK_CBK:
+			    	/* Mining activate timer tick handling */
+			    	App_MiningActivateTmrTickCbk();
+			    	break;
+#endif /* MINING_MODE_SUPP */
 			    default:
 			    	break;
 			}
@@ -2152,29 +2321,51 @@ void App_Task (void)
 	Indication_Task();
 
 	/* Acceleration processing task */
+#if ACC_SUPPORTED_ENABLE
 	AccProc_Task();
+#endif
 
 #if UART_ENABLE
 	/* UART Configure task  */
-	if (uart_active)
+	if (configurator_active)
 	{
-		uart_active = UartConfig_Task();
+		configurator_active = UartConfig_Task();
 		/* Exit from UART configuration - continue init board */
-		if (uart_active == false)
+		if (configurator_active == false)
 		{
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
-			/* Reinit GPIOs for PWM */
-			PWM_IN_GPIO_Init();
-#endif
+			/* Check configuration of PWM2 channel */
+			if (sysStatus.config->pwm2InputEnable == false)
+			{
+#if (OSD_ENABLE == 1u)
+				/* Disable RX and keep TX enabled to transmit OSD data */
+				UART_Configure(true, false);
+				/* Initialize OSD */
+				App_OsdInit();
+#endif /* (OSD_ENABLE == 1u) */
+				/* Configure only PWM1 channel */
+				PWM_GPIO_Configure(true, false);
+			}
+			else
+			{
+				/* Configure both PWM channels */
+                PWM_IN_GPIO_Init();
+			}
+#endif /* (CONTROL_MODE == PWM_CTRL_SUPP) */
+
 			/* Finish application initialization */
 			App_InitFinish();
 		}
 		return;
 	}
 #endif
+
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
 	/* Stick monitoring */
 	Stick_Task();
+#if (OSD_ENABLE == 1u)
+	OsdMsp_Task();
+#endif /* (OSD_ENABLE == 1u) */
 #elif (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 	/* Mavlink Processing */
 	Mavlink_Process();

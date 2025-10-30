@@ -7,8 +7,8 @@
   */
 /* USER CODE END Header */
 
-#ifndef __SOLUTION_H
-#define __SOLUTION_H
+#ifndef __SOLUTION_WRAPPER_H
+#define __SOLUTION_WRAPPER_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,6 +43,7 @@ extern ADC_HandleTypeDef hadc1;
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Solution_HalInit (void);
+void delay_us(uint16_t us);
 bool SpiReadRegister(uint8_t address, uint8_t* value, uint8_t num);
 bool SpiWriteSingleRegister(uint8_t address, uint8_t value);
 bool ReadAccIntGpio (void);
@@ -80,6 +81,9 @@ void Test2LedSet (bool state);
 void Test3LedSet (bool state);
 void Test3LedToggle ();
 void PWM_IN_GPIO_Init(void);
+void UART_Configure(bool disable_rx, bool disable_tx);
+void PWM_GPIO_Configure(bool configure_pwm1, bool configure_pwm2);
+void UART_Restore_Configuration(void);
 bool UartSendData(uint8_t* wrBuff, uint8_t len);
 bool UartGetOneByteRx(void);
 void VusaUart_IRQ_Cbk(uint8_t vusa_byte);
@@ -99,4 +103,4 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
 }
 #endif
 
-#endif /* __SOLUTION_H */
+#endif /* __SOLUTION_WRAPPER_H */

@@ -156,10 +156,17 @@ void EXTI4_15_IRQHandler(void) //TODO OSAV
   /* USER CODE BEGIN EXTI4_15_IRQn 0 */
 
   /* USER CODE END EXTI4_15_IRQn 0 */
-  HAL_GPIO_EXTI_IRQHandler(PWM2_IN_Pin);
+  HAL_GPIO_EXTI_IRQHandler(PWM2_INPUT_PIN);
   /* USER CODE BEGIN EXTI4_15_IRQn 1 */
-  HAL_GPIO_EXTI_IRQHandler(FC_PWM_GPIO_IN_Pin);
+  HAL_GPIO_EXTI_IRQHandler(PWM1_INPUT_PIN);
   /* USER CODE END EXTI4_15_IRQn 1 */
+
+  // Очистити всі можливі EXTI flags в діапазоні 4-15
+  for (uint32_t pin = GPIO_PIN_4; pin <= GPIO_PIN_15; pin <<= 1) {
+    if (__HAL_GPIO_EXTI_GET_IT(pin) != RESET) {
+      __HAL_GPIO_EXTI_CLEAR_IT(pin);
+    }
+  }
 }
 
 /**

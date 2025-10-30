@@ -52,6 +52,7 @@ extern "C" {
 #define MINING_ACTIVATE_TMR                          (9u)
 
 #define IGNITION_TMR                                 (10u)
+#define IGNITION_TMR_LOW_SIDE_OFF_PERIOD_MS          (50u)
 
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
 #define STICK1_LOST_TMR                        		 (11u)
@@ -74,6 +75,7 @@ extern "C" {
 #define UART_CONFIGURATOR_PING_TIMEOUT_MS            (2500u)
 
 #define FLIGHT_PARAMS_UPDATE_TMR                     (17u)
+#define FLIGHT_PARAMS_UPDATE_TMR_OSD_PERIOD_MS       (500u)
 
 #define MILISECONDS_IN_SECOND                        (1000u)
 #define MILISECONDS_IN_MINUTE                        (MILISECONDS_IN_SECOND * 60u)
