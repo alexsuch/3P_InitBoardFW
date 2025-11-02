@@ -215,7 +215,7 @@ typedef enum {
 	BOARD_STATE_CHARGING = 0x02,    // Charging
     BOARD_STATE_ARMED = 0x03,       // Armed
     BOARD_STATE_BOOM = 0x04,        // Boom
-    BOARD_STATE_MINING = 0x05       // Mining active
+    BOARD_STATE_MINING = 0x05,       // Mining active
 } board_state_t;
 
 typedef struct __attribute__ ((__packed__))
@@ -314,6 +314,8 @@ typedef struct
 	bool is_battery_low;
 	// OSD 
 	bool osd_enabled;
+	// UART Configurator
+	bool configurator_active;
 	// Self destroy
 	self_destroy_state_t self_destroy_mode;
 	mining_state_t mining_state;

@@ -193,13 +193,6 @@ void Stick_Deinit (void)
 
 void Stick_ProcessEdgeCbk (system_evt_t idx, uint32_t usr_data)
 {
-	/* Disable interrupts */
-	uint32_t prim = __get_PRIMASK();
-	__disable_irq();
-
-	//Test2LedToggle();
-	//TestLedToggle();
-
 	if (idx <= PWM_CH_2)
 	{
 		stickStatus[idx].countVal = ReadStickCounter10Us();
@@ -231,10 +224,6 @@ void Stick_ProcessEdgeCbk (system_evt_t idx, uint32_t usr_data)
 			stickStatus[idx].fallingIdx++;
 		}
 	}
-
-	// enable interrupts
-	__set_PRIMASK(prim);
-
 }
 
 void Stick_Task (void)

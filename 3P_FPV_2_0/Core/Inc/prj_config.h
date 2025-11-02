@@ -25,19 +25,19 @@ extern "C" {
 
 
 
-#define RELEASE_CONFIGURATION_ENABLE                  (0u)
+#define RELEASE_CONFIGURATION_ENABLE                  (1u)
 
 #if (RELEASE_CONFIGURATION_ENABLE == 0u) //TEST CONFIGURATION
 /*-------------------------- BUILD MACROS -----------------------------------------*/
 #define CONTROL_MODE                                  (PWM_CTRL_SUPP)
-#define VBAT_MEASURE_FEATURE                          (1u)
-#define ACC_SUPPORTED_ENABLE                          (1u)
-#define LIS2DH12_ACC_ENABLE                           (1u)
+#define VBAT_MEASURE_FEATURE                          (0u)
+#define ACC_SUPPORTED_ENABLE                          (0u)
+#define LIS2DH12_ACC_ENABLE                           (0u)
 #define START_UP_DELAY_ENABLE                         (1u)
 #define UART_ENABLE                                   (1u)
 
 /*--------------------------- VUSA MACROS -----------------------------------------*/
-#define VUSA_ENABLE                                   (0u) // RELEASE VALUE - 1u
+#define VUSA_ENABLE                                   (u) // RELEASE VALUE - 1u
 #define VUSA_ENABLE_DEFAULT                           (1u) // RELEASE VALUE - 1u      
 
 /*--------------------------- OSD MACROS -----------------------------------------*/
@@ -45,17 +45,11 @@ extern "C" {
 #define OSD_ENABLE_DEFAULT                            (1u) // RELEASE VALUE - 1u
 
 /*----------------------------PWM 2 MACROS -----------------------------------------*/
-#if (OSD_ENABLE == 1u)
-#define PWM2_INPUT_ENABLE                             (0u) // RELEASE VALUE - 1u
 #define PWM2_INPUT_ENABLE_DEFAULT                     (0u) // RELEASE VALUE - 1u
-#else
-#define PWM2_INPUT_ENABLE                             (1u) // RELEASE VALUE - 0u
-#define PWM2_INPUT_ENABLE_DEFAULT                     (1u) // RELEASE VALUE - 0u
-#endif /* OSD_ENABLE == 0u */
 
 /*-------------------------- Main Configuration parameters -----------------------*/
 /* Safe Timer Timeout Value is seconds */
-#define SAFE_TIMEOUT_SEC_DEFAULT                      (10u) // RELEASE VALUE - 120u
+#define SAFE_TIMEOUT_SEC_DEFAULT                      (5u) // RELEASE VALUE - 120u
 
 /* Ignition delay in milliseconds */
 #define IGNITION_DELAY_MILISEC_DEFAULT                (0u) // RELEASE VALUE - 0u
@@ -64,7 +58,7 @@ extern "C" {
 #define ACC_ENABLE_DEFAULT                            (1u) // RELEASE VALUE - 1u
 
 /* Self destruction related timings */
-#define SELF_DESTROY_TIMEOUT_MIN_DEFAULT              (0u)     //RELEASE VALUE - 30u
+#define SELF_DESTROY_TIMEOUT_MIN_DEFAULT              (1u)     //RELEASE VALUE - 30u
 
 /* Magic number chosen by experimental way */
 #define MOVEMENT_THRESHOLD_DEFAULT                    (72089LL) //RELEASE VALUE - 72089LL
@@ -148,19 +142,15 @@ extern "C" {
 #define VBAT_MEASURE_FEATURE                          (1u)
 #define START_UP_DELAY_ENABLE                         (1u)
 #define UART_ENABLE                                   (1u)
+#define ACC_SUPPORTED_ENABLE                          (1u)
 
 /*--------------------------- OSD MACROS -----------------------------------------*/
 #define OSD_ENABLE                                    (1u) // RELEASE VALUE - 1u
 #define OSD_ENABLE_DEFAULT                            (1u) // RELEASE VALUE - 1u
 
 /*----------------------------PWM 2 MACROS -----------------------------------------*/
-#if (OSD_ENABLE == 1u)
-#define PWM2_INPUT_ENABLE                             (0u) // RELEASE VALUE - 1u
 #define PWM2_INPUT_ENABLE_DEFAULT                     (0u) // RELEASE VALUE - 1u
-#else
-#define PWM2_INPUT_ENABLE                             (1u) // RELEASE VALUE - 0u
-#define PWM2_INPUT_ENABLE_DEFAULT                     (1u) // RELEASE VALUE - 0u
-#endif /* OSD_ENABLE == 0u */
+
 /*--------------------------- VUSA MACROS -----------------------------------------*/
 #define VUSA_ENABLE                                   (1u) // RELEASE VALUE - 1u
 #define VUSA_ENABLE_DEFAULT                           (1u) // RELEASE VALUE - 1u      
@@ -171,7 +161,7 @@ extern "C" {
 #define ACC_HIT_THRESHOLD_MG                          (12000u)  // units in mili G //RELEASE VALUE - 12G - 12000u
 #define ACC_BUFF_SIZE                                 (6u) //RELEASE VALUE - WINDOW SIZE = 6u
 
-#define NET_DETECTION_ENABLE                          (0u)
+#define NET_DETECTION_ENABLE                          (1u)
 #define ACC_NET_BUFF_SIZE                             (100u)
 #define ACC_HIT_NET_DIFF_THRESHOLD_MG                 (5000u)
 #define ACC_NET_DECIMATION_RATE                       (5u)
@@ -213,7 +203,7 @@ extern "C" {
 /* Disarm -> Ignition timeout */
 #define DISARM_IGNITION_BLOCK_TIMEOUT_MS              (4000u) // RELEASE VALUE - 4000u
 
-#define BUZZER_DISABLE                                (0u)
+#define BUZZER_DISABLE                                (0u)     //RELEASE VALUE - 0u
 
 /*------------------------ Battery Configuration parameters -----------------------*/
 
@@ -237,6 +227,7 @@ extern "C" {
 #define MAVLINK_CONNECTION_TIMEOUT_MS                 (3000u)
 #endif /* MAVLINK_V2_CTRL_SUPP */
 
+#if 0
 /*----------------------------- Test parameters -----------------------*/
 #define TEST_SELF_DESTROY_ONLY_MODE                   (0u) //RELEASE VALUE - 0u
 #define TEST_SELF_DESTROY_MINING_MODE                 (0u) //RELEASE VALUE - 0u
@@ -245,7 +236,7 @@ extern "C" {
 
 #define ACC_HIT_DETECTED_STICKY_LED_FEATURE           (0u) //RELEASE VALUE - 0u
 #define MOVE_DETECTED_STICKY_LED_FEATURE              (0u) //RELEASE VALUE - 0u
-
+#endif
 #endif /* RELEASE_CONFIGURATION_ENABLE */
 
 /*------------------------ Flash Configuration parameters -----------------------*/

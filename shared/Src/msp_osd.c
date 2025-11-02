@@ -402,7 +402,6 @@ static bool format_osd_message_from_system_info(const init_board_system_info_t* 
             board_state_message = get_osd_message(OSD_MSG_MINING);
             break;
         default:
-            board_state_message = get_osd_message(OSD_MSG_INIT);  // BOARD_STATE_INIT або невідомий стан
             break;
     }
     
@@ -794,8 +793,6 @@ bool msp_osd_encode_bomb_status_v1(const init_board_system_info_t* system_info, 
 
     return true;
 }
-
-
 
 static bool OsdMsp_UpdateStatus (void)
 {

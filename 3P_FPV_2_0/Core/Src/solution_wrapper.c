@@ -249,6 +249,9 @@ void GpioIntHandler (uint16_t GPIO_Pin, bool is_rise_edge)
 	{
 		if (GPIO_Pin == PWM1_INPUT_PIN)
 		{
+	/* Disable interrupts */
+	uint32_t prim = __get_PRIMASK();
+	__disable_irq();
 			//TestLedToggle();
 			/* Handle Interrupt from FC PWM1 */
 			if ((is_rise_edge) && (ReadFcPwm1Gpio() == true) && (pwm1_rise_edge == false))
@@ -261,11 +264,15 @@ void GpioIntHandler (uint16_t GPIO_Pin, bool is_rise_edge)
 				pwm1_rise_edge = false;
 				fc_pwm_cbk(PWM_CH_1, false);
 			}
-
+	// enable interrupts
+	__set_PRIMASK(prim);
 		}
 
 		if (GPIO_Pin == PWM2_INPUT_PIN)
 		{
+	/* Disable interrupts */
+	uint32_t prim = __get_PRIMASK();
+	__disable_irq();
 			//TestLedToggle();
 			/* Handle Interrupt from FC PWM2 */
 			if ((is_rise_edge) && (ReadFcPwm2Gpio() == true) && (pwm2_rise_edge == false))
@@ -278,6 +285,8 @@ void GpioIntHandler (uint16_t GPIO_Pin, bool is_rise_edge)
 				pwm2_rise_edge = false;
 				fc_pwm_cbk(PWM_CH_2, false);
 			}
+	// enable interrupts
+	__set_PRIMASK(prim);
 		}
 	}
 }

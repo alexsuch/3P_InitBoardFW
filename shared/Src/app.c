@@ -21,7 +21,7 @@
 
 static system_status_t sysStatus;
 static uint8_t idx = 0u;
-static bool start_up, configurator_active = false;
+static bool start_up;
 
 static void App_SafeTmrStop (void);
 static void App_ClearError(uint32_t err_code);
@@ -50,6 +50,9 @@ static void App_MiningModeEnableCbk (uint8_t timer_id);
 static void App_MiningActivateTmrTick (uint8_t timer_id);
 static void App_MiningActivateTmrTickCbk (void);
 #endif /* MINING_MODE_SUPP */
+#if UART_ENABLE
+static bool App_UartConfigurationTask(void);
+#endif /* UART_ENABLE */
 #if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 static bool App_MavlinkIsAble2Arm(void);
 static bool App_MavlinkIgnitionTryRun(void);
@@ -180,6 +183,10 @@ static void App_SetError(err_type_t err_type, uint32_t usr_data)
 			/* Mavlink Processing */
 			Mavlink_Process();
 #endif
+#if (OSD_ENABLE == 1u)
+			/* OSD processing task */
+			OsdMsp_Task();
+#endif /* (OSD_ENABLE == 1u) */
 		}
 	}
 	/* Error is active until error source will be removed. In that case Reload app layer */
@@ -239,32 +246,8 @@ static void App_SelfDestructionCbk (uint8_t timer_id)
 
 static void App_SelfDestroyRunCbk (uint8_t timer_id)
 {
-	/* Enable indication in the last seconds before self destroy. Not applicable for mining case */
-	if (
-			(SELF_DESTROY_INDICATE_LAST_SECONDS != 0u) 
-#if MINING_MODE_SUPP
-			&& (sysStatus.mining_state != MINING_STATE_IGNITION)
-#endif /* MINING_MODE_SUPP */
-		)
-	{
-		Timer_Start (SELF_DISTRUCTION_IND_TMR, (SELF_DESTROY_INDICATE_LAST_SECONDS * MILISECONDS_IN_SECOND), App_SelfDestructionCbk);
-
-		if (sysStatus.vbat_voltage_mv < BATTERY_VOLTAGE_LOW_NO_SOUND_THRESHOLD_MILIVOLTS)
-		{
-			/* If battery almost discharged provide indication without sound */
-			Indication_SetStatus(IND_STATUS_DESTRUCTION_START_NO_SOUND, 0u);
-		}
-		else if (sysStatus.is_battery_low == false)
-		{
-			/* Indicate self destruction with sound only if battery is not low */
-			Indication_SetStatus(IND_STATUS_DESTRUCTION_START, 0u);
-		}
-	}
-	else
-	{
-		/* Run self destruction handler */
-		App_SelfDestructionCbk(DUMMY_TMR);
-	}
+	/* Run self destruction handler */
+	App_SelfDestructionCbk(DUMMY_TMR);
 }
 
 static void App_SelfDestroyInit (void)
@@ -289,8 +272,8 @@ static void App_SelfDestroyTmrTickCbk (void)
     sysStatus.self_destroy_tmr_tick--;
 
 #if MINING_MODE_SUPP
-	/* Only update sys_info if Mining timer is not active (Mining has higher priority) */
-	if (!Timer_IsActive(MINING_ACTIVATE_TMR))
+	/* Only update sys_info if Mining or Safe timer are not active (Mining + Safe have higher priority) */
+	if ((!Timer_IsActive(MINING_ACTIVATE_TMR)) && (sysStatus.state != SYSTEM_STATE_SAFE_TIMER))
 #endif /* MINING_MODE_SUPP */
 	{
 		/* Update timer mode */
@@ -307,6 +290,28 @@ static void App_SelfDestroyTmrTickCbk (void)
     }
     else
     {
+		/* Enable indication in the last seconds before self destroy. Not applicable for mining case */
+		if (
+				(SELF_DESTROY_INDICATE_LAST_SECONDS != 0u)  &&
+				(sysStatus.self_destroy_tmr_tick == SELF_DESTROY_INDICATE_LAST_SECONDS) 
+#if MINING_MODE_SUPP
+				&& (sysStatus.mining_state != MINING_STATE_IGNITION)
+#endif /* MINING_MODE_SUPP */
+			)
+		{
+			//Timer_Start (SELF_DISTRUCTION_IND_TMR, (SELF_DESTROY_INDICATE_LAST_SECONDS * MILISECONDS_IN_SECOND), App_SelfDestructionCbk);
+			if (sysStatus.vbat_voltage_mv < BATTERY_VOLTAGE_LOW_NO_SOUND_THRESHOLD_MILIVOLTS)
+			{
+				/* If battery almost discharged provide indication without sound */
+				Indication_SetStatus(IND_STATUS_DESTRUCTION_START_NO_SOUND, 0u);
+			}
+			else if (sysStatus.is_battery_low == false)
+			{
+				/* Indicate self destruction with sound if battery is not low */
+				Indication_SetStatus(IND_STATUS_DESTRUCTION_START, 0u);
+			}
+		}
+
     	/* Continue countdown - restart timer for next second */
     	Timer_Start (SELF_DESTRUCTION_TMR, ONE_SECOND_TICK_TMR_PERIOD_MS, App_SelfDestroyTmrTick);
     }
@@ -390,11 +395,15 @@ static void App_MiningActivateTmrTickCbk (void)
 	/* Decrement timer tick */
     sysStatus.mining_activate_tmr_tick--;
 
-	/* Update timer mode to MINING (Mining timer has higher priority than Self Destroy) */
-	sysStatus.sys_info.timer_mode = TIMER_MODE_MINING;
+	/* Only update sys_info if Safe timer is not active (Safe has higher priority) */
+	if (sysStatus.state != SYSTEM_STATE_SAFE_TIMER)
+	{
+		/* Update timer mode to MINING (Mining timer has higher priority than Self Destroy) */
+		sysStatus.sys_info.timer_mode = TIMER_MODE_MINING;
 
-	/* Update timer info */
-	sysStatus.sys_info.timer_seconds = sysStatus.mining_activate_tmr_tick;
+		/* Update timer info */
+		sysStatus.sys_info.timer_seconds = sysStatus.mining_activate_tmr_tick;
+	}
 
     if (sysStatus.mining_activate_tmr_tick == 0u)
     {
@@ -469,8 +478,6 @@ static void App_MiningModeDisable (void)
 		{
 			Timer_Stop (SAFE_TIMEOUT_TMR);
 		}
-
-		Timer_Stop (MINING_ACTIVATE_TMR);
 
 		/* Disable mining feature */
 		sysStatus.mining_state = MINING_STATE_NONE;
@@ -1269,6 +1276,7 @@ void App_SetSafe (bool ind_enable)
 	/* Reset all flags */
 	sysStatus.safe_tmr_tick = sysStatus.config->safeTimeoutSec;
 	sysStatus.safe_tmr_pause = false;
+	sysStatus.sys_info.board_state = BOARD_STATE_DISARMED;
 #if !SELF_DESTROY_DISABLE
 	sysStatus.self_destroy_mode = SELF_DESTROY_STATE_NONE;
 	sysStatus.sys_info.low_pwr_self_dest_allowed = false;
@@ -1759,6 +1767,7 @@ static void App_SafeTmrTickCbk (void)
 
 	/* Update timer info */
 	sysStatus.sys_info.timer_seconds = sysStatus.safe_tmr_tick;
+	sysStatus.sys_info.timer_mode    = TIMER_MODE_SAFE;
 
     if (sysStatus.safe_tmr_tick == 0u)
     {
@@ -1866,7 +1875,7 @@ static void App_SafeTmrRun (void)
 	{
 		App_SafeTmrPause();
 	}
-#endif
+#endif /* PWM_CTRL_SUPP */
 
 	sysStatus.state         = SYSTEM_STATE_SAFE_TIMER;
 	sysStatus.safe_tmr_tick = sysStatus.config->safeTimeoutSec;
@@ -1906,7 +1915,7 @@ static void App_FusePollCbk (void)
 			/* Update fuse sys_info structure */
 			sysStatus.sys_info.fuse_present = !new_fuse_state;
 
-			if (configurator_active)
+			if (sysStatus.configurator_active)
 			{
 				if (sysStatus.is_fuse_removed == false)
 				{
@@ -2215,7 +2224,7 @@ void App_InitRun(void)
 	UartConfig_Init();
 
 	sysStatus.state = SYSTEM_STATE_CONFIGURE;
-	configurator_active = true;
+	sysStatus.configurator_active = true;
 #else
 	App_InitFinish();
 #endif
@@ -2309,29 +2318,15 @@ void App_Process ()
 	}
 }
 
-void App_Task (void)
-{
-	/* Timer tick task */
-	Timer_Task();
-
-	/* Pending Application tasks */
-	App_Process();
-
-	/* LED/Sound indication */
-	Indication_Task();
-
-	/* Acceleration processing task */
-#if ACC_SUPPORTED_ENABLE
-	AccProc_Task();
-#endif
-
 #if UART_ENABLE
+static bool App_UartConfigurationTask(void)
+{
 	/* UART Configure task  */
-	if (configurator_active)
+	if (sysStatus.configurator_active)
 	{
-		configurator_active = UartConfig_Task();
+		sysStatus.configurator_active = UartConfig_Task();
 		/* Exit from UART configuration - continue init board */
-		if (configurator_active == false)
+		if (sysStatus.configurator_active == false)
 		{
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
 			/* Check configuration of PWM2 channel */
@@ -2356,16 +2351,44 @@ void App_Task (void)
 			/* Finish application initialization */
 			App_InitFinish();
 		}
+		return true;
+	}
+	return false;
+}
+#endif /* UART_ENABLE */
+
+void App_Task (void)
+{
+	/* Timer tick task */
+	Timer_Task();
+
+	/* Pending Application tasks */
+	App_Process();
+
+	/* LED/Sound indication */
+	Indication_Task();
+
+	/* Acceleration processing task */
+#if ACC_SUPPORTED_ENABLE
+	AccProc_Task();
+#endif
+
+#if (OSD_ENABLE == 1u)
+	/* OSD processing task */
+	OsdMsp_Task();
+#endif /* (OSD_ENABLE == 1u) */
+
+#if UART_ENABLE
+	/* UART Configuration Task */
+	if (App_UartConfigurationTask())
+	{
 		return;
 	}
-#endif
+#endif /* UART_ENABLE */
 
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
 	/* Stick monitoring */
 	Stick_Task();
-#if (OSD_ENABLE == 1u)
-	OsdMsp_Task();
-#endif /* (OSD_ENABLE == 1u) */
 #elif (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 	/* Mavlink Processing */
 	Mavlink_Process();

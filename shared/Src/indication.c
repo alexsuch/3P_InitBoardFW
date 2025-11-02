@@ -52,6 +52,7 @@ static void Indication_ClearStatusIndication (void)
 	Timer_Stop (INDICATION_STATUS_TMR);
 	/* Reset indication related flags */
 	indStatus.stat_retry_cnt = 0u;
+	indStatus.handle_stat_tmr_cbk = false;
 	Indication_Stop(INDICATION_STATUS_TMR);
 }
 
@@ -60,6 +61,7 @@ static void Indication_ClearErrorIndication (void)
 	Timer_Stop (INDICATION_ERROR_TMR);
 	/* Reset indication related flags */
 	indStatus.err_retry_cnt = 0u;
+	indStatus.handle_err_tmr_cbk = false;
 	Indication_Stop(INDICATION_ERROR_TMR);
 }
 
