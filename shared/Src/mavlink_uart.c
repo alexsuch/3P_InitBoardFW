@@ -77,9 +77,8 @@ void Mavlink_Init(app_ext_cbk_fn system_cbk, init_board_system_info_t* system_in
     mavlink_state.initboard_heartbeat_send_flag = 0;
     mavlink_state.autopilot_connection_timeout_flag = 0;
     
-    // Initialize autopilot ARM/PREARM states to unknown
+    // Initialize autopilot ARM state to unknown
     mavlink_state.autopilot_arm_state = 0xFF;      // Unknown state initially
-    mavlink_state.autopilot_prearm_state = 0xFF;   // Unknown state initially
     
     // Initialize VFR_HUD data
     memset(&mavlink_state.vfr_hud_data, 0, sizeof(mavlink_vfr_hud_data_t));
@@ -262,9 +261,9 @@ static void Mavlink_ProcessReceivedMessage(void) {
                      (mavlink_rx_buffer[MAVLINK_V2_MSG_ID_MID_INDEX] << 8) | 
                      (mavlink_rx_buffer[MAVLINK_V2_MSG_ID_HIGH_INDEX] << 16);
     
-    // Extract source system and component (not used for filtering per requirements)
-    uint8_t source_system = mavlink_rx_buffer[MAVLINK_V2_SYSTEM_ID_INDEX];
-    uint8_t source_component = mavlink_rx_buffer[MAVLINK_V2_COMPONENT_ID_INDEX];
+    // Note: Source system and component IDs are not used for filtering per requirements
+    (void)mavlink_rx_buffer[MAVLINK_V2_SYSTEM_ID_INDEX];     // Suppress unused warning
+    (void)mavlink_rx_buffer[MAVLINK_V2_COMPONENT_ID_INDEX];  // Suppress unused warning
     
     // Update connection status for any incoming message (autopilot connection)
     if (!mavlink_state.connected) {
@@ -305,9 +304,9 @@ static void Mavlink_ProcessReceivedMessage(void) {
  * @param payload Message payload
  */
 static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload) {
-    // Extract type and autopilot for logging/debugging if needed
-    uint8_t type = payload[HEARTBEAT_TYPE_INDEX];
-    uint8_t autopilot = payload[HEARTBEAT_AUTOPILOT_INDEX];
+    // Note: Type and autopilot fields available for future use if needed
+    (void)payload[HEARTBEAT_TYPE_INDEX];      // Suppress unused warning
+    (void)payload[HEARTBEAT_AUTOPILOT_INDEX]; // Suppress unused warning
     
     // Extract custom mode (4 bytes) - contains ARM/PREARM states from ESP32 GPIO
     uint32_t custom_mode_raw = payload[HEARTBEAT_CUSTOM_MODE_INDEX] | 
@@ -315,12 +314,11 @@ static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload) {
                               (payload[HEARTBEAT_CUSTOM_MODE_INDEX + 2] << 16) | 
                               (payload[HEARTBEAT_CUSTOM_MODE_INDEX + 3] << 24);
     
-    // Decode ARM/PREARM states from 32-bit custom mode
+    // Decode ARM state from 32-bit custom mode
     mavlink_autopilot_states_t autopilot_states;
     autopilot_states.raw = custom_mode_raw;
     
     uint32_t new_arm_state = autopilot_states.bitfield.arm_state;        // Bits 0-3 - auto-extracted by compiler
-    uint32_t new_prearm_state = autopilot_states.bitfield.prearm_state;  // Bits 4-7 - auto-extracted by compiler
     
     // Check for ARM state changes and notify application with specific events
     if (new_arm_state != mavlink_state.autopilot_arm_state) {
@@ -334,17 +332,8 @@ static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload) {
         }
     }
     
-    // Check for PREARM state changes and notify application with specific events
-    if (new_prearm_state != mavlink_state.autopilot_prearm_state) {
-        mavlink_state.autopilot_prearm_state = new_prearm_state;
-        if (mavlink_state.system_callback) {
-            if (new_prearm_state == MAVLINK_AUTOPILOT_PREARM_ENABLED) {
-                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_PREARM_ENABLED, NULL);
-            } else if (new_prearm_state == MAVLINK_AUTOPILOT_PREARM_DISABLED) {
-                mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_PREARM_DISABLED, NULL);
-            }
-        }
-    }
+    // Note: PREARM state is now handled via asynchronous commands (MAVLINK_CMD_PREARM_ENABLE/DISABLE)
+    // instead of being encoded in HEARTBEAT messages
     
     // Autopilot connection timeout timer is already restarted in Mavlink_ProcessReceivedMessage()
     // when any message from autopilot is received, including this heartbeat
@@ -393,20 +382,33 @@ static void Mavlink_ProcessCommandLong(const uint8_t* payload) {
     // Extract main command ID (bytes 28-29) - should be MAV_CMD_USER_1 for custom commands
     uint16_t command_id = payload[28] | (payload[29] << 8);
     
-    // Extract target system and component  
-    uint8_t target_system = payload[30];
-    uint8_t target_component = payload[31];
+    // Extract target system and component to check if command is addressed to us
+    uint8_t target_system = payload[30];      // Who should execute this command
+    uint8_t target_component = payload[31];   // Which component should execute
     
-    // Check if command is for us (ignore system/component ID checks as per requirements)
+    // Security check: Only process commands addressed specifically to us (no broadcast support)
+    if (target_system != MAVLINK_SYSTEM_ID_INITBOARD) {
+        // Command not for our system - silently ignore
+        return;
+    }
+    
+    if (target_component != MAVLINK_COMP_ID_INITBOARD) {
+        // Command not for our component - silently ignore
+        return;
+    }
+    
+    // Note: Source system/component are ignored as per current requirements
+    // Commands from any source are accepted if properly addressed to us
+    
     uint8_t result = MAV_RESULT_UNSUPPORTED;
     
     // Process custom commands via MAV_CMD_USER_1
     if (command_id == MAV_CMD_USER_1) {
         // Extract custom command type from param1 first byte
         uint8_t custom_command_type = payload[0];  // First byte of param1 - command type
-        uint8_t command_data = payload[1];         // Second byte of param1 - command data
-        uint8_t custom_param2 = payload[2];        // Third byte of param1 (reserved)
-        uint8_t custom_param3 = payload[3];        // Fourth byte of param1 (reserved)
+        (void)payload[1]; // command_data - suppress unused warning (available for future use)
+        (void)payload[2]; // custom_param2 - suppress unused warning (reserved)
+        (void)payload[3]; // custom_param3 - suppress unused warning (reserved)
         
         // Process custom command based on type
         switch (custom_command_type) {
@@ -421,13 +423,37 @@ static void Mavlink_ProcessCommandLong(const uint8_t* payload) {
                 }
                 break;
                 
-            // Future custom commands can be added here:
-            // case 2:  // Custom command type 2
-            //     // command_data specific to command type 2
-            //     break;
-            // case 3:  // Custom command type 3
-            //     // command_data specific to command type 3
-            //     break;
+            case MAVLINK_CMD_CHARGE:  // 2 - CHARGE command
+                // Process CHARGE command via callback
+                if (mavlink_state.system_callback) {
+                    uint8_t callback_result = mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_CHARGE, NULL);
+                    result = (callback_result == 0u) ? MAV_RESULT_DENIED : MAV_RESULT_ACCEPTED;
+                }
+                break;
+                
+            case MAVLINK_CMD_DISCHARGE:  // 3 - DISCHARGE command
+                // Process DISCHARGE command via callback
+                if (mavlink_state.system_callback) {
+                    uint8_t callback_result = mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_DISCHARGE, NULL);
+                    result = (callback_result == 0u) ? MAV_RESULT_DENIED : MAV_RESULT_ACCEPTED;
+                }
+                break;
+                
+            case MAVLINK_CMD_PREARM_ENABLE:  // 4 - PREARM ENABLE command
+                // Process PREARM ENABLE command via callback
+                if (mavlink_state.system_callback) {
+                    uint8_t callback_result = mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_PREARM_ENABLED, NULL);
+                    result = (callback_result == 0u) ? MAV_RESULT_DENIED : MAV_RESULT_ACCEPTED;
+                }
+                break;
+                
+            case MAVLINK_CMD_PREARM_DISABLE:  // 5 - PREARM DISABLE command
+                // Process PREARM DISABLE command via callback
+                if (mavlink_state.system_callback) {
+                    uint8_t callback_result = mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_PREARM_DISABLED, NULL);
+                    result = (callback_result == 0u) ? MAV_RESULT_DENIED : MAV_RESULT_ACCEPTED;
+                }
+                break;
                 
             default:
                 result = MAV_RESULT_UNSUPPORTED;
@@ -529,13 +555,8 @@ uint8_t Mavlink_GetAutopilotArmState(void) {
     return mavlink_state.autopilot_arm_state;
 }
 
-/**
- * @brief Get autopilot PREARM state (from last received HEARTBEAT)
- * @return uint8_t PREARM state (0=PREARM_DISABLED, 1=PREARM_ENABLED, 0xFF=unknown)
- */
-uint8_t Mavlink_GetAutopilotPrearmState(void) {
-    return mavlink_state.autopilot_prearm_state;
-}
+// Note: PREARM state is now handled via asynchronous commands (MAVLINK_CMD_PREARM_ENABLE/DISABLE)
+// instead of being encoded in HEARTBEAT messages - no getter function needed
 
 /**
  * @brief Get last received VFR_HUD data

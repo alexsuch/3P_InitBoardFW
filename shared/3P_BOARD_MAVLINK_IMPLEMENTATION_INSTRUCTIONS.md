@@ -119,9 +119,9 @@ typedef enum {
 ```c
 typedef enum {
     BOARD_STATE_INIT = 0x00,        // Ініціалізація
-    BOARD_STATE_DISARMED = 0x01,    // Роззброєно
+    BOARD_STATE_DISCHARGED = 0x01,  // Розряджено
     BOARD_STATE_CHARGING = 0x02,    // Зарядка
-    BOARD_STATE_ARMED = 0x03,       // Озброєно
+    BOARD_STATE_CHARGED = 0x03,     // Заряджено
     BOARD_STATE_BOOM = 0x04         // Вибух
 } board_state_t;
 ```

@@ -299,7 +299,6 @@ static void App_SelfDestroyTmrTickCbk (void)
 #endif /* MINING_MODE_SUPP */
 			)
 		{
-			//Timer_Start (SELF_DISTRUCTION_IND_TMR, (SELF_DESTROY_INDICATE_LAST_SECONDS * MILISECONDS_IN_SECOND), App_SelfDestructionCbk);
 			if (sysStatus.vbat_voltage_mv < BATTERY_VOLTAGE_LOW_NO_SOUND_THRESHOLD_MILIVOLTS)
 			{
 				/* If battery almost discharged provide indication without sound */
@@ -484,7 +483,7 @@ static void App_MiningModeDisable (void)
 
 		/* Update board state based on current system state */
 		if ((sysStatus.state == SYSTEM_STATE_ARMED) || (sysStatus.state == SYSTEM_STATE_ARMED_PUMP)) {
-			sysStatus.sys_info.board_state = BOARD_STATE_ARMED;
+			sysStatus.sys_info.board_state = BOARD_STATE_CHARGED;
 		} else if (sysStatus.state == SYSTEM_STATE_CHARGING) {
 			sysStatus.sys_info.board_state = BOARD_STATE_CHARGING;
 		} else {
@@ -1276,7 +1275,7 @@ void App_SetSafe (bool ind_enable)
 	/* Reset all flags */
 	sysStatus.safe_tmr_tick = sysStatus.config->safeTimeoutSec;
 	sysStatus.safe_tmr_pause = false;
-	sysStatus.sys_info.board_state = BOARD_STATE_DISARMED;
+	sysStatus.sys_info.board_state = BOARD_STATE_DISCHARGED;
 #if !SELF_DESTROY_DISABLE
 	sysStatus.self_destroy_mode = SELF_DESTROY_STATE_NONE;
 	sysStatus.sys_info.low_pwr_self_dest_allowed = false;
@@ -1609,8 +1608,8 @@ static void App_ArmRun (void)
 
 	sysStatus.state = SYSTEM_STATE_ARMED;
 
-	/* Set board state to ARMED */
-	sysStatus.sys_info.board_state = BOARD_STATE_ARMED;
+	/* Set board state to CHARGED */
+	sysStatus.sys_info.board_state = BOARD_STATE_CHARGED;
 
 	/* Check if any ignition controls is already triggered */
 	if (
@@ -1743,8 +1742,8 @@ static void App_ChargingRun (system_state_t charge_state, bool reset_var)
 /***************************************** DISARM STATE **************************************************/
 static void App_DisarmRun (bool ind_enable)
 {
-	/* Set board state to disarmed */
-	sysStatus.sys_info.board_state = BOARD_STATE_DISARMED;
+	/* Set board state to discharged */
+	sysStatus.sys_info.board_state = BOARD_STATE_DISCHARGED;
 
 	/* Reset all system blocks and variables */
 	App_SetSafe(ind_enable);
@@ -2122,8 +2121,8 @@ static void App_InitCbk (void)
 	{
 		/* Restart logic from the beginning */
 		App_FuseCheckRun();
-		/* Set board state to disarmed */
-		sysStatus.sys_info.board_state = BOARD_STATE_DISARMED;
+		/* Set board state to discharged */
+		sysStatus.sys_info.board_state = BOARD_STATE_DISCHARGED;
 	}
 }
 

@@ -384,7 +384,7 @@ static bool format_osd_message_from_system_info(const init_board_system_info_t* 
     const char* board_state_message = NULL;
     
     switch (system_info->board_state) {
-        case BOARD_STATE_DISARMED:
+        case BOARD_STATE_DISCHARGED:
             // Перевіряємо чи активний сейф таймер
             if (system_info->timer_mode == TIMER_MODE_SAFE && system_info->timer_seconds > 0) {
                 board_state_message = get_osd_message(OSD_MSG_SAFE_TMR);
@@ -395,7 +395,7 @@ static bool format_osd_message_from_system_info(const init_board_system_info_t* 
         case BOARD_STATE_CHARGING:
             board_state_message = get_osd_message(OSD_MSG_CHARGE);
             break;
-        case BOARD_STATE_ARMED:
+        case BOARD_STATE_CHARGED:
             board_state_message = get_osd_message(OSD_MSG_ARMED);
             break;
         case BOARD_STATE_MINING:

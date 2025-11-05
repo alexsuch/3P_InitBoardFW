@@ -298,16 +298,24 @@ static void App_AdcDataAnalyze(void)
 /***************************************** IGNITION STATE ********************************************************/
 static void App_IgnitionSwitchOn (void)
 {
-	/* Enable High and Low side switches */
-	DetonHighSideSwithSet (true);
+	/* Enable low side first */
 	DetonLowSideSwitchSet (true);
+	delay_us(20);  //20us delay to avoid shoot through
+	DetonHighSideSwithSet (true);
+}
+
+static void App_IgnitionDisableLowSideCbk (uint8_t timer_id)
+{
+	/* Disable low side switch */
+	DetonLowSideSwitchSet (false);
 }
 
 static void App_IgnitionSwitchOff (void)
 {
 	/* Disable High and Low side switches */
 	DetonHighSideSwithSet (false);
-	DetonLowSideSwitchSet (false);
+	/* Run timer to disable low side driver */
+	Timer_Start (IGNITION_TMR, IGNITION_TMR_LOW_SIDE_OFF_PERIOD_MS, App_IgnitionDisableLowSideCbk);
 }
 
 /***************************************** CHARGING STATE **************************************************/

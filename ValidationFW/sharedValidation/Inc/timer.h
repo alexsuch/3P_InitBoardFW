@@ -57,6 +57,7 @@ extern "C" {
 
 
 #define IGNITION_TMR                                 (10u)
+#define IGNITION_TMR_LOW_SIDE_OFF_PERIOD_MS          (50u)
 
 #define STICK1_LOST_TMR                        		 (11u)
 #define STICK2_LOST_TMR                        		 (12u)

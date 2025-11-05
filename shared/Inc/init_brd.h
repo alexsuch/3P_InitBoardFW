@@ -211,9 +211,9 @@ typedef enum {
 // Board state enumeration
 typedef enum {
     BOARD_STATE_INIT = 0x00,        // No data available
-    BOARD_STATE_DISARMED = 0x01,    // Disarmed
+    BOARD_STATE_DISCHARGED = 0x01,  // Discharged
 	BOARD_STATE_CHARGING = 0x02,    // Charging
-    BOARD_STATE_ARMED = 0x03,       // Armed
+    BOARD_STATE_CHARGED = 0x03,     // Charged
     BOARD_STATE_BOOM = 0x04,        // Boom
     BOARD_STATE_MINING = 0x05,       // Mining active
 } board_state_t;

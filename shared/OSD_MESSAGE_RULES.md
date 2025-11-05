@@ -45,9 +45,9 @@ Messages are displayed according to priority levels:
 ### Standard States
 | State | Message | Length | Description |
 |-------|---------|--------|-------------|
-| `BOARD_STATE_DISARMED` | `"DISARM"` | 6 chars | System disarmed |
+| `BOARD_STATE_DISCHARGED` | `"DISARM"` | 6 chars | System discharged |
 | `BOARD_STATE_CHARGING` | `"CHARGING"` | 8 chars | Battery charging |
-| `BOARD_STATE_ARMED` | `"ARMED"` | 5 chars | System armed |
+| `BOARD_STATE_CHARGED` | `"ARMED"` | 5 chars | System charged |
 | `BOARD_STATE_MINING` | `"!MINE ACT"` | 9 chars | Mining mode active |
 | `BOARD_STATE_INIT` | `"INIT"` | 4 chars | Initialization/unknown |
 

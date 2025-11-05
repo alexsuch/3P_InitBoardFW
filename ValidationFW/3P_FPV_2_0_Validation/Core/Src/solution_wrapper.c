@@ -77,6 +77,15 @@ bool IsFuseRemoved (void)
 
 // ---------------------- DETONATION CONTROL -------------------------------
 
+void delay_us(uint16_t us)
+{
+    // Калібровано для 24MHz
+    // Кожна ітерація займає приблизно 3-4 такти
+    for (volatile uint16_t i = 0; i < (us * 4); i++) {
+        __NOP();
+    }
+}
+
 void DetonHighSideSwithSet (bool state)
 {
 	if (state)
@@ -91,8 +100,9 @@ void DetonHighSideSwithSet (bool state)
 
 void DetonLowSideSwitchSet (bool state)
 {
-	HAL_GPIO_WritePin(DETON_LOW_SIDE_SWITCH_OUT_1_PORT, DETON_LOW_SIDE_SWITCH_OUT_1_PIN, state);
 	HAL_GPIO_WritePin(DETON_LOW_SIDE_SWITCH_OUT_2_PORT, DETON_LOW_SIDE_SWITCH_OUT_2_PIN, state);
+	delay_us(2);
+	HAL_GPIO_WritePin(DETON_LOW_SIDE_SWITCH_OUT_1_PORT, DETON_LOW_SIDE_SWITCH_OUT_1_PIN, state);
 }
 
 // ---------------------- LED INDICATION -----------------------------------
