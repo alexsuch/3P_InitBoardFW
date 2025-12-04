@@ -85,33 +85,53 @@ extern "C" {
 #define ADC_CHANNELS_COUNT          2           /* Number of ADC channels */
 
 /* GPIO Pin Definitions ------------------------------------------------------*/
-/* SPI Chip Select - defined below with ACC pins */
+/* Test GPIO Outputs */
+#define TEST_1_PORT                 GPIOA
+#define TEST_1_PIN                  GPIO_PIN_4
+#define TEST_2_PORT                 GPIOA
+#define TEST_2_PIN                  GPIO_PIN_11
 
-/* LEDs */
-#define LED_ERROR_PORT              LED_YELLOW_OUT_GPIO_Port
-#define LED_ERROR_PIN               LED_YELLOW_OUT_Pin
-#define LED_STATUS_PORT             LED_GREEN_OUT_GPIO_Port
-#define LED_STATUS_PIN              LED_GREEN_OUT_Pin
+/* LED Outputs */
+#define LED_ERROR_OUT_PORT          GPIOB
+#define LED_ERROR_OUT_PIN           GPIO_PIN_1
+#define LED_STATUS_OUT_PORT         GPIOB
+#define LED_STATUS_OUT_PIN          GPIO_PIN_2
+#define EX_LED_OUT_PORT             GPIOA
+#define EX_LED_OUT_PIN              GPIO_PIN_5
 
-/* Test GPIOs */
-#define TEST_1_PORT                 TEST_1_GPIO_Port
-#define TEST_1_PIN                  TEST_1_Pin
-#define TEST_2_PORT                 TEST_2_GPIO_Port
-#define TEST_2_PIN                  TEST_2_Pin
+/* LED Aliases */
+#define LED_ERROR_PORT              LED_ERROR_OUT_PORT
+#define LED_ERROR_PIN               LED_ERROR_OUT_PIN
+#define LED_STATUS_PORT             LED_STATUS_OUT_PORT
+#define LED_STATUS_PIN              LED_STATUS_OUT_PIN
 
-/* Boom Control */
-#define DETON_LOW_SIDE_SWITCH_OUT_1_PORT    BOOM_LOW_SIDE_OUT_1_GPIO_Port
-#define DETON_LOW_SIDE_SWITCH_OUT_1_PIN     BOOM_LOW_SIDE_OUT_1_Pin
-#define DETON_LOW_SIDE_SWITCH_OUT_2_PORT    BOOM_LOW_SIDE_OUT_2_GPIO_Port
-#define DETON_LOW_SIDE_SWITCH_OUT_2_PIN     BOOM_LOW_SIDE_OUT_2_Pin
+/* Boom Control Outputs */
+#define BOOM_LOW_SIDE_OUT_1_PORT    GPIOB
+#define BOOM_LOW_SIDE_OUT_1_PIN     GPIO_PIN_13
+#define BOOM_LOW_SIDE_OUT_2_PORT    GPIOB
+#define BOOM_LOW_SIDE_OUT_2_PIN     GPIO_PIN_12
+
+/* Boom Aliases */
+#define DETON_LOW_SIDE_SWITCH_OUT_1_PORT    BOOM_LOW_SIDE_OUT_1_PORT
+#define DETON_LOW_SIDE_SWITCH_OUT_1_PIN     BOOM_LOW_SIDE_OUT_1_PIN
+#define DETON_LOW_SIDE_SWITCH_OUT_2_PORT    BOOM_LOW_SIDE_OUT_2_PORT
+#define DETON_LOW_SIDE_SWITCH_OUT_2_PIN     BOOM_LOW_SIDE_OUT_2_PIN
+
+/* Charging Control Output */
+#define CHARGE_EN_OUT_PORT          GPIOA
+#define CHARGE_EN_OUT_PIN           GPIO_PIN_10
+
+/* Charging Alias */
+#define CHARGE_EN_PORT              CHARGE_EN_OUT_PORT
+#define CHARGE_EN_PIN               CHARGE_EN_OUT_PIN
 
 /* Input Pins */
-#define FUSE_INPUT_PORT             FUSE_IN_GPIO_Port
-#define FUSE_INPUT_PIN              FUSE_IN_Pin
+#define FUSE_IN_PORT                GPIOA
+#define FUSE_IN_PIN                 GPIO_PIN_12
 
-/* Charging Control */
-#define CHARGE_EN_PORT              CHARGE_EN_OUT_GPIO_Port
-#define CHARGE_EN_PIN               CHARGE_EN_OUT_Pin
+/* Fuse Input Alias */
+#define FUSE_INPUT_PORT             FUSE_IN_PORT
+#define FUSE_INPUT_PIN              FUSE_IN_PIN
 
 /* Accelerometer SPI CS and interrupt pins */
 #define ACC_CS_PORT                 GPIOC

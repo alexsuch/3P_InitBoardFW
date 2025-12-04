@@ -36,6 +36,7 @@ DMA_HandleTypeDef hdma_spi1_rx;   /* SPI1 RX DMA handle */
 DMA_HandleTypeDef hdma_spi1_tx;   /* SPI1 TX DMA handle */
 
 /* Private function prototypes -----------------------------------------------*/
+static HAL_StatusTypeDef HalConfigure_Gpio_Init(void);
 static HAL_StatusTypeDef HalConfigure_SysTickTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_HighSidePwmTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_PumpPwmTimer_Init(void);
@@ -50,6 +51,12 @@ static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void);
   */
 void Solution_HalConfigure(void)
 {
+    /* Initialize GPIO pins */
+    if (HalConfigure_Gpio_Init() != HAL_OK)
+    {
+        Error_Handler();
+    }
+
     /* Initialize System Tick Timer */
     if (HalConfigure_SysTickTimer_Init() != HAL_OK)
     {
@@ -85,6 +92,55 @@ void Solution_HalConfigure(void)
     {
         Error_Handler();
     }
+}
+
+/**
+  * @brief  Initialize GPIO pins for LEDs, test outputs, boom control, charging, and inputs
+  * @note   This replaces MX_GPIO_Init()
+  *         Includes: Clock enable, pin configuration
+  *         Independent from CubeMX configuration
+  * @retval HAL status
+  */
+static HAL_StatusTypeDef HalConfigure_Gpio_Init(void)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+    /* ========== Clock Configuration ========== */
+    /* Enable GPIO clocks */
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+
+    /* ========== Set Initial Output Levels ========== */
+    /* GPIOA outputs: TEST_1, EX_LED_OUT, CHARGE_EN_OUT, TEST_2 - all LOW */
+    HAL_GPIO_WritePin(GPIOA, TEST_1_PIN | EX_LED_OUT_PIN | CHARGE_EN_OUT_PIN | TEST_2_PIN, GPIO_PIN_RESET);
+
+    /* GPIOB outputs: LED_ERROR, LED_STATUS, BOOM_LOW_SIDE_OUT_1, BOOM_LOW_SIDE_OUT_2 - all LOW */
+    HAL_GPIO_WritePin(GPIOB, LED_ERROR_OUT_PIN | LED_STATUS_OUT_PIN | BOOM_LOW_SIDE_OUT_1_PIN | BOOM_LOW_SIDE_OUT_2_PIN, GPIO_PIN_RESET);
+
+    /* ========== Configure GPIOA Output Pins ========== */
+    /* Configure TEST_1 (PA4), EX_LED_OUT (PA5), CHARGE_EN_OUT (PA10), TEST_2 (PA11) */
+    GPIO_InitStruct.Pin = TEST_1_PIN | EX_LED_OUT_PIN | CHARGE_EN_OUT_PIN | TEST_2_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+    /* ========== Configure GPIOB Output Pins ========== */
+    /* Configure LED_ERROR_OUT (PB1), LED_STATUS_OUT (PB2), BOOM_LOW_SIDE_OUT_2 (PB12), BOOM_LOW_SIDE_OUT_1 (PB13) */
+    GPIO_InitStruct.Pin = LED_ERROR_OUT_PIN | LED_STATUS_OUT_PIN | BOOM_LOW_SIDE_OUT_2_PIN | BOOM_LOW_SIDE_OUT_1_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    /* ========== Configure Input Pins ========== */
+    /* Configure FUSE_IN (PA12) as input */
+    GPIO_InitStruct.Pin = FUSE_IN_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(FUSE_IN_PORT, &GPIO_InitStruct);
+
+    return HAL_OK;
 }
 
 /**

@@ -42,13 +42,16 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+ADC_HandleTypeDef hadc2;
+DMA_HandleTypeDef hdma_adc2;
+
 COMP_HandleTypeDef hcomp1;
 
 DAC_HandleTypeDef hdac1;
 
-TIM_HandleTypeDef htim6;
+OPAMP_HandleTypeDef hopamp2;
 
-// UART_HandleTypeDef huart2;  /* Moved to solution_hal_cfg.c */
+TIM_HandleTypeDef htim6;
 
 /* USER CODE BEGIN PV */
 
@@ -56,11 +59,14 @@ TIM_HandleTypeDef htim6;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
+// static void MX_GPIO_Init(void);  /* Moved to solution_hal_cfg.c */
+static void MX_DMA_Init(void);
+static void MX_COMP1_Init(void);
 static void MX_COMP1_Init(void);
 static void MX_DAC1_Init(void);
 static void MX_TIM6_Init(void);
-// static void MX_USART2_UART_Init(void);  /* Moved to solution_hal_cfg.c */
+static void MX_ADC2_Init(void);
+static void MX_OPAMP2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -101,11 +107,13 @@ int main(void)
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
-  MX_GPIO_Init();
+  // MX_GPIO_Init();  /* Moved to solution_hal_cfg.c - called from Solution_HalConfigure() */
+  MX_DMA_Init();
   MX_COMP1_Init();
   MX_DAC1_Init();
   MX_TIM6_Init();
-  // MX_USART2_UART_Init();  /* Moved to solution_hal_cfg.c - called from Solution_HalConfigure() */
+  MX_ADC2_Init();
+  MX_OPAMP2_Init();
   /* USER CODE BEGIN 2 */
   /* Configure Solution HAL peripherals */
   Solution_HalConfigure();
@@ -172,6 +180,65 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief ADC2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC2_Init(void)
+{
+
+  /* USER CODE BEGIN ADC2_Init 0 */
+
+  /* USER CODE END ADC2_Init 0 */
+
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC2_Init 1 */
+
+  /* USER CODE END ADC2_Init 1 */
+
+  /** Common config
+  */
+  hadc2.Instance = ADC2;
+  hadc2.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+  hadc2.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc2.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc2.Init.GainCompensation = 0;
+  hadc2.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc2.Init.LowPowerAutoWait = DISABLE;
+  hadc2.Init.ContinuousConvMode = DISABLE;
+  hadc2.Init.NbrOfConversion = 1;
+  hadc2.Init.DiscontinuousConvMode = DISABLE;
+  hadc2.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T6_TRGO;
+  hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
+  hadc2.Init.DMAContinuousRequests = DISABLE;
+  hadc2.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc2.Init.OversamplingMode = DISABLE;
+  if (HAL_ADC_Init(&hadc2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_1;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
+  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+  sConfig.OffsetNumber = ADC_OFFSET_NONE;
+  sConfig.Offset = 0;
+  if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC2_Init 2 */
+
+  /* USER CODE END ADC2_Init 2 */
+
 }
 
 /**
@@ -254,6 +321,38 @@ static void MX_DAC1_Init(void)
 }
 
 /**
+  * @brief OPAMP2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_OPAMP2_Init(void)
+{
+
+  /* USER CODE BEGIN OPAMP2_Init 0 */
+
+  /* USER CODE END OPAMP2_Init 0 */
+
+  /* USER CODE BEGIN OPAMP2_Init 1 */
+
+  /* USER CODE END OPAMP2_Init 1 */
+  hopamp2.Instance = OPAMP2;
+  hopamp2.Init.PowerMode = OPAMP_POWERMODE_NORMALSPEED;
+  hopamp2.Init.Mode = OPAMP_FOLLOWER_MODE;
+  hopamp2.Init.NonInvertingInput = OPAMP_NONINVERTINGINPUT_IO0;
+  hopamp2.Init.InternalOutput = DISABLE;
+  hopamp2.Init.TimerControlledMuxmode = OPAMP_TIMERCONTROLLEDMUXMODE_DISABLE;
+  hopamp2.Init.UserTrimming = OPAMP_TRIMMING_FACTORY;
+  if (HAL_OPAMP_Init(&hopamp2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN OPAMP2_Init 2 */
+
+  /* USER CODE END OPAMP2_Init 2 */
+
+}
+
+/**
   * @brief TIM6 Initialization Function
   * @param None
   * @retval None
@@ -292,110 +391,73 @@ static void MX_TIM6_Init(void)
 }
 
 /**
-  * @brief USART2 Initialization Function
-  * @param None
-  * @retval None
-  * @note  Moved to solution_hal_cfg.c - HalConfigure_MainUart_Init()
+  * Enable DMA controller clock
   */
-/*
-static void MX_USART2_UART_Init(void)
+static void MX_DMA_Init(void)
 {
 
-  // USER CODE BEGIN USART2_Init 0
+  /* DMA controller clock enable */
+  __HAL_RCC_DMAMUX1_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
 
-  // USER CODE END USART2_Init 0
-
-  // USER CODE BEGIN USART2_Init 1
-
-  // USER CODE END USART2_Init 1
-  huart2.Instance = USART2;
-  huart2.Init.BaudRate = 9600;
-  huart2.Init.WordLength = UART_WORDLENGTH_8B;
-  huart2.Init.StopBits = UART_STOPBITS_1;
-  huart2.Init.Parity = UART_PARITY_NONE;
-  huart2.Init.Mode = UART_MODE_TX_RX;
-  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart2.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetTxFifoThreshold(&huart2, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetRxFifoThreshold(&huart2, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_DisableFifoMode(&huart2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  // USER CODE BEGIN USART2_Init 2
-
-  // USER CODE END USART2_Init 2
+  /* DMA interrupt init */
+  /* DMA1_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
 }
-*/
 
 /**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
+  * @note  Moved to solution_hal_cfg.c - HalConfigure_Gpio_Init()
   */
+/*
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-  /* USER CODE BEGIN MX_GPIO_Init_1 */
+  // USER CODE BEGIN MX_GPIO_Init_1
 
-  /* USER CODE END MX_GPIO_Init_1 */
+  // USER CODE END MX_GPIO_Init_1
 
-  /* GPIO Ports Clock Enable */
+  // GPIO Ports Clock Enable
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
-  /*Configure GPIO pin Output Level */
+  //Configure GPIO pin Output Level
   HAL_GPIO_WritePin(GPIOA, TEST_1_Pin|EX_LED_OUT_Pin|CHARGE_EN_OUT_Pin|TEST_2_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin Output Level */
+  //Configure GPIO pin Output Level
   HAL_GPIO_WritePin(GPIOB, LED_YELLOW_OUT_Pin|LED_GREEN_OUT_Pin|BOOM_LOW_SIDE_OUT_2_Pin|BOOM_LOW_SIDE_OUT_1_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : TEST_1_Pin EX_LED_OUT_Pin CHARGE_EN_OUT_Pin TEST_2_Pin */
+  //Configure GPIO pins : TEST_1_Pin EX_LED_OUT_Pin CHARGE_EN_OUT_Pin TEST_2_Pin
   GPIO_InitStruct.Pin = TEST_1_Pin|EX_LED_OUT_Pin|CHARGE_EN_OUT_Pin|TEST_2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : LED_YELLOW_OUT_Pin LED_GREEN_OUT_Pin BOOM_LOW_SIDE_OUT_2_Pin BOOM_LOW_SIDE_OUT_1_Pin */
+  //Configure GPIO pins : LED_YELLOW_OUT_Pin LED_GREEN_OUT_Pin BOOM_LOW_SIDE_OUT_2_Pin BOOM_LOW_SIDE_OUT_1_Pin
   GPIO_InitStruct.Pin = LED_YELLOW_OUT_Pin|LED_GREEN_OUT_Pin|BOOM_LOW_SIDE_OUT_2_Pin|BOOM_LOW_SIDE_OUT_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : FUSE_IN_Pin */
+  //Configure GPIO pin : FUSE_IN_Pin
   GPIO_InitStruct.Pin = FUSE_IN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(FUSE_IN_GPIO_Port, &GPIO_InitStruct);
 
-  /* USER CODE BEGIN MX_GPIO_Init_2 */
+  // USER CODE BEGIN MX_GPIO_Init_2
   
   // PB1 configured as COMP4_OUT in HAL_COMP_MspInit()
 
-  /* USER CODE END MX_GPIO_Init_2 */
+  // USER CODE END MX_GPIO_Init_2
 }
+*/
 
 /* USER CODE BEGIN 4 */
 
