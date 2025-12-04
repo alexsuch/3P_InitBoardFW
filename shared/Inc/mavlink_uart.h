@@ -8,7 +8,7 @@
 #ifndef MAVLINK_UART_H
 #define MAVLINK_UART_H
 
-#include "stm32g0xx_hal.h"
+#include "solution_wrapper.h"
 #include <stdint.h>
 #include <init_brd.h>
 

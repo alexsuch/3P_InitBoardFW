@@ -25,32 +25,20 @@ extern "C" {
 
 
 
-#define RELEASE_CONFIGURATION_ENABLE                  (1u)
+#define RELEASE_CONFIGURATION_ENABLE                  (0u)
+
 
 #if (RELEASE_CONFIGURATION_ENABLE == 0u) //TEST CONFIGURATION
 /*-------------------------- BUILD MACROS -----------------------------------------*/
-#define CONTROL_MODE                                  (PWM_CTRL_SUPP)
+#define CONTROL_MODE                                  (MAVLINK_V2_CTRL_SUPP)
 #define VBAT_MEASURE_FEATURE                          (0u)
-#define ACC_SUPPORTED_ENABLE                          (0u)
-#define LIS2DH12_ACC_ENABLE                           (0u)
-#define LSM6DS3_ACC_ENABLE                            (0u)
+#define LIS2DH12_ACC_ENABLE                           (1u)
 #define START_UP_DELAY_ENABLE                         (1u)
 #define UART_ENABLE                                   (1u)
 
-/*--------------------------- VUSA MACROS -----------------------------------------*/
-#define VUSA_ENABLE                                   (0u) // RELEASE VALUE - 1u
-#define VUSA_ENABLE_DEFAULT                           (1u) // RELEASE VALUE - 1u      
-
-/*--------------------------- OSD MACROS -----------------------------------------*/
-#define OSD_ENABLE                                    (1u) // RELEASE VALUE - 1u
-#define OSD_ENABLE_DEFAULT                            (1u) // RELEASE VALUE - 1u
-
-/*----------------------------PWM 2 MACROS -----------------------------------------*/
-#define PWM2_INPUT_ENABLE_DEFAULT                     (0u) // RELEASE VALUE - 1u
-
 /*-------------------------- Main Configuration parameters -----------------------*/
 /* Safe Timer Timeout Value is seconds */
-#define SAFE_TIMEOUT_SEC_DEFAULT                      (5u) // RELEASE VALUE - 120u
+#define SAFE_TIMEOUT_SEC_DEFAULT                      (4u) // RELEASE VALUE - 120u
 
 /* Ignition delay in milliseconds */
 #define IGNITION_DELAY_MILISEC_DEFAULT                (0u) // RELEASE VALUE - 0u
@@ -59,28 +47,31 @@ extern "C" {
 #define ACC_ENABLE_DEFAULT                            (1u) // RELEASE VALUE - 1u
 
 /* Self destruction related timings */
-#define SELF_DESTROY_TIMEOUT_MIN_DEFAULT              (1u)     //RELEASE VALUE - 30u
+#define SELF_DESTROY_TIMEOUT_MIN_DEFAULT              (30u)     //RELEASE VALUE - 30u
 
 /* Magic number chosen by experimental way */
 #define MOVEMENT_THRESHOLD_DEFAULT                    (72089LL) //RELEASE VALUE - 72089LL
 
+/* Self destruction disable */
+#define SELF_DESTROY_DISABLE                          (1u) //RELEASE VALUE - 1u
+
 /*------------------------ Mining Mode Configuration -----------------------*/
 
-#define MINING_MODE_SUPP                              (1u)
+#define MINING_MODE_SUPP                              (0u)
 
 /* Enable/disable mining mode  */
-#define MINING_MODE_ENABLE_DEFAULT                    MINING_MODE_AUTO //MINING_MODE_MANUAL//MINING_MODE_AUTO //RELEASE VALUE - MINING_MODE_NONE
-#define MINING_SELF_DESTROY_EN_TIMEOUT_MIN_DEFAULT    (1u)  //RELEASE VALUE - 30u
+#define MINING_MODE_ENABLE_DEFAULT                    MINING_MODE_NONE //MINING_MODE_MANUAL//MINING_MODE_AUTO //RELEASE VALUE - MINING_MODE_NONE
+#define MINING_SELF_DESTROY_EN_TIMEOUT_MIN_DEFAULT    (30u)  //RELEASE VALUE - 30u
 #define MINING_ENABLE_DELAY_SEC                       (5u)  //RELEASE VALUE - 30u
 
 /*------------------------ Accelerometer Parameters -----------------------------------*/
+// HIT
 #define ACC_HIT_THRESHOLD_MG                          (12000u)  // units in mili G //RELEASE VALUE - 12G - 12000u
-
 #define ACC_BUFF_SIZE                                 (6u) //RELEASE VALUE - WINDOW SIZE = 6u
-
 #define ACC_NO_DIVIDE_ENABLE                          (1u)
-
 #define NET_DETECTION_ENABLE                          (0u)
+
+//NET
 
 #define ACC_NET_BUFF_SIZE                             (100u) //RELEASE VALUE - WINDOW SIZE = 100u
 
@@ -88,26 +79,31 @@ extern "C" {
 
 #define ACC_NET_DECIMATION_RATE                       (5u)
 
+// SHAKE
+#define ACC_SHAKE_DETECTION_ENABLE                    (1u)   // Enable shake detection
+#define ACC_SHAKE_THRESHOLD_MG                        (5000u)   // units in mili G - Shake detection threshold
+
 /*------------------------ Battery Configuration parameters -----------------------*/
 
 // Battery level calculation thresholds for AAA battery
 #define BATTERY_VOLTAGE_100_PERCENT_THRESHOLD_MILIVOLTS      (1450u)  // 100% - 1.45V
-#define BATTERY_VOLTAGE_0_PERCENT_THRESHOLD_MILIVOLTS        (1000u)   // 0% - 0.9V
+#define BATTERY_VOLTAGE_0_PERCENT_THRESHOLD_MILIVOLTS        (900u)   // 0% - 0.9V
 
-#define BATTERY_VOLTAGE_VERY_LOW_SD_LOW_THRESHOLD_MILIVOLTS  (1100u) //RELEASE VALUE - 1100 mV
-#define BATTERY_VOLTAGE_LOW_NO_SOUND_THRESHOLD_MILIVOLTS     (1200u) //RELEASE VALUE - 1200 mV
-#define BATTERY_VOLTAGE_LOW_SD_LOW_THRESHOLD_MILIVOLTS       (1300u) //RELEASE VALUE - 1300 mV 
+#define BATTERY_VOLTAGE_VERY_LOW_SD_LOW_THRESHOLD_MILIVOLTS  (1000u) //RELEASE VALUE - 1000 mV
+#define BATTERY_VOLTAGE_LOW_SD_LOW_THRESHOLD_MILIVOLTS       (1200u) //RELEASE VALUE - 1200 mV
 #define SELF_VOLTAGE_LOW_SD_LOW_THRESHOLD_MILIVOLTS          (2500u) //RELEASE VALUE - 2400 mV
 
 #define BATTERY_THRESHOLD_ADJUSTMENT_MV                      (100u) //RELEASE VALUE - 100 mV
 
 /*------------------------ Application Configuration parameters -----------------------*/
 
+#define SELF_DESTROY_INDICATE_LAST_SECONDS            (15u) //RELEASE VALUE - 15
+
 /* Capacitor charging timeout in milliseconds */
-#define CHARGING_TMR_TIMEOUT_MS  		     	      (7000u) //RELEASE VALUE - 10000u
+#define CHARGING_TMR_TIMEOUT_MS  		     	      (4000u) //RELEASE VALUE - 10000u
 
 /* Ignition time in milliseconds */
-#define IGNITION_OFF_TMR_PERIOD_MS  		 		  (4000u) //RELEASE VALUE - 4000u
+#define IGNITION_OFF_TMR_PERIOD_MS  		 		  (1000u) //RELEASE VALUE - 1000u
 
 /* Disarm -> Ignition timeout */
 #define DISARM_IGNITION_BLOCK_TIMEOUT_MS              (3000) // RELEASE VALUE - 5000u
@@ -116,7 +112,7 @@ extern "C" {
 #define TEMP_OFFSET                                   (8u)
 
 /* Disable Buzzer */
-#define BUZZER_DISABLE                                (1u)
+#define BUZZER_DISABLE                                (0u)
 
 
 /*----------------------------- Mavlink parameters -----------------------*/
@@ -124,15 +120,16 @@ extern "C" {
 // Timing Configuration
 #define MAVLINK_INITBOARD_HEARTBEAT_INTERVAL_MS       (750u)
 #define MAVLINK_CONNECTION_TIMEOUT_MS                 (3000u)
-#endif /* MAVLINK_V2_CTRL_SUPP */
 
+#define FLIGHT_STABLE_PARAMETERS_TIMEOUT_SEC          (4u)  // 7 seconds speed and altitude must be higher than minimum thresholds
+#define FLIGHT_SPEED_MINIMUM_THRESHOLD_M_S            (17u) // 17 m/s
+#define FLIGHT_ALTITUDE_MINIMUM_THRESHOLD_M           (100u)  // 100 meters
+#endif /* MAVLINK_V2_CTRL_SUPP */
 /*----------------------------- Test parameters -----------------------*/
-#define SELF_DESTROY_DISABLE                          (0u) //RELEASE VALUE - 0u
+
 
 #define TEST_SELF_DESTROY_ONLY_MODE                   (0u) //RELEASE VALUE - 0u
 #define TEST_SELF_DESTROY_MINING_MODE                 (0u) //RELEASE VALUE - 0u
-
-#define SELF_DESTROY_INDICATE_LAST_SECONDS            (15u) //RELEASE VALUE - 15
 
 #define ACC_HIT_DETECTED_STICKY_LED_FEATURE           (0u) //RELEASE VALUE - 0u
 #define MOVE_DETECTED_STICKY_LED_FEATURE              (0u) //RELEASE VALUE - 0u
@@ -143,29 +140,25 @@ extern "C" {
 #define VBAT_MEASURE_FEATURE                          (1u)
 #define START_UP_DELAY_ENABLE                         (1u)
 #define UART_ENABLE                                   (1u)
-#define ACC_SUPPORTED_ENABLE                          (1u)
 
-/*--------------------------- OSD MACROS -----------------------------------------*/
-#define OSD_ENABLE                                    (1u) // RELEASE VALUE - 1u
-#define OSD_ENABLE_DEFAULT                            (1u) // RELEASE VALUE - 1u
-
-/*----------------------------PWM 2 MACROS -----------------------------------------*/
-#define PWM2_INPUT_ENABLE_DEFAULT                     (0u) // RELEASE VALUE - 1u
-
-/*--------------------------- VUSA MACROS -----------------------------------------*/
-#define VUSA_ENABLE                                   (1u) // RELEASE VALUE - 1u
-#define VUSA_ENABLE_DEFAULT                           (1u) // RELEASE VALUE - 1u      
 /*-------------------------- ACCELEROMETER MACROS --------------------------------*/
 #define LIS2DH12_ACC_ENABLE                           (1u)
-#define LSM6DS3_ACC_ENABLE                            (0u)
 #define ACC_NO_DIVIDE_ENABLE                          (1u)
 
 #define ACC_HIT_THRESHOLD_MG                          (12000u)  // units in mili G //RELEASE VALUE - 12G - 12000u
+
+#if ACC_SHAKE_DETECTION_ENABLE
+#define ACC_SHAKE_THRESHOLD_MG                        (5000u)   // units in mili G - Shake detection threshold
+#endif /* ACC_SHAKE_DETECTION_ENABLE */
+
 #define ACC_BUFF_SIZE                                 (6u) //RELEASE VALUE - WINDOW SIZE = 6u
 
-#define NET_DETECTION_ENABLE                          (1u)
+#define NET_DETECTION_ENABLE                          (0u)
+
+#define ACC_SHAKE_DETECTION_ENABLE                    (0u)   // Enable shake detection - RELEASE: disabled
+
 #define ACC_NET_BUFF_SIZE                             (100u)
-#define ACC_HIT_NET_DIFF_THRESHOLD_MG                 (5500u)
+#define ACC_HIT_NET_DIFF_THRESHOLD_MG                 (5000u)
 #define ACC_NET_DECIMATION_RATE                       (5u)
 
 /*-------------------------- Main Configuration parameters -----------------------*/
@@ -200,22 +193,21 @@ extern "C" {
 #define CHARGING_TMR_TIMEOUT_MS  		     	      (9000u) //RELEASE VALUE - 9000u
 
 /* Ignition time in milliseconds */
-#define IGNITION_OFF_TMR_PERIOD_MS  		 		  (2500u) //RELEASE VALUE - 2500u
+#define IGNITION_OFF_TMR_PERIOD_MS  		 		  (1000u) //RELEASE VALUE - 1000u
 
 /* Disarm -> Ignition timeout */
-#define DISARM_IGNITION_BLOCK_TIMEOUT_MS              (4000u) // RELEASE VALUE - 4000u
+#define DISARM_IGNITION_BLOCK_TIMEOUT_MS              (5000u) // RELEASE VALUE - 5000u
 
-#define BUZZER_DISABLE                                (0u)     //RELEASE VALUE - 0u
+#define BUZZER_DISABLE                                (0u)
 
 /*------------------------ Battery Configuration parameters -----------------------*/
 
 // Battery level calculation thresholds for AAA battery
 #define BATTERY_VOLTAGE_100_PERCENT_THRESHOLD_MILIVOLTS      (1450u)  // 100% - 1.45V
-#define BATTERY_VOLTAGE_0_PERCENT_THRESHOLD_MILIVOLTS        (1000u)   // 0% - 0.9V
+#define BATTERY_VOLTAGE_0_PERCENT_THRESHOLD_MILIVOLTS        (900u)   // 0% - 0.9V
 
-#define BATTERY_VOLTAGE_VERY_LOW_SD_LOW_THRESHOLD_MILIVOLTS  (1100u) //RELEASE VALUE - 1100 mV
-#define BATTERY_VOLTAGE_LOW_NO_SOUND_THRESHOLD_MILIVOLTS     (1200u) //RELEASE VALUE - 1200 mV
-#define BATTERY_VOLTAGE_LOW_SD_LOW_THRESHOLD_MILIVOLTS       (1300u) //RELEASE VALUE - 1300 mV 
+#define BATTERY_VOLTAGE_VERY_LOW_SD_LOW_THRESHOLD_MILIVOLTS  (1000u) //RELEASE VALUE - 1000 mV
+#define BATTERY_VOLTAGE_LOW_SD_LOW_THRESHOLD_MILIVOLTS       (1200u) //RELEASE VALUE - 1200 mV
 #define SELF_VOLTAGE_LOW_SD_LOW_THRESHOLD_MILIVOLTS          (2500u) //RELEASE VALUE - 2400 mV
 
 #define BATTERY_THRESHOLD_ADJUSTMENT_MV                      (100u) //RELEASE VALUE - 100 mV
@@ -229,7 +221,6 @@ extern "C" {
 #define MAVLINK_CONNECTION_TIMEOUT_MS                 (3000u)
 #endif /* MAVLINK_V2_CTRL_SUPP */
 
-#if 0
 /*----------------------------- Test parameters -----------------------*/
 #define TEST_SELF_DESTROY_ONLY_MODE                   (0u) //RELEASE VALUE - 0u
 #define TEST_SELF_DESTROY_MINING_MODE                 (0u) //RELEASE VALUE - 0u
@@ -238,7 +229,7 @@ extern "C" {
 
 #define ACC_HIT_DETECTED_STICKY_LED_FEATURE           (0u) //RELEASE VALUE - 0u
 #define MOVE_DETECTED_STICKY_LED_FEATURE              (0u) //RELEASE VALUE - 0u
-#endif
+
 #endif /* RELEASE_CONFIGURATION_ENABLE */
 
 /*------------------------ Flash Configuration parameters -----------------------*/

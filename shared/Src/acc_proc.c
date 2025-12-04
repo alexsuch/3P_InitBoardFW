@@ -1,12 +1,17 @@
-#if LIS2DH12_ACC_ENABLE
+#if (LIS2DH12_ACC_ENABLE == 1u)
 #include <LIS2DH12.h>
+#elif (LSM6DS3_ACC_ENABLE == 1u)
+#include <LSM6DS3.h>
 #endif
 #include <string.h>
+#include <math.h>
 #include "init_brd.h"
 #include "acc_proc.h"
-#if	LIS2DH12_ACC_ENABLE
+#if	(LIS2DH12_ACC_ENABLE == 1u)
 #include "LIS2DH12.h"
-#endif /* LIS2DH12_ACC_ENABLE */
+#elif (LSM6DS3_ACC_ENABLE == 1u)
+#include "LSM6DS3.h"
+#endif /* LIS2DH12_ACC_ENABLE || LSM6DS3_ACC_ENABLE */
 #include "prj_config.h"
 
 static accProcStatus_t accProcStatus;
@@ -15,6 +20,12 @@ static app_cbk_fn acc_sys_cbk = NULL;
 static int16_t *x_axis;
 static int16_t *y_axis;
 static int16_t *z_axis;
+
+#if (LSM6DS3_ACC_ENABLE == 1u)
+static int16_t *gyro_x;
+static int16_t *gyro_y;
+static int16_t *gyro_z;
+#endif /* LSM6DS3_ACC_ENABLE */
 
 #if ACC_NO_DIVIDE_ENABLE
 const uint64_t accSqrtThreshold = ACC_SQRT_TRESHOLD * ACC_BUFF_SIZE * ACC_BUFF_SIZE;
@@ -363,6 +374,20 @@ static void AccProc_Processing(void)
 			        tmp32 = x_tmp * x_tmp + y_tmp * y_tmp + z_tmp * z_tmp;
 #endif
 
+			        // Debug: обчислення реального прискорення в G
+#if (LSM6DS3_ACC_ENABLE == 1u)
+			        // LSM6DS3: 16-bit data, ±16g range (HIT mode)
+			        // Sensitivity: 0.488 mg/LSB for ±16g
+			        // Формула: acc_magnitude = sqrt(x^2 + y^2 + z^2) * 0.488 / 1000
+			        float x_avg = (float)(accProcStatus.x_sum) / (float)ACC_BUFF_SIZE;
+			        float y_avg = (float)(accProcStatus.y_sum) / (float)ACC_BUFF_SIZE;
+			        float z_avg = (float)(accProcStatus.z_sum) / (float)ACC_BUFF_SIZE;
+			        float acc_magnitude_raw = sqrtf(x_avg * x_avg + y_avg * y_avg + z_avg * z_avg);
+			        float acc_magnitude_g = acc_magnitude_raw * 0.488f / 1000.0f; // в G
+			        (void)acc_magnitude_g; // Для відлагодження - постав breakpoint
+#endif
+
+
 		        // 6. Порівняння з порогом для детекції удару
 		        if (accProcStatus.hit_detection_enabled)
 		        {
@@ -396,6 +421,32 @@ static void AccProc_Processing(void)
 
 			// 7. Перехід до наступного індексу в циклічному буфері
 			accProcStatus.idx = (accProcStatus.idx + 1) % ACC_BUFF_SIZE;
+
+#if (LSM6DS3_ACC_ENABLE == 1u)
+			// Gyroscope data processing (only for LSM6DS3)
+			// 1. Вилучаємо старе значення з суми гіроскопа
+			accProcStatus.gyro_x_sum -= accProcStatus.gyro_x_buff[accProcStatus.idx];
+			accProcStatus.gyro_y_sum -= accProcStatus.gyro_y_buff[accProcStatus.idx];
+			accProcStatus.gyro_z_sum -= accProcStatus.gyro_z_buff[accProcStatus.idx];
+
+			// 2. Записуємо нові значення гіроскопа
+			accProcStatus.gyro_x_buff[accProcStatus.idx] = *gyro_x;
+			accProcStatus.gyro_y_buff[accProcStatus.idx] = *gyro_y;
+			accProcStatus.gyro_z_buff[accProcStatus.idx] = *gyro_z;
+
+			// 3. Додаємо нове значення до суми
+			accProcStatus.gyro_x_sum += *gyro_x;
+			accProcStatus.gyro_y_sum += *gyro_y;
+			accProcStatus.gyro_z_sum += *gyro_z;
+
+			// 4. Обчислюємо усереднені значення (якщо буфер заповнений)
+			if (accProcStatus.validCount >= ACC_BUFF_SIZE)
+			{
+				accProcStatus.gyro_x_avg = accProcStatus.gyro_x_sum / (int32_t)ACC_BUFF_SIZE;
+				accProcStatus.gyro_y_avg = accProcStatus.gyro_y_sum / (int32_t)ACC_BUFF_SIZE;
+				accProcStatus.gyro_z_avg = accProcStatus.gyro_z_sum / (int32_t)ACC_BUFF_SIZE;
+			}
+#endif /* LSM6DS3_ACC_ENABLE */
 
 #if NET_DETECTION_ENABLE
 
@@ -512,6 +563,9 @@ void AccProc_Stop (void)
 #if	LIS2DH12_ACC_ENABLE
 	/* Deinit Accelerometer functionality */
 	Lis2dh12_Deinit();
+#elif (LSM6DS3_ACC_ENABLE == 1u)
+	/* Deinit Accelerometer functionality */
+	Lsm6ds3_Deinit();
 #endif
 }
 
@@ -523,6 +577,11 @@ void AccProc_Reset (app_cbk_fn sys_cbk)
 #if	LIS2DH12_ACC_ENABLE
 	/* Init Accelerometer functionality */
 	Lis2dh12_Reset(App_AccCbk, &x_axis, &y_axis, &z_axis);
+#elif (LSM6DS3_ACC_ENABLE == 1u)
+	/* Init Accelerometer + Gyroscope functionality */
+	Lsm6ds3_Reset(App_AccCbk, &x_axis, &y_axis, &z_axis);
+	/* Get pointers to gyroscope data */
+	Lsm6ds3_GetGyroData(&gyro_x, &gyro_y, &gyro_z);
 #endif
 }
 
@@ -548,6 +607,9 @@ void AccProc_HitDetectionStart (void)
 #if	LIS2DH12_ACC_ENABLE
 		/* Set hit mode parameters */
 		Lis2dh12_GotoHitMode();
+#elif (LSM6DS3_ACC_ENABLE == 1u)
+		/* Set hit mode parameters */
+		Lsm6ds3_GotoHitMode();
 #endif
 	}
 }
@@ -564,6 +626,9 @@ void AccProc_MoveDetectionStart (uint32_t move_threshold)
 #if	LIS2DH12_ACC_ENABLE
 		/* Goto move detection mode */
 		Lis2dh12_GotoMoveMode();
+#elif (LSM6DS3_ACC_ENABLE == 1u)
+		/* Goto move detection mode */
+		Lsm6ds3_GotoMoveMode();
 #endif
 	}
 }
@@ -590,6 +655,9 @@ void AccProc_ShakeDetectionStart (void)
 #if	LIS2DH12_ACC_ENABLE
 		/* Set shake mode parameters - same as hit detection */
 		Lis2dh12_GotoShakeMode();
+#elif (LSM6DS3_ACC_ENABLE == 1u)
+		/* Set shake mode parameters - same as hit detection */
+		Lsm6ds3_GotoShakeMode();
 #endif
 	}
 }
@@ -599,8 +667,31 @@ void AccProc_Task ()
 {
 	AccProc_Processing();
 
-#if LIS2DH12_ACC_ENABLE
+#if (LIS2DH12_ACC_ENABLE == 1u)
 	/* Accelerometer tasks*/
 	Lis2dh12_Task();
+#elif (LSM6DS3_ACC_ENABLE == 1u)
+	/* Accelerometer tasks*/
+	Lsm6ds3_Task();
 #endif
 }
+
+#if (LSM6DS3_ACC_ENABLE == 1u)
+void AccProc_GetGyroAverage(int16_t* gyro_x_avg, int16_t* gyro_y_avg, int16_t* gyro_z_avg)
+{
+	if (gyro_x_avg != NULL)
+	{
+		*gyro_x_avg = accProcStatus.gyro_x_avg;
+	}
+	if (gyro_y_avg != NULL)
+	{
+		*gyro_y_avg = accProcStatus.gyro_y_avg;
+	}
+	if (gyro_z_avg != NULL)
+	{
+		*gyro_z_avg = accProcStatus.gyro_z_avg;
+	}
+}
+#endif /* LSM6DS3_ACC_ENABLE */
+
+

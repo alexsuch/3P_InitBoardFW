@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"name": "G431CBU6_Wing_Example",
+			"path": "."
+		},
+		{
+			"name": "shared",
+			"path": "../shared"
+		},
+		{
+			"path": "../3P_FPV_2_0"
+		}
+	],
+	"settings": {
+		"stm32cube-ide-clangd.arguments": [
+			"starm-clangd",
+			"--query-driver=${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/13.3.1+st.9/bin/arm-none-eabi-gcc.exe",
+			"--query-driver=${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/13.3.1+st.9/bin/arm-none-eabi-g++.exe"
+		],
+		"stm32cube-ide-clangd.path": "cube"
+	}
+}

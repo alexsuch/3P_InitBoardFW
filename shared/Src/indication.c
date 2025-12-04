@@ -15,7 +15,9 @@ static uint8_t Indication_GetHighErrIdx (uint32_t err_code_mask);
 static void Indication_Stop (uint8_t timer_id)
 {
 	(timer_id == INDICATION_STATUS_TMR) ? SET_STATUS_LED(false) : SET_ERROR_LED(false);
+#if !BUZZER_DISABLE
 	BuzzerDisable();
+#endif	
 
 	/* Run device active indication */
 	if (indStatus.curr_status == IND_STATUS_FUSE_POPULATED)
@@ -38,13 +40,17 @@ static void Indication_Stop (uint8_t timer_id)
 static void Indication_BuzzerStartCbk (uint8_t timer_id)
 {
 	(void) timer_id;
+#if !BUZZER_DISABLE
 	BuzzerEnable();
+#endif
 }
 
 static void Indication_Start (uint8_t timer_id)
 {
 	(timer_id == INDICATION_STATUS_TMR) ? SET_STATUS_LED(true) : SET_ERROR_LED(true);
+#if !BUZZER_DISABLE
 	BuzzerEnable();
+#endif
 }
 
 static void Indication_ClearStatusIndication (void)
@@ -433,7 +439,9 @@ void Indication_SetStatus (ind_status_t status_code, uint32_t user_data)
 		    case IND_STATUS_BOOM_START:
 				// Delay Buzzer to not drop system voltage level
 				Timer_Start (INDICATION_STATUS_TMR, INDICATION_TMR_LONG_SOUND_PERIOD_MS, Indication_BuzzerStartCbk);
+#if !BUZZER_DISABLE
 		    	BuzzerEnable();
+#endif
 		    	break;
 		    case IND_STATUS_FUSE_POPULATED:
 		    	if (indStatus.curr_status != status_code)

@@ -23,6 +23,15 @@ extern "C" {
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
+/* Stick PWM Definitions ---------------------------------------------------------*/
+#define PWM1_IN_Pin GPIO_PIN_14
+#define PWM1_IN_GPIO_Port GPIOB
+#define PWM1_IN_EXTI_IRQn EXTI4_15_IRQn
+
+#define PWM2_IN_Pin GPIO_PIN_10
+#define PWM2_IN_GPIO_Port GPIOA
+#define PWM2_IN_EXTI_IRQn EXTI4_15_IRQn
+
 /* Timer Definitions ---------------------------------------------------------*/
 #define SYS_TICK_TIMER_BASE         TIM3        /* System tick timer instance */
 #define DETON_HIGH_SIDE_SWITH_TIMER_BASE    TIM14       /* Detonation high-side switch PWM timer */
@@ -68,20 +77,10 @@ extern "C" {
 #define ACC_INT_PIN                 ACC_INT_Pin
 
 /* PWM Input Pins (for PWM control mode) */
-#define PWM1_INPUT_PORT             GPIOA
-#define PWM1_INPUT_PIN              GPIO_PIN_10
-#define PWM1_INPUT_EXTI_IRQn        EXTI4_15_IRQn
-
-/* PWM2 Input Pins (for PWM control mode) */
-#define PWM2_INPUT_PORT             FC_PWM_GPIO_IN_GPIO_Port
-#define PWM2_INPUT_PIN              FC_PWM_GPIO_IN_Pin
-#define PWM2_INPUT_EXTI_IRQn        EXTI4_15_IRQn
-
-/* UART Communication Pins */
-#define COMM_UART_TX_PORT           GPIOA
-#define COMM_UART_TX_PIN            GPIO_PIN_9      /* PA9 - USART1 TX */
-#define COMM_UART_RX_PORT           GPIOA
-#define COMM_UART_RX_PIN            GPIO_PIN_10     /* PA10 - USART1 RX */
+#define PWM1_INPUT_PORT             PWM1_IN_GPIO_Port
+#define PWM1_INPUT_PIN              PWM1_IN_Pin
+#define PWM2_INPUT_PORT             PWM2_IN_GPIO_Port
+#define PWM2_INPUT_PIN              PWM2_IN_Pin
 
 /* Buzzer */
 #define BUZZER_PORT                 EM_BUZZ_GPIO_Port
@@ -116,7 +115,7 @@ extern ADC_HandleTypeDef hadc1;    /* Main ADC handle */
 #define UART_TIMEOUT_MS             100         /* UART communication timeout */
 
 /* Buffer Size Definitions ---------------------------------------------------*/
-#define SPI_WR_BUFFER_SIZE          13          /* SPI write buffer size (7 for LIS2DH12, 13 for LSM6DS3) */
+#define SPI_WR_BUFFER_SIZE          7           /* SPI write buffer size */
 #define UART_RX_TEMP_BUFFER_SIZE    10          /* UART RX temporary buffer size */
 #define VUSA_PACKET_LENGTH          4           /* VUSA packet length */
 

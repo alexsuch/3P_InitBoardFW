@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "timer.h"
-#include "stm32g0xx_hal.h"
+#include "solution_wrapper.h"
 
 
 static timers_t timers[MAX_TIMER_NUMB];

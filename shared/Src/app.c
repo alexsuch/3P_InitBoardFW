@@ -1467,6 +1467,11 @@ static void App_AdcDataAnalyze(void)
 	}
 	else
 	{
+		/* Clear the error in configuration mode */
+		if (sysStatus.state == SYSTEM_STATE_CONFIGURE)
+		{
+			Indication_ClearError(ERR_CODE_BATTERY_LOW);
+		}
 		sysStatus.is_battery_low = false;
 		sysStatus.adc_measure_retry_cnt = 0u;
 	}
@@ -2123,6 +2128,8 @@ static void App_InitCbk (void)
 		App_FuseCheckRun();
 		/* Set board state to discharged */
 		sysStatus.sys_info.board_state = BOARD_STATE_DISCHARGED;
+
+		AccProc_HitDetectionStart(); //TODO OSAV Remove
 	}
 }
 
@@ -2166,7 +2173,7 @@ void App_InitRun(void)
 	start_up = true;
 
 	/* Load configuration */
-	App_RefreshConfig();
+	App_RefreshConfig(); //TODO OSAV checkconfig address
 
 #if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 	/* Initialize flight parameters */

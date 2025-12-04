@@ -7,8 +7,8 @@
   */
 /* USER CODE END Header */
 
-#ifndef __SOLUTION_WRAPPER_H
-#define __SOLUTION_WRAPPER_H
+#ifndef __SOLUTION_H
+#define __SOLUTION_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,10 +23,6 @@ extern "C" {
 
 #define LIS2DH12_ACC_DATA_READ_SIZE          (7u)
 #define LIS2DH12_ACC_DATA_ZERO_BYTE          (0xE8u)
-#define LSM6DS3_ACC_DATA_READ_SIZE           (7u)   /* 1 dummy + 6 accel bytes (same as LIS2DH12) */
-#define LSM6DS3_ACC_DATA_ZERO_BYTE           (0xE8u) /* OUTX_L_XL (0x28) with read bit (0x80) and auto-increment (0x40) */
-#define LSM6DS3_GYRO_DATA_READ_SIZE          (7u)   /* 1 dummy + 6 gyro bytes */
-#define LSM6DS3_GYRO_DATA_ZERO_BYTE          (0xE2u) /* OUTX_L_G (0x22) with read bit (0x80) and auto-increment (0x40) */
 #define ADC_SELF_PWR_CHANNEL_IDX             (ADC_CHANNEL_VREFINT)
 #define ADC_VBAT_CHANNEL_IDX                 (ADC_CHANNEL_11)
 
@@ -47,7 +43,6 @@ extern ADC_HandleTypeDef hadc1;
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Solution_HalInit (void);
-void delay_us(uint16_t us);
 bool SpiReadRegister(uint8_t address, uint8_t* value, uint8_t num);
 bool SpiWriteSingleRegister(uint8_t address, uint8_t value);
 bool ReadAccIntGpio (void);
@@ -85,9 +80,6 @@ void Test2LedSet (bool state);
 void Test3LedSet (bool state);
 void Test3LedToggle ();
 void PWM_IN_GPIO_Init(void);
-void UART_Configure(bool disable_rx, bool disable_tx);
-void PWM_GPIO_Configure(bool configure_pwm1, bool configure_pwm2);
-void UART_Restore_Configuration(void);
 bool UartSendData(uint8_t* wrBuff, uint8_t len);
 bool UartGetOneByteRx(void);
 void VusaUart_IRQ_Cbk(uint8_t vusa_byte);
@@ -107,4 +99,4 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
 }
 #endif
 
-#endif /* __SOLUTION_WRAPPER_H */
+#endif /* __SOLUTION_H */

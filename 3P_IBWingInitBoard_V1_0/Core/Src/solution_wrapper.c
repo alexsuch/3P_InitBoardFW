@@ -89,20 +89,10 @@ void DetonHighSideSwithSet (bool state)
 	}
 }
 
-void delay_us(uint16_t us)
-{
-    // Калібровано для 24MHz
-    // Кожна ітерація займає приблизно 3-4 такти
-    for (volatile uint16_t i = 0; i < (us * 4); i++) {
-        __NOP();
-    }
-}
-
 void DetonLowSideSwitchSet (bool state)
 {
-	HAL_GPIO_WritePin(DETON_LOW_SIDE_SWITCH_OUT_2_PORT, DETON_LOW_SIDE_SWITCH_OUT_2_PIN, state);
-	delay_us(2);
 	HAL_GPIO_WritePin(DETON_LOW_SIDE_SWITCH_OUT_1_PORT, DETON_LOW_SIDE_SWITCH_OUT_1_PIN, state);
+	HAL_GPIO_WritePin(DETON_LOW_SIDE_SWITCH_OUT_2_PORT, DETON_LOW_SIDE_SWITCH_OUT_2_PIN, state);
 }
 
 // ---------------------- LED INDICATION -----------------------------------
@@ -131,100 +121,33 @@ uint32_t ReadStickCounter10Us (void)
 	return __HAL_TIM_GetCounter(&PWM_STICK_COUNTER_HANDLE);
 }
 
-void UART_Configure(bool disable_rx, bool disable_tx)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-  if (disable_rx && disable_tx)
-  {
-    /* Deinit entire UART */
-    HAL_UART_DeInit(&MAIN_UART_HANDLE);
-  }
-  else if (disable_rx && !disable_tx)
-  {
-    /* Disable only UART RX, keep TX active */
-    HAL_UART_AbortReceive_IT(&MAIN_UART_HANDLE);
-    CLEAR_BIT(MAIN_UART_HANDLE.Instance->CR1, USART_CR1_RE);  // Disable RX only
-    
-    /* Reconfigure RX pin as GPIO */
-    GPIO_InitStruct.Pin = COMM_UART_RX_PIN;
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_PULLUP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    HAL_GPIO_Init(COMM_UART_RX_PORT, &GPIO_InitStruct);
-  }
-  else if (!disable_rx && disable_tx)
-  {
-    /* Disable only UART TX, keep RX active */
-    HAL_UART_AbortTransmit_IT(&MAIN_UART_HANDLE);
-    CLEAR_BIT(MAIN_UART_HANDLE.Instance->CR1, USART_CR1_TE);  // Disable TX only
-    
-    /* Reconfigure TX pin as GPIO */
-    GPIO_InitStruct.Pin = COMM_UART_TX_PIN;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    HAL_GPIO_Init(COMM_UART_TX_PORT, &GPIO_InitStruct);
-  }
-  
-  /* Wait for configuration to settle */
-  HAL_Delay(10);
-}
-
-void PWM_GPIO_Configure(bool configure_pwm1, bool configure_pwm2)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  bool need_exti_init = false;
-
-  if (configure_pwm1)
-  {
-    /*Configure GPIO pin : PWM1_IN_Pin */
-    GPIO_InitStruct.Pin = PWM1_INPUT_PIN;
-    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-    HAL_GPIO_Init(PWM1_INPUT_PORT, &GPIO_InitStruct);
-    need_exti_init = true;
-  }
-
-  if (configure_pwm2)
-  {
-    /*Configure GPIO pin : PWM2_IN_Pin */
-    GPIO_InitStruct.Pin = PWM2_INPUT_PIN;
-    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-    HAL_GPIO_Init(PWM2_INPUT_PORT, &GPIO_InitStruct);
-    need_exti_init = true;
-  }
-
-  if (need_exti_init)
-  {
-    /* EXTI interrupt init */
-    HAL_NVIC_SetPriority(EXTI4_15_IRQn, 0, 1);
-    HAL_NVIC_EnableIRQ(EXTI4_15_IRQn);
-  }
-
-  /* Wait for configuration to settle */
-  HAL_Delay(10);
-}
-
 void PWM_IN_GPIO_Init(void)
 {
-  /* Legacy function - calls new functions with default behavior */
-  UART_Configure(true, true);   // Disable both RX and TX (full UART deinit)
-  PWM_GPIO_Configure(true, true); // Configure both PWM1 and PWM2
-}
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
 
-void UART_Restore_Configuration(void)
-{
-  /* Disable PWM GPIO interrupts */
-  HAL_NVIC_DisableIRQ(EXTI4_15_IRQn);
-  
-  /* Reinitialize UART with both RX and TX */
-  extern void MX_USART1_UART_Init(void);  // External function from main.c
-  MX_USART1_UART_Init();
-  
-  /* Restart UART reception */
-  UartGetOneByteRx();
+  /* Deinit UART */
+  HAL_UART_DeInit(&MAIN_UART_HANDLE);
+  /* Wait for some time */
+  HAL_Delay(10);
+
+  /*Configure GPIO pin : PWM2_IN_Pin */
+  GPIO_InitStruct.Pin = PWM2_INPUT_PIN;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(PWM2_INPUT_PORT, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PWM1_IN_Pin */
+  GPIO_InitStruct.Pin = PWM1_INPUT_PIN;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(PWM1_INPUT_PORT, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI4_15_IRQn, 0, 1);
+  HAL_NVIC_EnableIRQ(EXTI4_15_IRQn);
+
+  /* Wait for some time */
+  HAL_Delay(10);
 }
 
 bool ReadFcPwm1Gpio (void)
@@ -249,9 +172,6 @@ void GpioIntHandler (uint16_t GPIO_Pin, bool is_rise_edge)
 	{
 		if (GPIO_Pin == PWM1_INPUT_PIN)
 		{
-	/* Disable interrupts */
-	uint32_t prim = __get_PRIMASK();
-	__disable_irq();
 			//TestLedToggle();
 			/* Handle Interrupt from FC PWM1 */
 			if ((is_rise_edge) && (ReadFcPwm1Gpio() == true) && (pwm1_rise_edge == false))
@@ -264,15 +184,11 @@ void GpioIntHandler (uint16_t GPIO_Pin, bool is_rise_edge)
 				pwm1_rise_edge = false;
 				fc_pwm_cbk(PWM_CH_1, false);
 			}
-	// enable interrupts
-	__set_PRIMASK(prim);
+
 		}
 
 		if (GPIO_Pin == PWM2_INPUT_PIN)
 		{
-	/* Disable interrupts */
-	uint32_t prim = __get_PRIMASK();
-	__disable_irq();
 			//TestLedToggle();
 			/* Handle Interrupt from FC PWM2 */
 			if ((is_rise_edge) && (ReadFcPwm2Gpio() == true) && (pwm2_rise_edge == false))
@@ -285,8 +201,6 @@ void GpioIntHandler (uint16_t GPIO_Pin, bool is_rise_edge)
 				pwm2_rise_edge = false;
 				fc_pwm_cbk(PWM_CH_2, false);
 			}
-	// enable interrupts
-	__set_PRIMASK(prim);
 		}
 	}
 }
@@ -450,13 +364,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 // ---------------------- SPI COMMUNICATION --------------------------------
 
 // SPI Communication Variables
-#if LIS2DH12_ACC_ENABLE
-uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-#elif LSM6DS3_ACC_ENABLE
-uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-#else
-uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00};
-#endif
+uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {LIS2DH12_ACC_DATA_ZERO_BYTE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 uint8_t readCommand = 0xF2;
 app_cbk_fn acc_cbk = NULL;
 app_cbk_fn ext_pwr_cbk = NULL;
@@ -490,20 +398,11 @@ void HAL_SPI_DMAErrorCallback(SPI_HandleTypeDef *hspi)
 bool SpiGetAccData (uint8_t *rd_data_ptr, app_cbk_fn cbk)
 {
 	acc_cbk = cbk;
-
-#if LIS2DH12_ACC_ENABLE
 	spi_wr_buff[0] = LIS2DH12_ACC_DATA_ZERO_BYTE;
-	uint8_t read_size = LIS2DH12_ACC_DATA_READ_SIZE;
-#elif LSM6DS3_ACC_ENABLE
-	spi_wr_buff[0] = LSM6DS3_ACC_DATA_ZERO_BYTE;
-	uint8_t read_size = LSM6DS3_ACC_DATA_READ_SIZE;
-#else
-	#error "No accelerometer type defined!"
-#endif
 
 	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_RESET);
 
-	if (HAL_SPI_TransmitReceive_DMA(&ACC_SPI_HANDLE, spi_wr_buff, rd_data_ptr, read_size) != HAL_OK)
+	if (HAL_SPI_TransmitReceive_DMA(&ACC_SPI_HANDLE, spi_wr_buff, rd_data_ptr, LIS2DH12_ACC_DATA_READ_SIZE) != HAL_OK)
 	{
 		HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
 		return false;

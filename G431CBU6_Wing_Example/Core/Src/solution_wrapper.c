@@ -26,30 +26,23 @@
 // -----------------------HAL Init -------------------------------------------------
 void Solution_HalInit (void)
 {
+#if 0
   if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK)
   {
     /* Starting Error */
     Error_Handler();
   }
+#endif
 
   /* Reset all GPIOs to the correct state */
-  HAL_GPIO_WritePin(SPI_CS_GPIO_Port,SPI_CS_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(SPI_CS_GPIO_Port, SPI_CS_Pin, GPIO_PIN_SET);
 
   /* Run 10ms main timer tick */
-  if (HAL_TIM_Base_Start_IT(&htim3) != HAL_OK)
+  if (HAL_TIM_Base_Start_IT(&SYS_TICK_TIMER_HANDLE) != HAL_OK)
   {
     /* Starting Error */
     Error_Handler();
   }
-
-#if (CONTROL_MODE == PWM_CTRL_SUPP)
-  /* Enable Stick tracking timer */
-  if (HAL_TIM_Base_Start_IT(&htim17) != HAL_OK)
-  {
-    /* Starting Error */
-    Error_Handler();
-  }
-#endif
 }
 
 // ---------------------- SYSTEM TIMER CALLBACKS ------------------------------------
@@ -85,11 +78,11 @@ void DetonHighSideSwithSet (bool state)
 	}
 	else
 	{
-	    HAL_TIM_PWM_Stop(&DETON_HIGH_SIDE_SWITH_TIMER_HANDLE, DETON_HIGH_SIDE_SWITH_CHANNEL);
+		HAL_TIM_PWM_Stop(&DETON_HIGH_SIDE_SWITH_TIMER_HANDLE, DETON_HIGH_SIDE_SWITH_CHANNEL);
 	}
 }
 
-void delay_us(uint16_t us)
+void delay_us(uint16_t us) //TODO OSAV rework due to proper mcu clock
 {
     // Калібровано для 24MHz
     // Кожна ітерація займає приблизно 3-4 такти
@@ -105,218 +98,6 @@ void DetonLowSideSwitchSet (bool state)
 	HAL_GPIO_WritePin(DETON_LOW_SIDE_SWITCH_OUT_1_PORT, DETON_LOW_SIDE_SWITCH_OUT_1_PIN, state);
 }
 
-// ---------------------- LED INDICATION -----------------------------------
-
-void LedErrorSet (bool state)
-{
-	HAL_GPIO_WritePin(LED_ERROR_PORT, LED_ERROR_PIN, state);
-}
-
-void LedStatusSet (bool state)
-{
-	HAL_GPIO_WritePin(LED_STATUS_PORT, LED_STATUS_PIN, state);
-}
-
-// ---------------------- PWM CONTROL MODE ---------------------------------
-
-#if (CONTROL_MODE == PWM_CTRL_SUPP)
-
-// PWM Control Variables
-app_cbk_fn fc_pwm_cbk = NULL;
-volatile bool pwm1_rise_edge = false;
-volatile bool pwm2_rise_edge = false;
-
-uint32_t ReadStickCounter10Us (void)
-{
-	return __HAL_TIM_GetCounter(&PWM_STICK_COUNTER_HANDLE);
-}
-
-void UART_Configure(bool disable_rx, bool disable_tx)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-  if (disable_rx && disable_tx)
-  {
-    /* Deinit entire UART */
-    HAL_UART_DeInit(&MAIN_UART_HANDLE);
-  }
-  else if (disable_rx && !disable_tx)
-  {
-    /* Disable only UART RX, keep TX active */
-    HAL_UART_AbortReceive_IT(&MAIN_UART_HANDLE);
-    CLEAR_BIT(MAIN_UART_HANDLE.Instance->CR1, USART_CR1_RE);  // Disable RX only
-    
-    /* Reconfigure RX pin as GPIO */
-    GPIO_InitStruct.Pin = COMM_UART_RX_PIN;
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_PULLUP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    HAL_GPIO_Init(COMM_UART_RX_PORT, &GPIO_InitStruct);
-  }
-  else if (!disable_rx && disable_tx)
-  {
-    /* Disable only UART TX, keep RX active */
-    HAL_UART_AbortTransmit_IT(&MAIN_UART_HANDLE);
-    CLEAR_BIT(MAIN_UART_HANDLE.Instance->CR1, USART_CR1_TE);  // Disable TX only
-    
-    /* Reconfigure TX pin as GPIO */
-    GPIO_InitStruct.Pin = COMM_UART_TX_PIN;
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    HAL_GPIO_Init(COMM_UART_TX_PORT, &GPIO_InitStruct);
-  }
-  
-  /* Wait for configuration to settle */
-  HAL_Delay(10);
-}
-
-void PWM_GPIO_Configure(bool configure_pwm1, bool configure_pwm2)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  bool need_exti_init = false;
-
-  if (configure_pwm1)
-  {
-    /*Configure GPIO pin : PWM1_IN_Pin */
-    GPIO_InitStruct.Pin = PWM1_INPUT_PIN;
-    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-    HAL_GPIO_Init(PWM1_INPUT_PORT, &GPIO_InitStruct);
-    need_exti_init = true;
-  }
-
-  if (configure_pwm2)
-  {
-    /*Configure GPIO pin : PWM2_IN_Pin */
-    GPIO_InitStruct.Pin = PWM2_INPUT_PIN;
-    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-    HAL_GPIO_Init(PWM2_INPUT_PORT, &GPIO_InitStruct);
-    need_exti_init = true;
-  }
-
-  if (need_exti_init)
-  {
-    /* EXTI interrupt init */
-    HAL_NVIC_SetPriority(EXTI4_15_IRQn, 0, 1);
-    HAL_NVIC_EnableIRQ(EXTI4_15_IRQn);
-  }
-
-  /* Wait for configuration to settle */
-  HAL_Delay(10);
-}
-
-void PWM_IN_GPIO_Init(void)
-{
-  /* Legacy function - calls new functions with default behavior */
-  UART_Configure(true, true);   // Disable both RX and TX (full UART deinit)
-  PWM_GPIO_Configure(true, true); // Configure both PWM1 and PWM2
-}
-
-void UART_Restore_Configuration(void)
-{
-  /* Disable PWM GPIO interrupts */
-  HAL_NVIC_DisableIRQ(EXTI4_15_IRQn);
-  
-  /* Reinitialize UART with both RX and TX */
-  extern void MX_USART1_UART_Init(void);  // External function from main.c
-  MX_USART1_UART_Init();
-  
-  /* Restart UART reception */
-  UartGetOneByteRx();
-}
-
-bool ReadFcPwm1Gpio (void)
-{
-	return (HAL_GPIO_ReadPin(PWM1_INPUT_PORT, PWM1_INPUT_PIN) == GPIO_PIN_SET) ? true : false;
-}
-
-bool ReadFcPwm2Gpio (void)
-{
-	return (HAL_GPIO_ReadPin(PWM2_INPUT_PORT, PWM2_INPUT_PIN) == GPIO_PIN_SET) ? true : false;
-}
-
-void FcPwmSetCbk(app_cbk_fn cbk)
-{
-	/* Save callback from FC PWM input */
-	fc_pwm_cbk = cbk;
-}
-
-void GpioIntHandler (uint16_t GPIO_Pin, bool is_rise_edge)
-{
-	if (fc_pwm_cbk != NULL)
-	{
-		if (GPIO_Pin == PWM1_INPUT_PIN)
-		{
-	/* Disable interrupts */
-	uint32_t prim = __get_PRIMASK();
-	__disable_irq();
-			//TestLedToggle();
-			/* Handle Interrupt from FC PWM1 */
-			if ((is_rise_edge) && (ReadFcPwm1Gpio() == true) && (pwm1_rise_edge == false))
-			{
-				pwm1_rise_edge = true;
-				fc_pwm_cbk(PWM_CH_1, true);
-			}
-			else if ((is_rise_edge == false) && (ReadFcPwm1Gpio() == false) && (pwm1_rise_edge == true))
-			{
-				pwm1_rise_edge = false;
-				fc_pwm_cbk(PWM_CH_1, false);
-			}
-	// enable interrupts
-	__set_PRIMASK(prim);
-		}
-
-		if (GPIO_Pin == PWM2_INPUT_PIN)
-		{
-	/* Disable interrupts */
-	uint32_t prim = __get_PRIMASK();
-	__disable_irq();
-			//TestLedToggle();
-			/* Handle Interrupt from FC PWM2 */
-			if ((is_rise_edge) && (ReadFcPwm2Gpio() == true) && (pwm2_rise_edge == false))
-			{
-				pwm2_rise_edge = true;
-				fc_pwm_cbk(PWM_CH_2, true);
-			}
-			else if ((is_rise_edge == false) && (ReadFcPwm2Gpio() == false) && (pwm2_rise_edge == true))
-			{
-				pwm2_rise_edge = false;
-				fc_pwm_cbk(PWM_CH_2, false);
-			}
-	// enable interrupts
-	__set_PRIMASK(prim);
-		}
-	}
-}
-
-void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
-{
-	GpioIntHandler(GPIO_Pin, true);
-}
-
-void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin)
-{
-	GpioIntHandler(GPIO_Pin, false);
-}
-#elif (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
-
-#endif /* CONTROL_MODE == PWM_CTRL_SUPP */
-
-// ---------------------- BUZZER CONTROL -----------------------------------
-
-void BuzzerEnable(void)
-{
-#if (!BUZZER_DISABLE)
-	HAL_GPIO_WritePin(BUZZER_PORT, BUZZER_PIN, true);
-#endif
-}
-
-void BuzzerDisable(void)
-{
-	HAL_GPIO_WritePin(BUZZER_PORT, BUZZER_PIN, false);
-}
 
 // ---------------------- CHARGING CONTROL ---------------------------------
 
@@ -330,6 +111,39 @@ void ChargingDisable(void)
 {
 	/* Closes charge MOSFET and opens Discharge MOSFET */
 	HAL_GPIO_WritePin(CHARGE_EN_PORT, CHARGE_EN_PIN, true);
+}
+
+// ---------------------- LED INDICATION -----------------------------------
+
+void LedErrorSet (bool state)
+{
+	HAL_GPIO_WritePin(LED_ERROR_PORT, LED_ERROR_PIN, state);
+}
+
+void LedStatusSet (bool state)
+{
+	HAL_GPIO_WritePin(LED_STATUS_PORT, LED_STATUS_PIN, state);
+}
+
+// ------------------------ TEST GPIOs ---------------------------------
+void Test1Set (bool state)
+{
+	HAL_GPIO_WritePin(TEST_1_PORT, TEST_1_PIN, state);
+}
+
+void Test2Set (bool state)
+{
+	HAL_GPIO_WritePin(TEST_2_PORT, TEST_2_PIN, state);
+}
+
+void Test1Toggle (void)
+{
+	HAL_GPIO_TogglePin(TEST_1_PORT, TEST_1_PIN);
+}
+
+void Test2Toggle (void)
+{
+	HAL_GPIO_TogglePin(TEST_2_PORT, TEST_2_PIN);
 }
 
 // ---------------------- PUMP CONTROL -------------------------------------
@@ -436,8 +250,10 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	}
 	else if (&MAIN_UART_HANDLE == huart)
 	{
+#if UART_ENABLE
 		/* Handle Configurator received byte */
 		UartConfig_ByteReceived(uartRxTempByte);
+#endif /* UART_ENABLE */
 #if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 		/* Handle Mavlink comands */
 		Mavlink_UartRxByte(uartRxTempByte);
@@ -449,13 +265,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 // ---------------------- SPI COMMUNICATION --------------------------------
 
-// SPI Communication Variables
+// SPI Communication Variables - aligned for DMA
 #if LIS2DH12_ACC_ENABLE
-uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+__attribute__((aligned(4))) uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 #elif LSM6DS3_ACC_ENABLE
-uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+__attribute__((aligned(4))) uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 #else
-uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00};
+__attribute__((aligned(4))) uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00};
 #endif
 uint8_t readCommand = 0xF2;
 app_cbk_fn acc_cbk = NULL;
@@ -475,39 +291,50 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 	Acc_ReportStatus(SYSTEM_EVT_READY);
 }
 
-void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
-{
-	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
-	Acc_ReportStatus(SYSTEM_EVT_ERROR);
-}
-
-void HAL_SPI_DMAErrorCallback(SPI_HandleTypeDef *hspi)
-{
-	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
-	Acc_ReportStatus(SYSTEM_EVT_ERROR);
-}
+/* SPI DMA callbacks not needed in blocking mode */
 
 bool SpiGetAccData (uint8_t *rd_data_ptr, app_cbk_fn cbk)
 {
 	acc_cbk = cbk;
 
 #if LIS2DH12_ACC_ENABLE
-	spi_wr_buff[0] = LIS2DH12_ACC_DATA_ZERO_BYTE;
-	uint8_t read_size = LIS2DH12_ACC_DATA_READ_SIZE;
+	uint8_t reg_addr = LIS2DH12_ACC_DATA_ZERO_BYTE;
+	uint8_t data_size = LIS2DH12_ACC_DATA_READ_SIZE - 1;  /* -1 for address byte in TransmitReceive */
 #elif LSM6DS3_ACC_ENABLE
-	spi_wr_buff[0] = LSM6DS3_ACC_DATA_ZERO_BYTE;
-	uint8_t read_size = LSM6DS3_ACC_DATA_READ_SIZE;
+	uint8_t reg_addr = LSM6DS3_GYRO_DATA_ZERO_BYTE;
+	uint8_t data_size = LSM6DS3_ACC_DATA_READ_SIZE - 1;  /* 12 data bytes (6 gyro + 6 accel) */
 #else
 	#error "No accelerometer type defined!"
 #endif
 
-	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_RESET);
-
-	if (HAL_SPI_TransmitReceive_DMA(&ACC_SPI_HANDLE, spi_wr_buff, rd_data_ptr, read_size) != HAL_OK)
+	/* Ensure previous transaction is complete */
+	if (ACC_SPI_HANDLE.State != HAL_SPI_STATE_READY)
 	{
-		HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
+		Acc_ReportStatus(SYSTEM_EVT_ERROR);
 		return false;
 	}
+
+	/* Prepare transmit buffer: address byte followed by dummy bytes */
+	spi_wr_buff[0] = reg_addr;
+	/* Dummy bytes already initialized to 0x00 in global buffer */
+	
+	/* Pull CS LOW to start transaction */
+	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_RESET);
+	
+	/* Send address + receive data in one synchronized transaction */
+	/* Takes ~10us @ 10.5MHz for 13 bytes */
+	if (HAL_SPI_TransmitReceive(&ACC_SPI_HANDLE, spi_wr_buff, rd_data_ptr, data_size + 1, 100) != HAL_OK)
+	{
+		HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
+		Acc_ReportStatus(SYSTEM_EVT_ERROR);
+		return false;
+	}
+	
+	/* Raise CS to end transaction */
+	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
+	
+	/* Call callback immediately in blocking mode */
+	Acc_ReportStatus(SYSTEM_EVT_READY);
 
 	return true;
 }
@@ -568,6 +395,7 @@ bool SpiReadRegister(uint8_t address, uint8_t* value, uint8_t num)
 
 // ---------------------- ADC OPERATIONS -----------------------------------
 
+#if 0
 // ADC Variables
 app_cbk_fn adc_cbk = NULL;
 uint8_t adc_idx = 0u;
@@ -616,3 +444,4 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc_ptr) //TODO add calibratio
 		}
 	}
 }
+	#endif
