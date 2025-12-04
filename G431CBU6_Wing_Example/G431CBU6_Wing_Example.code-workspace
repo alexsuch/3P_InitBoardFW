@@ -9,7 +9,7 @@
 			"path": "../shared"
 		},
 		{
-			"path": "../3P_FPV_2_0"
+			"path": "../MavlinkEmulator"
 		}
 	],
 	"settings": {

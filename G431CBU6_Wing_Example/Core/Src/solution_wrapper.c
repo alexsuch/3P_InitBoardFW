@@ -35,7 +35,7 @@ void Solution_HalInit (void)
 #endif
 
   /* Reset all GPIOs to the correct state */
-  HAL_GPIO_WritePin(SPI_CS_GPIO_Port, SPI_CS_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
 
   /* Run 10ms main timer tick */
   if (HAL_TIM_Base_Start_IT(&SYS_TICK_TIMER_HANDLE) != HAL_OK)
@@ -287,7 +287,7 @@ static void Acc_ReportStatus (system_evt_t evt)
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
-	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
 	Acc_ReportStatus(SYSTEM_EVT_READY);
 }
 
@@ -319,19 +319,19 @@ bool SpiGetAccData (uint8_t *rd_data_ptr, app_cbk_fn cbk)
 	/* Dummy bytes already initialized to 0x00 in global buffer */
 	
 	/* Pull CS LOW to start transaction */
-	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_RESET);
 	
 	/* Send address + receive data in one synchronized transaction */
 	/* Takes ~10us @ 10.5MHz for 13 bytes */
 	if (HAL_SPI_TransmitReceive(&ACC_SPI_HANDLE, spi_wr_buff, rd_data_ptr, data_size + 1, 100) != HAL_OK)
 	{
-		HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
 		Acc_ReportStatus(SYSTEM_EVT_ERROR);
 		return false;
 	}
 	
 	/* Raise CS to end transaction */
-	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
 	
 	/* Call callback immediately in blocking mode */
 	Acc_ReportStatus(SYSTEM_EVT_READY);
@@ -351,15 +351,15 @@ bool SpiWriteSingleRegister(uint8_t address, uint8_t value)
 	// Setting R/W = 0, i.e.: Write Mode
     address &= ~(0x80);
 
-	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_RESET);
 
 	if (HAL_SPI_Transmit(&ACC_SPI_HANDLE, wrBuff,2, SPI_TIMEOUT_MS) != HAL_OK)
 	{
-		HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
 		return false;
 	}
 
-	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
 
 	return true;
 }
@@ -375,20 +375,20 @@ bool SpiReadRegister(uint8_t address, uint8_t* value, uint8_t num)
 	// Setting R/W = 1, i.e.: Read Mode
     address |= (0x80);
 
-	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_RESET);
 
 	if (HAL_SPI_Transmit(&ACC_SPI_HANDLE, &address, 1, SPI_TIMEOUT_MS) != HAL_OK)
 	{
-		HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
 		return false;
 	}
 	if (HAL_SPI_Receive(&ACC_SPI_HANDLE, value, num, SPI_TIMEOUT_MS) != HAL_OK)
 	{
-		HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
 		return false;
 	}
 
-	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
 
 	return true;
 }

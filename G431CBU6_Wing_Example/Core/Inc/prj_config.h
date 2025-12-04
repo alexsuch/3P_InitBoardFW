@@ -32,7 +32,7 @@ extern "C" {
 
 #if (RELEASE_CONFIGURATION_ENABLE == 0u) //TEST CONFIGURATION
 /*-------------------------- BUILD MACROS -----------------------------------------*/
-#define CONTROL_MODE                                  (NO_CTRL)
+#define CONTROL_MODE                                  (MAVLINK_V2_CTRL_SUPP)
 #define VBAT_MEASURE_FEATURE                          (0u)
 #define ACC_SUPPORTED_ENABLE                          (1u)
 #define START_UP_DELAY_ENABLE                         (1u)

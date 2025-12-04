@@ -32,20 +32,41 @@ extern "C" {
 #define DETON_HIGH_SIDE_SWITH_CHANNEL       TIM_CHANNEL_2   /* Detonation high-side switch PWM channel */
 #define PWM_PUMP_CHANNEL                    TIM_CHANNEL_2   /* Pump PWM channel */
 
+/* PWM GPIO Configuration ----------------------------------------------------*/
+/* Detonation High-Side Switch PWM (TIM15_CH2) */
+#define DETON_PWM_PORT              GPIOB
+#define DETON_PWM_PIN               GPIO_PIN_15
+#define DETON_PWM_AF                GPIO_AF1_TIM15
+
+/* Pump PWM (TIM1_CH2 and TIM1_CH2N) */
+#define PUMP_PWM_MAIN_PORT          GPIOA
+#define PUMP_PWM_MAIN_PIN           GPIO_PIN_9
+#define PUMP_PWM_COMPL_PORT         GPIOB
+#define PUMP_PWM_COMPL_PIN          GPIO_PIN_14
+#define PUMP_PWM_AF                 GPIO_AF6_TIM1
+
 /* SPI Configuration ---------------------------------------------------------*/
 #define ACC_SPI_INSTANCE            SPI1        /* Accelerometer SPI instance */
 
 /* SPI GPIO Configuration */
-#define ACC_SPI_SCK_PORT            GPIOA
-#define ACC_SPI_SCK_PIN             GPIO_PIN_5
-#define ACC_SPI_MISO_PORT           GPIOA
-#define ACC_SPI_MISO_PIN            GPIO_PIN_6
-#define ACC_SPI_MOSI_PORT           GPIOA
-#define ACC_SPI_MOSI_PIN            GPIO_PIN_7
+#define ACC_SPI_SCK_PORT            GPIOB
+#define ACC_SPI_SCK_PIN             GPIO_PIN_3
+#define ACC_SPI_MISO_PORT           GPIOB
+#define ACC_SPI_MISO_PIN            GPIO_PIN_4
+#define ACC_SPI_MOSI_PORT           GPIOB
+#define ACC_SPI_MOSI_PIN            GPIO_PIN_5
 
 /* UART Configuration --------------------------------------------------------*/
-#define MAIN_UART_INSTANCE          LPUART1       /* Main UART for communication */
+#define MAIN_UART_INSTANCE          USART2       /* Main UART for communication */
 #define VUSA_UART_INSTANCE          USART3       /* VUSA UART instance */
+
+/* Main UART GPIO Configuration */
+#define MAIN_UART_TX_PORT           GPIOA
+#define MAIN_UART_TX_PIN            GPIO_PIN_2
+#define MAIN_UART_RX_PORT           GPIOA
+#define MAIN_UART_RX_PIN            GPIO_PIN_3
+#define MAIN_UART_GPIO_AF           GPIO_AF7_USART2
+#define MAIN_UART_IRQn              USART2_IRQn
 
 /* VUSA UART GPIO Configuration */
 #define VUSA_UART_TX_PORT           GPIOB
@@ -64,9 +85,7 @@ extern "C" {
 #define ADC_CHANNELS_COUNT          2           /* Number of ADC channels */
 
 /* GPIO Pin Definitions ------------------------------------------------------*/
-/* SPI Chip Select */
-#define SPI_CS_PORT                 SPI_CS_GPIO_Port
-#define SPI_CS_PIN                  SPI_CS_Pin
+/* SPI Chip Select - defined below with ACC pins */
 
 /* LEDs */
 #define LED_ERROR_PORT              LED_YELLOW_OUT_GPIO_Port
@@ -94,16 +113,26 @@ extern "C" {
 #define CHARGE_EN_PORT              CHARGE_EN_OUT_GPIO_Port
 #define CHARGE_EN_PIN               CHARGE_EN_OUT_Pin
 
-/* Accelerometer interrupt */
-#define ACC_INT_PORT               ACC_INT_1_GPIO_Port
-#define ACC_INT_PIN                ACC_INT_1_Pin
+/* Accelerometer SPI CS and interrupt pins */
+#define ACC_CS_PORT                 GPIOC
+#define ACC_CS_PIN                  GPIO_PIN_11
+
+#define ACC_INT1_PORT               GPIOB
+#define ACC_INT1_PIN                GPIO_PIN_7
+
+#define ACC_INT2_PORT               GPIOB
+#define ACC_INT2_PIN                GPIO_PIN_6
+
+/* Legacy definitions for compatibility */
+#define ACC_INT_PORT                ACC_INT1_PORT
+#define ACC_INT_PIN                 ACC_INT1_PIN
 
 /* External Handle References ------------------------------------------------*/
 extern TIM_HandleTypeDef htim2;     /* System tick timer handle */
 extern TIM_HandleTypeDef htim15;    /* Detonation high-side switch PWM timer handle */
 extern TIM_HandleTypeDef htim1;    /* Pump PWM timer handle */
 extern SPI_HandleTypeDef hspi1;    /* Accelerometer SPI handle */
-extern UART_HandleTypeDef hlpuart1;  /* Main UART handle */
+extern UART_HandleTypeDef huart2;  /* Main UART handle */
 extern UART_HandleTypeDef huart3;  /* VUSA UART handle */
 extern DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
 
@@ -112,7 +141,7 @@ extern DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
 #define DETON_HIGH_SIDE_SWITH_TIMER_HANDLE  htim15
 #define PWM_PUMP_TIMER_HANDLE       htim1
 #define ACC_SPI_HANDLE              hspi1
-#define MAIN_UART_HANDLE            hlpuart1
+#define MAIN_UART_HANDLE            huart2
 #define VUSA_UART_HANDLE            huart3
 
 /* Timeout Definitions -------------------------------------------------------*/

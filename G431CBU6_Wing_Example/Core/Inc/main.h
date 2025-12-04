@@ -75,12 +75,6 @@ void Error_Handler(void);
 #define TEST_2_GPIO_Port GPIOA
 #define FUSE_IN_Pin GPIO_PIN_12
 #define FUSE_IN_GPIO_Port GPIOA
-#define SPI_CS_Pin GPIO_PIN_11
-#define SPI_CS_GPIO_Port GPIOC
-#define ACC_INT_2_Pin GPIO_PIN_6
-#define ACC_INT_2_GPIO_Port GPIOB
-#define ACC_INT_1_Pin GPIO_PIN_7
-#define ACC_INT_1_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 

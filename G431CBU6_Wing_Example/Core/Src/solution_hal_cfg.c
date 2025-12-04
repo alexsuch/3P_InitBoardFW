@@ -24,16 +24,24 @@ TIM_HandleTypeDef htim2;    /* System tick timer handle */
 TIM_HandleTypeDef htim15;   /* Detonation high-side switch PWM timer handle */
 
 /* UART handles */
+UART_HandleTypeDef huart2;  /* Main UART handle */
 UART_HandleTypeDef huart3;  /* VUSA UART handle */
 
 /* DMA handles */
 DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
 
+/* SPI handles */
+SPI_HandleTypeDef hspi1;          /* Accelerometer SPI handle */
+DMA_HandleTypeDef hdma_spi1_rx;   /* SPI1 RX DMA handle */
+DMA_HandleTypeDef hdma_spi1_tx;   /* SPI1 TX DMA handle */
+
 /* Private function prototypes -----------------------------------------------*/
 static HAL_StatusTypeDef HalConfigure_SysTickTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_HighSidePwmTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_PumpPwmTimer_Init(void);
+static HAL_StatusTypeDef HalConfigure_MainUart_Init(void);
 static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void);
+static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void);
 
 /**
   * @brief  Configure HAL peripherals (replaces MX_xxx_Init functions)
@@ -60,8 +68,20 @@ void Solution_HalConfigure(void)
         Error_Handler();
     }
 
+    /* Initialize Main UART */
+    if (HalConfigure_MainUart_Init() != HAL_OK)
+    {
+        Error_Handler();
+    }
+
     /* Initialize VUSA UART */
     if (HalConfigure_VusaUart_Init() != HAL_OK)
+    {
+        Error_Handler();
+    }
+
+    /* Initialize Accelerometer SPI */
+    if (HalConfigure_AccSpi_Init() != HAL_OK)
     {
         Error_Handler();
     }
@@ -217,12 +237,12 @@ static HAL_StatusTypeDef HalConfigure_HighSidePwmTimer_Init(void)
 
     /* ========== GPIO Configuration ========== */
     /* Configure PB15 for TIM15_CH2 PWM output */
-    GPIO_InitStruct.Pin = GPIO_PIN_15;
+    GPIO_InitStruct.Pin = DETON_PWM_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_PULLDOWN;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    GPIO_InitStruct.Alternate = GPIO_AF1_TIM15;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    GPIO_InitStruct.Alternate = DETON_PWM_AF;
+    HAL_GPIO_Init(DETON_PWM_PORT, &GPIO_InitStruct);
 
     return HAL_OK;
 }
@@ -312,20 +332,109 @@ static HAL_StatusTypeDef HalConfigure_PumpPwmTimer_Init(void)
 
     /* ========== GPIO Configuration ========== */
     /* Configure PB14 for TIM1_CH2N (complementary output) */
-    GPIO_InitStruct.Pin = GPIO_PIN_14;
+    GPIO_InitStruct.Pin = PUMP_PWM_COMPL_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_PULLDOWN;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    GPIO_InitStruct.Alternate = GPIO_AF6_TIM1;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    GPIO_InitStruct.Alternate = PUMP_PWM_AF;
+    HAL_GPIO_Init(PUMP_PWM_COMPL_PORT, &GPIO_InitStruct);
 
     /* Configure PA9 for TIM1_CH2 (main output) */
-    GPIO_InitStruct.Pin = GPIO_PIN_9;
+    GPIO_InitStruct.Pin = PUMP_PWM_MAIN_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_PULLDOWN;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    GPIO_InitStruct.Alternate = GPIO_AF6_TIM1;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    GPIO_InitStruct.Alternate = PUMP_PWM_AF;
+    HAL_GPIO_Init(PUMP_PWM_MAIN_PORT, &GPIO_InitStruct);
+
+    return HAL_OK;
+}
+
+/**
+  * @brief  Initialize Main UART (USART2) with full configuration
+  * @note   This replaces MX_USART2_UART_Init() and HAL_UART_MspInit()
+  *         Includes: Clock, GPIO, NVIC configuration
+  *         Independent from CubeMX configuration
+  * @retval HAL status
+  */
+static HAL_StatusTypeDef HalConfigure_MainUart_Init(void)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+    HAL_StatusTypeDef status;
+
+    /* ========== Clock Configuration ========== */
+    /* Configure peripheral clock source */
+    PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART2;
+    PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
+    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
+    {
+        return HAL_ERROR;
+    }
+
+    /* Enable peripheral clocks */
+    __HAL_RCC_USART2_CLK_ENABLE();
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    /* ========== GPIO Configuration ========== */
+    /* Configure TX pin (PA2) and RX pin (PA3) */
+    GPIO_InitStruct.Pin = MAIN_UART_TX_PIN | MAIN_UART_RX_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = MAIN_UART_GPIO_AF;
+    HAL_GPIO_Init(MAIN_UART_TX_PORT, &GPIO_InitStruct);
+
+    /* ========== NVIC Configuration ========== */
+    /* Configure USART2 interrupt */
+    HAL_NVIC_SetPriority(MAIN_UART_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(MAIN_UART_IRQn);
+
+    /* ========== UART Configuration ========== */
+    /* Configure UART parameters:
+     * - Baud Rate: 9600
+     * - Word Length: 8 bits
+     * - Stop Bits: 1
+     * - Parity: None
+     * - Flow Control: None
+     */
+    MAIN_UART_HANDLE.Instance = MAIN_UART_INSTANCE;
+    MAIN_UART_HANDLE.Init.BaudRate = 9600;
+    MAIN_UART_HANDLE.Init.WordLength = UART_WORDLENGTH_8B;
+    MAIN_UART_HANDLE.Init.StopBits = UART_STOPBITS_1;
+    MAIN_UART_HANDLE.Init.Parity = UART_PARITY_NONE;
+    MAIN_UART_HANDLE.Init.Mode = UART_MODE_TX_RX;
+    MAIN_UART_HANDLE.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    MAIN_UART_HANDLE.Init.OverSampling = UART_OVERSAMPLING_16;
+    MAIN_UART_HANDLE.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+    MAIN_UART_HANDLE.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+    MAIN_UART_HANDLE.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+
+    status = HAL_UART_Init(&MAIN_UART_HANDLE);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    /* Configure FIFO thresholds */
+    status = HAL_UARTEx_SetTxFifoThreshold(&MAIN_UART_HANDLE, UART_TXFIFO_THRESHOLD_1_8);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    status = HAL_UARTEx_SetRxFifoThreshold(&MAIN_UART_HANDLE, UART_RXFIFO_THRESHOLD_1_8);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    /* Disable FIFO mode */
+    status = HAL_UARTEx_DisableFifoMode(&MAIN_UART_HANDLE);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
 
     return HAL_OK;
 }
@@ -449,6 +558,146 @@ static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void)
     {
         return status;
     }
+
+    return HAL_OK;
+}
+
+/**
+  * @brief  Initialize Accelerometer SPI (SPI1) with DMA
+  * @note   This replaces MX_SPI1_Init() and HAL_SPI_MspInit()
+  *         Includes: Clock, GPIO, DMA, NVIC configuration
+  *         SPI Mode 3 (CPOL=1, CPHA=1) for LSM6DS3/LIS2DH12
+  *         Uses DMA for RX and TX
+  * @retval HAL status
+  */
+static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    HAL_StatusTypeDef status;
+
+    /* ========== Clock Configuration ========== */
+    /* Enable peripheral clocks */
+    __HAL_RCC_SPI1_CLK_ENABLE();
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+
+    /* ========== GPIO Configuration ========== */
+    /* Configure SPI1 GPIO pins using definitions from hal_cfg.h */
+
+    /* MISO pin */
+    GPIO_InitStruct.Pin = ACC_SPI_MISO_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
+    HAL_GPIO_Init(ACC_SPI_MISO_PORT, &GPIO_InitStruct);
+
+    /* SCK pin */
+    GPIO_InitStruct.Pin = ACC_SPI_SCK_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
+    HAL_GPIO_Init(ACC_SPI_SCK_PORT, &GPIO_InitStruct);
+
+    /* MOSI pin */
+    GPIO_InitStruct.Pin = ACC_SPI_MOSI_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
+    HAL_GPIO_Init(ACC_SPI_MOSI_PORT, &GPIO_InitStruct);
+
+    /* ========== DMA Configuration ========== */
+    /* SPI1_RX DMA Init */
+    hdma_spi1_rx.Instance = DMA1_Channel2;
+    hdma_spi1_rx.Init.Request = DMA_REQUEST_SPI1_RX;
+    hdma_spi1_rx.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    hdma_spi1_rx.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_spi1_rx.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_spi1_rx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    hdma_spi1_rx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+    hdma_spi1_rx.Init.Mode = DMA_NORMAL;
+    hdma_spi1_rx.Init.Priority = DMA_PRIORITY_LOW;
+    
+    status = HAL_DMA_Init(&hdma_spi1_rx);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    __HAL_LINKDMA(&hspi1, hdmarx, hdma_spi1_rx);
+
+    /* SPI1_TX DMA Init */
+    hdma_spi1_tx.Instance = DMA1_Channel3;
+    hdma_spi1_tx.Init.Request = DMA_REQUEST_SPI1_TX;
+    hdma_spi1_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_spi1_tx.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_spi1_tx.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_spi1_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    hdma_spi1_tx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+    hdma_spi1_tx.Init.Mode = DMA_NORMAL;
+    hdma_spi1_tx.Init.Priority = DMA_PRIORITY_LOW;
+    
+    status = HAL_DMA_Init(&hdma_spi1_tx);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    __HAL_LINKDMA(&hspi1, hdmatx, hdma_spi1_tx);
+
+    /* ========== SPI Configuration ========== */
+    /* Configure SPI1 parameters:
+     * - Mode: Master
+     * - Direction: Full-Duplex (2 lines)
+     * - Data Size: 8-bit
+     * - Clock Polarity: HIGH (CPOL=1) for SPI Mode 3
+     * - Clock Phase: 2nd Edge (CPHA=1) for SPI Mode 3
+     * - NSS: Software control
+     * - Baud Rate Prescaler: 8 (APB2=84MHz / 8 = 10.5 MHz)
+     * - Bit Order: MSB First
+     */
+    hspi1.Instance = SPI1;
+    hspi1.Init.Mode = SPI_MODE_MASTER;
+    hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+    hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+    hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;      /* CPOL=1 */
+    hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;           /* CPHA=1 */
+    hspi1.Init.NSS = SPI_NSS_SOFT;
+    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;  /* APB2=84MHz / 8 = 10.5 MHz */
+    hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+    hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+    hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+    hspi1.Init.CRCPolynomial = 7;
+    hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+    hspi1.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
+
+    status = HAL_SPI_Init(&hspi1);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    /* ========== CS and INT Pins Configuration ========== */
+    /* Configure PC11 (ACC_CS) as output push-pull, initially HIGH (inactive) */
+    GPIO_InitStruct.Pin = ACC_CS_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(ACC_CS_PORT, &GPIO_InitStruct);
+    HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);  /* CS HIGH = inactive */
+
+    /* Configure PB7 (ACC_INT1) and PB6 (ACC_INT2) as inputs with pull-down */
+    GPIO_InitStruct.Pin = ACC_INT1_PIN | ACC_INT2_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    /* ========== NVIC Configuration ========== */
+    /* Note: DMA interrupts configured in MX_DMA_Init() */
+    /* No additional SPI interrupt needed for DMA mode */
 
     return HAL_OK;
 }

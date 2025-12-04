@@ -84,10 +84,18 @@
 #define MAV_RESULT_IN_PROGRESS             0x05    // 5 - Command in progress
 #define MAV_RESULT_CANCELLED               0x06    // 6 - Command cancelled
 
-// Mavlink flight parameters thresholds
+// Mavlink flight parameters thresholds (use values from prj_config.h if defined)
+#ifndef FLIGHT_SPEED_MINIMUM_THRESHOLD_M_S
 #define FLIGHT_SPEED_MINIMUM_THRESHOLD_M_S            (5u)    // Minimum flight speed 5 m/s
+#endif
+
+#ifndef FLIGHT_ALTITUDE_MINIMUM_THRESHOLD_M
 #define FLIGHT_ALTITUDE_MINIMUM_THRESHOLD_M           (50)    // Minimum flight altitude 50m
+#endif
+
+#ifndef FLIGHT_STABLE_PARAMETERS_TIMEOUT_SEC
 #define FLIGHT_STABLE_PARAMETERS_TIMEOUT_SEC          (3u)    // Stable parameters timeout 3 seconds
+#endif
 
 /**
  * @brief Custom Command IDs (used in param1[0] of MAV_CMD_USER_1)
