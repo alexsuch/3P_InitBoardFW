@@ -2129,7 +2129,7 @@ static void App_InitCbk (void)
 		/* Set board state to discharged */
 		sysStatus.sys_info.board_state = BOARD_STATE_DISCHARGED;
 
-		AccProc_HitDetectionStart(); //TODO OSAV Remove
+		AccProc_HitDetectionStart(); //OSAV TODO: check if required
 	}
 }
 

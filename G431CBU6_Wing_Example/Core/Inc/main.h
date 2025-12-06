@@ -57,24 +57,12 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define TEST_1_Pin GPIO_PIN_4
-#define TEST_1_GPIO_Port GPIOA
 #define EX_LED_OUT_Pin GPIO_PIN_5
 #define EX_LED_OUT_GPIO_Port GPIOA
 #define LED_YELLOW_OUT_Pin GPIO_PIN_1
 #define LED_YELLOW_OUT_GPIO_Port GPIOB
 #define LED_GREEN_OUT_Pin GPIO_PIN_2
 #define LED_GREEN_OUT_GPIO_Port GPIOB
-#define BOOM_LOW_SIDE_OUT_2_Pin GPIO_PIN_12
-#define BOOM_LOW_SIDE_OUT_2_GPIO_Port GPIOB
-#define BOOM_LOW_SIDE_OUT_1_Pin GPIO_PIN_13
-#define BOOM_LOW_SIDE_OUT_1_GPIO_Port GPIOB
-#define CHARGE_EN_OUT_Pin GPIO_PIN_10
-#define CHARGE_EN_OUT_GPIO_Port GPIOA
-#define TEST_2_Pin GPIO_PIN_11
-#define TEST_2_GPIO_Port GPIOA
-#define FUSE_IN_Pin GPIO_PIN_12
-#define FUSE_IN_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 

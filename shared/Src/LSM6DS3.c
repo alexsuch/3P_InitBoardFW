@@ -621,7 +621,7 @@ void Lsm6ds3_Task (void)
 		    case LSM6DS3_STATE_GET_DATA:
 		    	if (ReadAccIntGpio () != false)
 		    	{
-                    Test1Toggle();
+                    //Test1Toggle();
 		    	    Lsm6ds3_GetData();
 		    	}
 		    	break;

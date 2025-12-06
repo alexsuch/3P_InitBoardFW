@@ -16,6 +16,8 @@
 /* Includes ------------------------------------------------------------------*/
 #include "solution_hal_cfg.h"
 #include "main.h"
+#include "hal_cfg.h"
+#include "prj_config.h"
 
 /* Private variables ---------------------------------------------------------*/
 /* Timer handles */
@@ -43,6 +45,8 @@ static HAL_StatusTypeDef HalConfigure_PumpPwmTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_MainUart_Init(void);
 static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void);
 static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void);
+static HAL_StatusTypeDef HalConfigure_Opamp_Init(void);
+
 
 /**
   * @brief  Configure HAL peripherals (replaces MX_xxx_Init functions)
@@ -54,7 +58,7 @@ void Solution_HalConfigure(void)
     /* Initialize GPIO pins */
     if (HalConfigure_Gpio_Init() != HAL_OK)
     {
-        Error_Handler();
+       Error_Handler();
     }
 
     /* Initialize System Tick Timer */
@@ -87,11 +91,19 @@ void Solution_HalConfigure(void)
         Error_Handler();
     }
 
+#if 1
     /* Initialize Accelerometer SPI */
     if (HalConfigure_AccSpi_Init() != HAL_OK)
     {
         Error_Handler();
     }
+#endif
+
+    /* Initialize OPAMP (moved from CubeMX) */
+     if (HalConfigure_Opamp_Init() != HAL_OK)
+     {
+         Error_Handler();
+     }
 }
 
 /**
@@ -118,7 +130,6 @@ static HAL_StatusTypeDef HalConfigure_Gpio_Init(void)
     HAL_GPIO_WritePin(GPIOB, LED_ERROR_OUT_PIN | LED_STATUS_OUT_PIN | BOOM_LOW_SIDE_OUT_1_PIN | BOOM_LOW_SIDE_OUT_2_PIN, GPIO_PIN_RESET);
 
     /* ========== Configure GPIOA Output Pins ========== */
-    /* Configure TEST_1 (PA4), EX_LED_OUT (PA5), CHARGE_EN_OUT (PA10), TEST_2 (PA11) */
     GPIO_InitStruct.Pin = TEST_1_PIN | EX_LED_OUT_PIN | CHARGE_EN_OUT_PIN | TEST_2_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -540,7 +551,7 @@ static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void)
     HAL_GPIO_Init(VUSA_UART_RX_PORT, &GPIO_InitStruct);
 
     /* ========== DMA Configuration ========== */
-    /* Configure DMA for USART3_TX (DMA1 Channel 2) */
+    /* Configure DMA for USART3_TX using macros */
     hdma_usart3_tx.Instance = VUSA_UART_DMA_INSTANCE;
     hdma_usart3_tx.Init.Request = VUSA_UART_DMA_REQUEST;
     hdma_usart3_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
@@ -550,7 +561,6 @@ static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void)
     hdma_usart3_tx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
     hdma_usart3_tx.Init.Mode = DMA_CIRCULAR;
     hdma_usart3_tx.Init.Priority = DMA_PRIORITY_LOW;
-    
     status = HAL_DMA_Init(&hdma_usart3_tx);
     if (status != HAL_OK)
     {
@@ -561,9 +571,9 @@ static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void)
     __HAL_LINKDMA(&VUSA_UART_HANDLE, hdmatx, hdma_usart3_tx);
 
     /* ========== NVIC Configuration ========== */
-    /* Configure DMA1 Channel 2 interrupt for USART3_TX */
-    HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+    /* Configure DMA interrupt for USART3_TX using macro */
+    HAL_NVIC_SetPriority(VUSA_UART_DMA_IRQ, 0, 0);
+    HAL_NVIC_EnableIRQ(VUSA_UART_DMA_IRQ);
 
     /* Configure USART3 interrupt */
     HAL_NVIC_SetPriority(VUSA_UART_IRQn, 0, 0);
@@ -666,8 +676,8 @@ static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void)
     HAL_GPIO_Init(ACC_SPI_MOSI_PORT, &GPIO_InitStruct);
 
     /* ========== DMA Configuration ========== */
-    /* SPI1_RX DMA Init */
-    hdma_spi1_rx.Instance = DMA1_Channel2;
+    /* SPI1_RX DMA Init: використовує DMA1_Channel5 замість DMA1_Channel2 */
+    hdma_spi1_rx.Instance = DMA1_Channel5;
     hdma_spi1_rx.Init.Request = DMA_REQUEST_SPI1_RX;
     hdma_spi1_rx.Init.Direction = DMA_PERIPH_TO_MEMORY;
     hdma_spi1_rx.Init.PeriphInc = DMA_PINC_DISABLE;
@@ -676,7 +686,6 @@ static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void)
     hdma_spi1_rx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
     hdma_spi1_rx.Init.Mode = DMA_NORMAL;
     hdma_spi1_rx.Init.Priority = DMA_PRIORITY_LOW;
-    
     status = HAL_DMA_Init(&hdma_spi1_rx);
     if (status != HAL_OK)
     {
@@ -722,7 +731,7 @@ static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void)
     hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;      /* CPOL=1 */
     hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;           /* CPHA=1 */
     hspi1.Init.NSS = SPI_NSS_SOFT;
-    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;  /* APB2=84MHz / 8 = 10.5 MHz */
+    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;  /* APB2=84MHz / 16 = 5.25 MHz */
     hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
     hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
     hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -752,8 +761,39 @@ static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void)
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
     /* ========== NVIC Configuration ========== */
-    /* Note: DMA interrupts configured in MX_DMA_Init() */
-    /* No additional SPI interrupt needed for DMA mode */
+    /* Configure DMA1 Channel 5 interrupt for SPI1_RX */
+    HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
+    /* DMA1_Channel3_IRQn interrupt configuration */
+    HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
 
     return HAL_OK;
 }
+
+#if 1
+/**
+  * @brief  Initialize OPAMP2 (mirror of CubeMX MX_OPAMP2_Init)
+  * @note   Uses the CubeMX-generated OPAMP handle `hopamp2` defined in main.c
+  * @retval HAL status
+  */
+static HAL_StatusTypeDef HalConfigure_Opamp_Init(void)
+{
+    /* Configure OPAMP2 parameters as in CubeMX */
+    hopamp2.Instance = OPAMP_INSTANCE;
+    hopamp2.Init.PowerMode = OPAMP_POWERMODE_NORMALSPEED;
+    hopamp2.Init.Mode = OPAMP_FOLLOWER_MODE;
+    hopamp2.Init.NonInvertingInput = OPAMP_NONINVERTINGINPUT_IO0;
+    hopamp2.Init.InternalOutput = DISABLE;
+    hopamp2.Init.TimerControlledMuxmode = OPAMP_TIMERCONTROLLEDMUXMODE_DISABLE;
+    hopamp2.Init.UserTrimming = OPAMP_TRIMMING_FACTORY;
+
+    if (HAL_OPAMP_Init(&hopamp2) != HAL_OK)
+    {
+        return HAL_ERROR;
+    }
+
+    return HAL_OK;
+}
+#endif
+

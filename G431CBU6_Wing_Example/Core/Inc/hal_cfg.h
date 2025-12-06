@@ -76,8 +76,10 @@ extern "C" {
 #define VUSA_UART_GPIO_AF           GPIO_AF7_USART3
 
 /* VUSA UART DMA Configuration */
-#define VUSA_UART_DMA_INSTANCE      DMA1_Channel2
+// VUSA UART TX now uses DMA1_Channel4 to avoid conflict with ADC2 and SPI1 RX
+#define VUSA_UART_DMA_INSTANCE      DMA1_Channel4
 #define VUSA_UART_DMA_REQUEST       DMA_REQUEST_USART3_TX
+#define VUSA_UART_DMA_IRQ           DMA1_Channel4_IRQn
 #define VUSA_UART_IRQn              USART3_IRQn
 
 /* ADC Configuration ---------------------------------------------------------*/
@@ -87,7 +89,7 @@ extern "C" {
 /* GPIO Pin Definitions ------------------------------------------------------*/
 /* Test GPIO Outputs */
 #define TEST_1_PORT                 GPIOA
-#define TEST_1_PIN                  GPIO_PIN_4
+#define TEST_1_PIN                  GPIO_PIN_8
 #define TEST_2_PORT                 GPIOA
 #define TEST_2_PIN                  GPIO_PIN_11
 
@@ -155,6 +157,7 @@ extern SPI_HandleTypeDef hspi1;    /* Accelerometer SPI handle */
 extern UART_HandleTypeDef huart2;  /* Main UART handle */
 extern UART_HandleTypeDef huart3;  /* VUSA UART handle */
 extern DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
+extern OPAMP_HandleTypeDef hopamp2; /* OPAMP2 handle (CubeMX-generated in main.c) */
 
 /* Macro Definitions ---------------------------------------------------------*/
 #define SYS_TICK_TIMER_HANDLE       htim2
@@ -175,6 +178,11 @@ extern DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
 
 
 /* ADC Resolution ------------------------------------------------------------*/
+
+/* OPAMP Configuration ------------------------------------------------------*/
+/* OPAMP instance used in the design (OPAMP1/OPAMP2/etc.) */
+#define OPAMP_INSTANCE             OPAMP2
+
 
 
 #ifdef __cplusplus

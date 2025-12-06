@@ -45,11 +45,14 @@
 ADC_HandleTypeDef hadc2;
 DMA_HandleTypeDef hdma_adc2;
 
-COMP_HandleTypeDef hcomp1;
-
 DAC_HandleTypeDef hdac1;
+DMA_HandleTypeDef hdma_dac1_ch1;
+
+UART_HandleTypeDef hlpuart1;
 
 OPAMP_HandleTypeDef hopamp2;
+
+SPI_HandleTypeDef hspi2;
 
 TIM_HandleTypeDef htim6;
 
@@ -59,14 +62,14 @@ TIM_HandleTypeDef htim6;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-// static void MX_GPIO_Init(void);  /* Moved to solution_hal_cfg.c */
+static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
-static void MX_COMP1_Init(void);
-static void MX_COMP1_Init(void);
-static void MX_DAC1_Init(void);
 static void MX_TIM6_Init(void);
 static void MX_ADC2_Init(void);
 static void MX_OPAMP2_Init(void);
+static void MX_SPI2_Init(void);
+static void MX_LPUART1_UART_Init(void);
+static void MX_DAC1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -102,23 +105,61 @@ int main(void)
   /* USER CODE BEGIN SysInit */
 #if START_UP_DELAY_ENABLE
   /* Provide delay before initialization to settle up power */
-  HAL_Delay(100);
+  //HAL_Delay(100);
 #endif
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
-  // MX_GPIO_Init();  /* Moved to solution_hal_cfg.c - called from Solution_HalConfigure() */
+  MX_GPIO_Init();
   MX_DMA_Init();
-  MX_COMP1_Init();
-  MX_DAC1_Init();
   MX_TIM6_Init();
   MX_ADC2_Init();
   MX_OPAMP2_Init();
+  MX_SPI2_Init();
+  MX_LPUART1_UART_Init();
+  MX_DAC1_Init();
   /* USER CODE BEGIN 2 */
   /* Configure Solution HAL peripherals */
   Solution_HalConfigure();
   /* Init Solution HAL layer */
   Solution_HalInit();
+
+  /* --- DAC test setup (unchanged) --- */
+  uint32_t dac_value = 0;
+  volatile HAL_StatusTypeDef dac_status = HAL_OK;
+  #define DAC_MAX_VALUE 4095  /* 12-bit DAC maximum value */
+  #define DAC_SAMPLES 256
+  static uint32_t dac_buffer[DAC_SAMPLES];
+  for (int i = 0; i < DAC_SAMPLES; i++)
+  {
+    dac_buffer[i] = ((((uint32_t)i) * DAC_MAX_VALUE) / (DAC_SAMPLES - 1));
+  }
+
+    if (HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)dac_buffer, DAC_SAMPLES, DAC_ALIGN_12B_R) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /* --- ADC2 DMA accumulation setup --- */
+  #define ADC2_DMA_SAMPLES 512
+  static uint16_t adc2_dma_buffer[ADC2_DMA_SAMPLES] __attribute__((aligned(4)));
+  static uint16_t adc2_dma_copy_buffer[ADC2_DMA_SAMPLES] __attribute__((aligned(4)));
+
+  /* 1. Calibrate ADC2 for best SNR */
+  if (HAL_ADCEx_Calibration_Start(&hadc2, ADC_SINGLE_ENDED) != HAL_OK) {
+    Error_Handler();
+  }
+
+  volatile uint16_t adc2_single_result = 0;
+
+    if (HAL_ADC_Start_DMA(&hadc2, adc2_dma_buffer, ADC2_DMA_SAMPLES) != HAL_OK) {
+    Error_Handler();
+  }
+
+    if (HAL_TIM_Base_Start(&htim6) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
   /* Init application layer */
   App_InitRun();
@@ -129,6 +170,15 @@ int main(void)
   while (1)
   {
     App_Task ();
+    
+    adc2_single_result++;
+    if (adc2_single_result > 200) {
+      for (int i = 0; i < ADC2_DMA_SAMPLES; i++) {
+        adc2_dma_copy_buffer[i] = adc2_dma_buffer[i];
+      }
+      adc2_single_result = 0;
+    }
+    __NOP();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -215,7 +265,7 @@ static void MX_ADC2_Init(void)
   hadc2.Init.DiscontinuousConvMode = DISABLE;
   hadc2.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T6_TRGO;
   hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
-  hadc2.Init.DMAContinuousRequests = DISABLE;
+  hadc2.Init.DMAContinuousRequests = ENABLE;
   hadc2.Init.Overrun = ADC_OVR_DATA_PRESERVED;
   hadc2.Init.OversamplingMode = DISABLE;
   if (HAL_ADC_Init(&hadc2) != HAL_OK)
@@ -227,7 +277,7 @@ static void MX_ADC2_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_1;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_92CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset = 0;
@@ -238,38 +288,6 @@ static void MX_ADC2_Init(void)
   /* USER CODE BEGIN ADC2_Init 2 */
 
   /* USER CODE END ADC2_Init 2 */
-
-}
-
-/**
-  * @brief COMP1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_COMP1_Init(void)
-{
-
-  /* USER CODE BEGIN COMP1_Init 0 */
-
-  /* USER CODE END COMP1_Init 0 */
-
-  /* USER CODE BEGIN COMP1_Init 1 */
-
-  /* USER CODE END COMP1_Init 1 */
-  hcomp1.Instance = COMP1;
-  hcomp1.Init.InputPlus = COMP_INPUT_PLUS_IO1;
-  hcomp1.Init.InputMinus = COMP_INPUT_MINUS_DAC1_CH1;
-  hcomp1.Init.OutputPol = COMP_OUTPUTPOL_NONINVERTED;
-  hcomp1.Init.Hysteresis = COMP_HYSTERESIS_NONE;
-  hcomp1.Init.BlankingSrce = COMP_BLANKINGSRC_NONE;
-  hcomp1.Init.TriggerMode = COMP_TRIGGERMODE_NONE;
-  if (HAL_COMP_Init(&hcomp1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN COMP1_Init 2 */
-
-  /* USER CODE END COMP1_Init 2 */
 
 }
 
@@ -305,10 +323,10 @@ static void MX_DAC1_Init(void)
   sConfig.DAC_DMADoubleDataMode = DISABLE;
   sConfig.DAC_SignedFormat = DISABLE;
   sConfig.DAC_SampleAndHold = DAC_SAMPLEANDHOLD_DISABLE;
-  sConfig.DAC_Trigger = DAC_TRIGGER_NONE;
+  sConfig.DAC_Trigger = DAC_TRIGGER_T6_TRGO;
   sConfig.DAC_Trigger2 = DAC_TRIGGER_NONE;
-  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_DISABLE;
-  sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_INTERNAL;
+  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
+  sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_EXTERNAL;
   sConfig.DAC_UserTrimming = DAC_TRIMMING_FACTORY;
   if (HAL_DAC_ConfigChannel(&hdac1, &sConfig, DAC_CHANNEL_1) != HAL_OK)
   {
@@ -317,6 +335,53 @@ static void MX_DAC1_Init(void)
   /* USER CODE BEGIN DAC1_Init 2 */
 
   /* USER CODE END DAC1_Init 2 */
+
+}
+
+/**
+  * @brief LPUART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_LPUART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN LPUART1_Init 0 */
+
+  /* USER CODE END LPUART1_Init 0 */
+
+  /* USER CODE BEGIN LPUART1_Init 1 */
+
+  /* USER CODE END LPUART1_Init 1 */
+  hlpuart1.Instance = LPUART1;
+  hlpuart1.Init.BaudRate = 209700;
+  hlpuart1.Init.WordLength = UART_WORDLENGTH_8B;
+  hlpuart1.Init.StopBits = UART_STOPBITS_1;
+  hlpuart1.Init.Parity = UART_PARITY_NONE;
+  hlpuart1.Init.Mode = UART_MODE_TX_RX;
+  hlpuart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  hlpuart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  hlpuart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+  hlpuart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&hlpuart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetTxFifoThreshold(&hlpuart1, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetRxFifoThreshold(&hlpuart1, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_DisableFifoMode(&hlpuart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN LPUART1_Init 2 */
+
+  /* USER CODE END LPUART1_Init 2 */
 
 }
 
@@ -353,6 +418,46 @@ static void MX_OPAMP2_Init(void)
 }
 
 /**
+  * @brief SPI2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI2_Init(void)
+{
+
+  /* USER CODE BEGIN SPI2_Init 0 */
+
+  /* USER CODE END SPI2_Init 0 */
+
+  /* USER CODE BEGIN SPI2_Init 1 */
+
+  /* USER CODE END SPI2_Init 1 */
+  /* SPI2 parameter configuration*/
+  hspi2.Instance = SPI2;
+  hspi2.Init.Mode = SPI_MODE_MASTER;
+  hspi2.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi2.Init.DataSize = SPI_DATASIZE_4BIT;
+  hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi2.Init.NSS = SPI_NSS_SOFT;
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi2.Init.CRCPolynomial = 7;
+  hspi2.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+  hspi2.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  if (HAL_SPI_Init(&hspi2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI2_Init 2 */
+
+  /* USER CODE END SPI2_Init 2 */
+
+}
+
+/**
   * @brief TIM6 Initialization Function
   * @param None
   * @retval None
@@ -372,13 +477,13 @@ static void MX_TIM6_Init(void)
   htim6.Instance = TIM6;
   htim6.Init.Prescaler = 0;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 65535;
+  htim6.Init.Period = 1679;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
     Error_Handler();
   }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
   {
@@ -404,6 +509,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMA1_Channel2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
 
 }
 
@@ -411,53 +519,43 @@ static void MX_DMA_Init(void)
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
-  * @note  Moved to solution_hal_cfg.c - HalConfigure_Gpio_Init()
   */
-/*
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-  // USER CODE BEGIN MX_GPIO_Init_1
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
 
-  // USER CODE END MX_GPIO_Init_1
+  /* USER CODE END MX_GPIO_Init_1 */
 
-  // GPIO Ports Clock Enable
+  /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
-  //Configure GPIO pin Output Level
-  HAL_GPIO_WritePin(GPIOA, TEST_1_Pin|EX_LED_OUT_Pin|CHARGE_EN_OUT_Pin|TEST_2_Pin, GPIO_PIN_RESET);
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(EX_LED_OUT_GPIO_Port, EX_LED_OUT_Pin, GPIO_PIN_RESET);
 
-  //Configure GPIO pin Output Level
-  HAL_GPIO_WritePin(GPIOB, LED_YELLOW_OUT_Pin|LED_GREEN_OUT_Pin|BOOM_LOW_SIDE_OUT_2_Pin|BOOM_LOW_SIDE_OUT_1_Pin, GPIO_PIN_RESET);
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, LED_YELLOW_OUT_Pin|LED_GREEN_OUT_Pin, GPIO_PIN_RESET);
 
-  //Configure GPIO pins : TEST_1_Pin EX_LED_OUT_Pin CHARGE_EN_OUT_Pin TEST_2_Pin
-  GPIO_InitStruct.Pin = TEST_1_Pin|EX_LED_OUT_Pin|CHARGE_EN_OUT_Pin|TEST_2_Pin;
+  /*Configure GPIO pin : EX_LED_OUT_Pin */
+  GPIO_InitStruct.Pin = EX_LED_OUT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_Init(EX_LED_OUT_GPIO_Port, &GPIO_InitStruct);
 
-  //Configure GPIO pins : LED_YELLOW_OUT_Pin LED_GREEN_OUT_Pin BOOM_LOW_SIDE_OUT_2_Pin BOOM_LOW_SIDE_OUT_1_Pin
-  GPIO_InitStruct.Pin = LED_YELLOW_OUT_Pin|LED_GREEN_OUT_Pin|BOOM_LOW_SIDE_OUT_2_Pin|BOOM_LOW_SIDE_OUT_1_Pin;
+  /*Configure GPIO pins : LED_YELLOW_OUT_Pin LED_GREEN_OUT_Pin */
+  GPIO_InitStruct.Pin = LED_YELLOW_OUT_Pin|LED_GREEN_OUT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  //Configure GPIO pin : FUSE_IN_Pin
-  GPIO_InitStruct.Pin = FUSE_IN_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(FUSE_IN_GPIO_Port, &GPIO_InitStruct);
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
 
-  // USER CODE BEGIN MX_GPIO_Init_2
-  
-  // PB1 configured as COMP4_OUT in HAL_COMP_MspInit()
-
-  // USER CODE END MX_GPIO_Init_2
+  /* USER CODE END MX_GPIO_Init_2 */
 }
-*/
 
 /* USER CODE BEGIN 4 */
 

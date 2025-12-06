@@ -9,10 +9,13 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "solution_wrapper.h"
+#include "solution_hal_cfg.h"
 #include "main.h"
 #include "hal_cfg.h"
+#include "prj_config.h"
 
 #include "app.h"
+
 #include "timer.h"
 #include "init_brd.h"
 #include "LIS2DH12.h"
@@ -43,6 +46,13 @@ void Solution_HalInit (void)
     /* Starting Error */
     Error_Handler();
   }
+
+	/* Start OPAMP if available (configured by CubeMX) */
+	if (HAL_OPAMP_Start(&hopamp2) != HAL_OK)
+	{
+		/* Starting Error */
+		Error_Handler();
+	}
 }
 
 // ---------------------- SYSTEM TIMER CALLBACKS ------------------------------------
@@ -55,6 +65,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		Timer_TickCbk();
     }
 }
+
+
 
 // ---------------------- FUSE READ -----------------------------------
 
@@ -277,12 +289,25 @@ uint8_t readCommand = 0xF2;
 app_cbk_fn acc_cbk = NULL;
 app_cbk_fn ext_pwr_cbk = NULL;
 
+
 static void Acc_ReportStatus (system_evt_t evt)
 {
 	if (acc_cbk != NULL)
 	{
 		acc_cbk(evt, 0u);
 	}
+}
+
+void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
+{
+	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
+	Acc_ReportStatus(SYSTEM_EVT_ERROR);
+}
+
+void HAL_SPI_DMAErrorCallback(SPI_HandleTypeDef *hspi)
+{
+	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
+	Acc_ReportStatus(SYSTEM_EVT_ERROR);
 }
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
@@ -320,21 +345,31 @@ bool SpiGetAccData (uint8_t *rd_data_ptr, app_cbk_fn cbk)
 	
 	/* Pull CS LOW to start transaction */
 	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_RESET);
-	
+
+#if 0
 	/* Send address + receive data in one synchronized transaction */
-	/* Takes ~10us @ 10.5MHz for 13 bytes */
+	/* Takes ~10us @ 5MHz for 13 bytes */
 	if (HAL_SPI_TransmitReceive(&ACC_SPI_HANDLE, spi_wr_buff, rd_data_ptr, data_size + 1, 100) != HAL_OK)
 	{
 		HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
 		Acc_ReportStatus(SYSTEM_EVT_ERROR);
 		return false;
 	}
-	
+
 	/* Raise CS to end transaction */
 	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
 	
 	/* Call callback immediately in blocking mode */
 	Acc_ReportStatus(SYSTEM_EVT_READY);
+#else
+	/* Start DMA-based TransmitReceive */
+	/* Takes ~10us @ 5MHz for 13 bytes */
+	if (HAL_SPI_TransmitReceive_DMA(&ACC_SPI_HANDLE, spi_wr_buff, rd_data_ptr, data_size + 1) != HAL_OK)
+	{
+		HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
+		return false;
+	}
+#endif
 
 	return true;
 }

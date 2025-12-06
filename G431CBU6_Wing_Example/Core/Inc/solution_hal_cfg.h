@@ -23,6 +23,7 @@ extern "C" {
 /* Includes ------------------------------------------------------------------*/
 #include "stm32g4xx_hal.h"
 #include "hal_cfg.h"
+#include "prj_config.h"
 
 /* Exported functions --------------------------------------------------------*/
 

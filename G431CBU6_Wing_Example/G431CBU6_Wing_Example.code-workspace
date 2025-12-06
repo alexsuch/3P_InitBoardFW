@@ -9,7 +9,7 @@
 			"path": "../shared"
 		},
 		{
-			"path": "../MavlinkEmulator"
+			"path": "../../3p-logger-next/logger"
 		}
 	],
 	"settings": {
