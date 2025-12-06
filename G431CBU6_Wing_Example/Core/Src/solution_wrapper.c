@@ -37,22 +37,33 @@ void Solution_HalInit (void)
   }
 #endif
 
-  /* Reset all GPIOs to the correct state */
-  HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
+	/* Reset all GPIOs to the correct state */
+	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
 
-  /* Run 10ms main timer tick */
-  if (HAL_TIM_Base_Start_IT(&SYS_TICK_TIMER_HANDLE) != HAL_OK)
-  {
-    /* Starting Error */
-    Error_Handler();
-  }
-
-	/* Start OPAMP if available (configured by CubeMX) */
-	if (HAL_OPAMP_Start(&hopamp2) != HAL_OK)
+	/* Run 10ms main timer tick */
+	if (HAL_TIM_Base_Start_IT(&SYS_TICK_TIMER_HANDLE) != HAL_OK)
 	{
 		/* Starting Error */
 		Error_Handler();
 	}
+
+	if (HAL_TIM_Base_Start(&ADC_TICK_TIMER_HANDLE) != HAL_OK)
+	{
+		Error_Handler();
+	}
+
+	/* Start OPAMP if available (configured by CubeMX) */
+	if (HAL_OPAMP_Start(&OPAMP_HANDLE) != HAL_OK)
+	{
+		/* Starting Error */
+		Error_Handler();
+	}
+
+	/* 1. Calibrate ADC2 for best SNR */
+	if (HAL_ADCEx_Calibration_Start(&ADC_PIEZO_HANDLE, ADC_SINGLE_ENDED) != HAL_OK) {
+		Error_Handler();
+	}
+
 }
 
 // ---------------------- SYSTEM TIMER CALLBACKS ------------------------------------

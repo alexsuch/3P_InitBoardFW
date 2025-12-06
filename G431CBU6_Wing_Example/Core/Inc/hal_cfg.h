@@ -82,9 +82,13 @@ extern "C" {
 #define VUSA_UART_DMA_IRQ           DMA1_Channel4_IRQn
 #define VUSA_UART_IRQn              USART3_IRQn
 
-/* ADC Configuration ---------------------------------------------------------*/
-#define MAIN_ADC_INSTANCE           ADC1        /* Main ADC instance */
-#define ADC_CHANNELS_COUNT          2           /* Number of ADC channels */
+/* DAC1 GPIO Configuration */
+#define DAC1_OUT1_PORT GPIOA
+#define DAC1_OUT1_PIN  GPIO_PIN_4
+
+/* ADC2 GPIO Configuration */
+#define ADC2_IN_PORT   GPIOA
+#define ADC2_IN_PIN    GPIO_PIN_7
 
 /* GPIO Pin Definitions ------------------------------------------------------*/
 /* Test GPIO Outputs */
@@ -151,6 +155,7 @@ extern "C" {
 
 /* External Handle References ------------------------------------------------*/
 extern TIM_HandleTypeDef htim2;     /* System tick timer handle */
+extern TIM_HandleTypeDef htim6;     /* System tick timer handle */
 extern TIM_HandleTypeDef htim15;    /* Detonation high-side switch PWM timer handle */
 extern TIM_HandleTypeDef htim1;    /* Pump PWM timer handle */
 extern SPI_HandleTypeDef hspi1;    /* Accelerometer SPI handle */
@@ -158,14 +163,19 @@ extern UART_HandleTypeDef huart2;  /* Main UART handle */
 extern UART_HandleTypeDef huart3;  /* VUSA UART handle */
 extern DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
 extern OPAMP_HandleTypeDef hopamp2; /* OPAMP2 handle (CubeMX-generated in main.c) */
+extern ADC_HandleTypeDef hadc2;
 
 /* Macro Definitions ---------------------------------------------------------*/
 #define SYS_TICK_TIMER_HANDLE       htim2
+#define ADC_TICK_TIMER_HANDLE       htim6
 #define DETON_HIGH_SIDE_SWITH_TIMER_HANDLE  htim15
 #define PWM_PUMP_TIMER_HANDLE       htim1
 #define ACC_SPI_HANDLE              hspi1
 #define MAIN_UART_HANDLE            huart2
 #define VUSA_UART_HANDLE            huart3
+#define OPAMP_HANDLE                hopamp2
+#define ADC_PIEZO_HANDLE            hadc2
+
 
 /* Timeout Definitions -------------------------------------------------------*/
 #define SPI_TIMEOUT_MS              10          /* SPI communication timeout */

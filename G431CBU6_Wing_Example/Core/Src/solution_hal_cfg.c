@@ -10,7 +10,7 @@
   * CubeMX-generated code for easier project portability between chips
   *
   ******************************************************************************
-  */
+    */
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
@@ -38,6 +38,7 @@ DMA_HandleTypeDef hdma_spi1_rx;   /* SPI1 RX DMA handle */
 DMA_HandleTypeDef hdma_spi1_tx;   /* SPI1 TX DMA handle */
 
 /* Private function prototypes -----------------------------------------------*/
+
 static HAL_StatusTypeDef HalConfigure_Gpio_Init(void);
 static HAL_StatusTypeDef HalConfigure_SysTickTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_HighSidePwmTimer_Init(void);
@@ -46,6 +47,10 @@ static HAL_StatusTypeDef HalConfigure_MainUart_Init(void);
 static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void);
 static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void);
 static HAL_StatusTypeDef HalConfigure_Opamp_Init(void);
+static HAL_StatusTypeDef HalConfigure_Adc2_Init(void);
+static HAL_StatusTypeDef HalConfigure_Tim6_Init(void);
+static HAL_StatusTypeDef HalConfigure_Dac1_Init(void);
+static HAL_StatusTypeDef HalConfigure_DMA_Init(void);
 
 
 /**
@@ -59,6 +64,12 @@ void Solution_HalConfigure(void)
     if (HalConfigure_Gpio_Init() != HAL_OK)
     {
        Error_Handler();
+    }
+
+    /* Initialize DMA controller */
+    if (HalConfigure_DMA_Init() != HAL_OK)
+    {
+        Error_Handler();
     }
 
     /* Initialize System Tick Timer */
@@ -91,19 +102,49 @@ void Solution_HalConfigure(void)
         Error_Handler();
     }
 
-#if 1
+    /* Initialize ADC2 */
+    if (HalConfigure_Adc2_Init() != HAL_OK)
+    {
+        Error_Handler();
+    }
+
+    /* Initialize TIM6 */
+    if (HalConfigure_Tim6_Init() != HAL_OK)
+    {
+        Error_Handler();
+    }
+
+    /* Initialize DAC1 */
+    if (HalConfigure_Dac1_Init() != HAL_OK)
+    {
+        Error_Handler();
+    }
+
     /* Initialize Accelerometer SPI */
     if (HalConfigure_AccSpi_Init() != HAL_OK)
     {
         Error_Handler();
     }
-#endif
 
     /* Initialize OPAMP (moved from CubeMX) */
      if (HalConfigure_Opamp_Init() != HAL_OK)
      {
          Error_Handler();
      }
+
+
+}
+/**
+    * @brief  Initialize DMA controller clocks (global DMA setup)
+    * @note   Call before any peripheral using DMA
+    * @retval HAL status
+    */
+static HAL_StatusTypeDef HalConfigure_DMA_Init(void)
+{
+        __HAL_RCC_DMAMUX1_CLK_ENABLE();
+        __HAL_RCC_DMA1_CLK_ENABLE();
+        /* Optionally, configure NVIC priorities for global DMA interrupts here */
+        return HAL_OK;
 }
 
 /**
@@ -531,7 +572,6 @@ static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void)
     /* Enable peripheral clocks */
     __HAL_RCC_USART3_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
-    __HAL_RCC_DMA1_CLK_ENABLE();
 
     /* ========== GPIO Configuration ========== */
     /* Configure TX pin (PB10) - No pull resistor */
@@ -796,4 +836,175 @@ static HAL_StatusTypeDef HalConfigure_Opamp_Init(void)
     return HAL_OK;
 }
 #endif
+
+/* --- Modular peripheral initializers for ADC2, TIM6, DAC1 --- */
+
+static HAL_StatusTypeDef HalConfigure_Adc2_Init(void)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    extern DMA_HandleTypeDef hdma_adc2;
+    extern ADC_HandleTypeDef hadc2;
+    HAL_StatusTypeDef status;
+    ADC_ChannelConfTypeDef sConfig = {0};
+
+    /* Enable clocks */
+    __HAL_RCC_ADC12_CLK_ENABLE();
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    /* Configure ADC2 GPIO */
+    GPIO_InitStruct.Pin = ADC2_IN_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(ADC2_IN_PORT, &GPIO_InitStruct);
+
+    /* Configure DMA for ADC2 */
+    hdma_adc2.Instance = DMA1_Channel2;
+    hdma_adc2.Init.Request = DMA_REQUEST_ADC2;
+    hdma_adc2.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    hdma_adc2.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_adc2.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_adc2.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
+    hdma_adc2.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
+    hdma_adc2.Init.Mode = DMA_CIRCULAR;
+    hdma_adc2.Init.Priority = DMA_PRIORITY_HIGH;
+    status = HAL_DMA_Init(&hdma_adc2);
+    if (status != HAL_OK)
+        return status;
+
+    /* Link DMA to ADC2 handle */
+    __HAL_LINKDMA(&hadc2, DMA_Handle, hdma_adc2);
+
+    /* NVIC configuration for DMA */
+    HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+
+    /* NVIC configuration for ADC2 */
+    HAL_NVIC_SetPriority(ADC1_2_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(ADC1_2_IRQn);
+
+    /* ADC2 configuration */
+    hadc2.Instance = ADC2;
+    hadc2.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+    hadc2.Init.Resolution = ADC_RESOLUTION_12B;
+    hadc2.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+    hadc2.Init.GainCompensation = 0;
+    hadc2.Init.ScanConvMode = ADC_SCAN_DISABLE;
+    hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+    hadc2.Init.LowPowerAutoWait = DISABLE;
+    hadc2.Init.ContinuousConvMode = DISABLE;
+    hadc2.Init.NbrOfConversion = 1;
+    hadc2.Init.DiscontinuousConvMode = DISABLE;
+    hadc2.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T6_TRGO;
+    hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
+    hadc2.Init.DMAContinuousRequests = ENABLE;
+    hadc2.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+    hadc2.Init.OversamplingMode = DISABLE;
+    status = HAL_ADC_Init(&hadc2);
+    if (status != HAL_OK)
+        return status;
+
+    /* Configure ADC2 regular channel (match CubeMX) */
+    sConfig.Channel = ADC_CHANNEL_1;
+    sConfig.Rank = ADC_REGULAR_RANK_1;
+    sConfig.SamplingTime = ADC_SAMPLETIME_92CYCLES_5;
+    sConfig.SingleDiff = ADC_SINGLE_ENDED;
+    sConfig.OffsetNumber = ADC_OFFSET_NONE;
+    sConfig.Offset = 0;
+    status = HAL_ADC_ConfigChannel(&hadc2, &sConfig);
+    if (status != HAL_OK)
+        return status;
+
+    return HAL_OK;
+}
+
+static HAL_StatusTypeDef HalConfigure_Tim6_Init(void)
+{
+    extern TIM_HandleTypeDef htim6;
+    TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+    /* Enable TIM6 clock */
+    __HAL_RCC_TIM6_CLK_ENABLE();
+
+    htim6.Instance = TIM6;
+    htim6.Init.Prescaler = 0;
+    htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
+    htim6.Init.Period = 1679;
+    htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+    if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
+        return HAL_ERROR;
+
+    sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+    sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+    if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
+        return HAL_ERROR;
+
+    /* NVIC configuration for TIM6 */
+    HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
+
+    return HAL_OK;
+}
+
+static HAL_StatusTypeDef HalConfigure_Dac1_Init(void)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    extern DMA_HandleTypeDef hdma_dac1_ch1;
+    extern DAC_HandleTypeDef hdac1;
+    DAC_ChannelConfTypeDef sConfig = {0};
+    HAL_StatusTypeDef status;
+
+    /* Enable DAC1, GPIO, DMA clocks */
+    __HAL_RCC_DAC1_CLK_ENABLE();
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    /* Configure DAC1 GPIO */
+    GPIO_InitStruct.Pin = DAC1_OUT1_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(DAC1_OUT1_PORT, &GPIO_InitStruct);
+
+    /* DMA for DAC1_CH1 (CubeMX) */
+    hdma_dac1_ch1.Instance = DMA1_Channel1;
+    hdma_dac1_ch1.Init.Request = DMA_REQUEST_DAC1_CHANNEL1;
+    hdma_dac1_ch1.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_dac1_ch1.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_dac1_ch1.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_dac1_ch1.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+    hdma_dac1_ch1.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+    hdma_dac1_ch1.Init.Mode = DMA_CIRCULAR;
+    hdma_dac1_ch1.Init.Priority = DMA_PRIORITY_HIGH;
+    status = HAL_DMA_Init(&hdma_dac1_ch1);
+    if (status != HAL_OK)
+        return status;
+
+    /* Link DMA to DAC1 handle */
+    __HAL_LINKDMA(&hdac1, DMA_Handle1, hdma_dac1_ch1);
+
+    /* NVIC configuration for DMA1_Channel1 */
+    HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+
+    /* DAC1 configuration */
+    hdac1.Instance = DAC1;
+    if (HAL_DAC_Init(&hdac1) != HAL_OK)
+        return HAL_ERROR;
+
+    sConfig.DAC_HighFrequency = DAC_HIGH_FREQUENCY_INTERFACE_MODE_AUTOMATIC;
+    sConfig.DAC_DMADoubleDataMode = DISABLE;
+    sConfig.DAC_SignedFormat = DISABLE;
+    sConfig.DAC_SampleAndHold = DAC_SAMPLEANDHOLD_DISABLE;
+    sConfig.DAC_Trigger = DAC_TRIGGER_T6_TRGO;
+    sConfig.DAC_Trigger2 = DAC_TRIGGER_NONE;
+    sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
+    sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_EXTERNAL;
+    sConfig.DAC_UserTrimming = DAC_TRIMMING_FACTORY;
+    if (HAL_DAC_ConfigChannel(&hdac1, &sConfig, DAC_CHANNEL_1) != HAL_OK)
+        return HAL_ERROR;
+
+    /* NVIC configuration for DAC */
+    HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
+
+    return HAL_OK;
+}
 

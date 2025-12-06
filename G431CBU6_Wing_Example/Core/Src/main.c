@@ -111,13 +111,13 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DMA_Init();
-  MX_TIM6_Init();
-  MX_ADC2_Init();
-  MX_OPAMP2_Init();
+  //MX_DMA_Init();
+  //MX_TIM6_Init();
+  //MX_ADC2_Init();
+  //MX_OPAMP2_Init();
   MX_SPI2_Init();
   MX_LPUART1_UART_Init();
-  MX_DAC1_Init();
+  //MX_DAC1_Init();
   /* USER CODE BEGIN 2 */
   /* Configure Solution HAL peripherals */
   Solution_HalConfigure();
@@ -145,21 +145,13 @@ int main(void)
   static uint16_t adc2_dma_buffer[ADC2_DMA_SAMPLES] __attribute__((aligned(4)));
   static uint16_t adc2_dma_copy_buffer[ADC2_DMA_SAMPLES] __attribute__((aligned(4)));
 
-  /* 1. Calibrate ADC2 for best SNR */
-  if (HAL_ADCEx_Calibration_Start(&hadc2, ADC_SINGLE_ENDED) != HAL_OK) {
-    Error_Handler();
-  }
-
   volatile uint16_t adc2_single_result = 0;
 
     if (HAL_ADC_Start_DMA(&hadc2, adc2_dma_buffer, ADC2_DMA_SAMPLES) != HAL_OK) {
     Error_Handler();
   }
 
-    if (HAL_TIM_Base_Start(&htim6) != HAL_OK)
-  {
-    Error_Handler();
-  }
+
 
   /* Init application layer */
   App_InitRun();
