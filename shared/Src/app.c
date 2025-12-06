@@ -1,4 +1,3 @@
-
 #include <stdlib.h>
 #include <stdio.h>
 #include "solution_wrapper.h"
@@ -9,6 +8,9 @@
 #include "indication.h"
 #include "app_config.h"
 #include "uart_configurator.h"
+#if SPI_LOGGER_ENABLE
+#include "spi_logger.h"
+#endif /* SPI_LOGGER_ENABLE */
 #if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 #include "mavlink_uart.h"
 #endif /* (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP) */
@@ -2198,6 +2200,10 @@ void App_InitRun(void)
 	App_AdcInit();
 #endif
 
+#if SPI_LOGGER_ENABLE
+	Logger_Init();
+#endif
+
 	Indication_Reset(&sysStatus.sys_info.error_code);
 
 	/* Set flag to monitor Fuse */
@@ -2377,6 +2383,10 @@ void App_Task (void)
 	/* Acceleration processing task */
 #if ACC_SUPPORTED_ENABLE
 	AccProc_Task();
+#endif
+
+#if SPI_LOGGER_ENABLE
+	Logger_Task();
 #endif
 
 #if (OSD_ENABLE == 1u)

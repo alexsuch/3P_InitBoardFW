@@ -159,6 +159,7 @@ extern TIM_HandleTypeDef htim6;     /* System tick timer handle */
 extern TIM_HandleTypeDef htim15;    /* Detonation high-side switch PWM timer handle */
 extern TIM_HandleTypeDef htim1;    /* Pump PWM timer handle */
 extern SPI_HandleTypeDef hspi1;    /* Accelerometer SPI handle */
+extern SPI_HandleTypeDef hspi2;    /* Logger SPI2 slave handle */
 extern UART_HandleTypeDef huart2;  /* Main UART handle */
 extern UART_HandleTypeDef huart3;  /* VUSA UART handle */
 extern DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
@@ -175,6 +176,11 @@ extern ADC_HandleTypeDef hadc2;
 #define VUSA_UART_HANDLE            huart3
 #define OPAMP_HANDLE                hopamp2
 #define ADC_PIEZO_HANDLE            hadc2
+
+/* Logger SPI Slave Configuration */
+#define LOGGER_SPI_HANDLE           hspi2       /* Logger SPI2 slave handle */
+#define LOGGER_SPI_DATA_RDY_PORT    GPIOC       /* Data ready signal GPIO port */
+#define LOGGER_SPI_DATA_RDY_PIN     GPIO_PIN_6  /* Data ready signal GPIO pin (C6) */
 
 
 /* Timeout Definitions -------------------------------------------------------*/

@@ -68,6 +68,9 @@ extern "C" {
 
 #define BLOCK_IGNITION_TMR                           (14u)
 
+#define LOGGER_SEND_TMR                              (18u)
+#define LOGGER_SEND_TMR_PERIOD_MS                    (1000u)  /* Send Logger packet every 1 second */
+
 #define SELF_DISTRUCTION_IND_TMR                     (15u)
 
 #define UART_CONFIGURATOR_TMR                        (16u)

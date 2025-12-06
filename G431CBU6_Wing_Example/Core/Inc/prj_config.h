@@ -37,7 +37,7 @@ extern "C" {
 #define ACC_SUPPORTED_ENABLE                          (1u)
 #define START_UP_DELAY_ENABLE                         (1u)
 #define UART_ENABLE                                   (0u)
-
+#define SPI_LOGGER_ENABLE                             (1u)
 /*--------------------------- VUSA MACROS -----------------------------------------*/
 #define VUSA_ENABLE                                   (1u) // RELEASE VALUE - 1u
 #define VUSA_ENABLE_DEFAULT                           (1u) // RELEASE VALUE - 1u      

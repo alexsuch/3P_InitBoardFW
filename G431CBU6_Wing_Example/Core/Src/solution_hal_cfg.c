@@ -78,6 +78,7 @@ void Solution_HalConfigure(void)
         Error_Handler();
     }
 
+#if (SPI_LOGGER_ENABLE == 0)
     /* Initialize Detonation PWM Timer */
     if (HalConfigure_HighSidePwmTimer_Init() != HAL_OK)
     {
@@ -89,7 +90,7 @@ void Solution_HalConfigure(void)
     {
         Error_Handler();
     }
-
+#endif
     /* Initialize Main UART */
     if (HalConfigure_MainUart_Init() != HAL_OK)
     {
@@ -167,8 +168,10 @@ static HAL_StatusTypeDef HalConfigure_Gpio_Init(void)
     /* GPIOA outputs: TEST_1, EX_LED_OUT, CHARGE_EN_OUT, TEST_2 - all LOW */
     HAL_GPIO_WritePin(GPIOA, TEST_1_PIN | EX_LED_OUT_PIN | CHARGE_EN_OUT_PIN | TEST_2_PIN, GPIO_PIN_RESET);
 
+#if (SPI_LOGGER_ENABLE == 0)
     /* GPIOB outputs: LED_ERROR, LED_STATUS, BOOM_LOW_SIDE_OUT_1, BOOM_LOW_SIDE_OUT_2 - all LOW */
     HAL_GPIO_WritePin(GPIOB, LED_ERROR_OUT_PIN | LED_STATUS_OUT_PIN | BOOM_LOW_SIDE_OUT_1_PIN | BOOM_LOW_SIDE_OUT_2_PIN, GPIO_PIN_RESET);
+#endif
 
     /* ========== Configure GPIOA Output Pins ========== */
     GPIO_InitStruct.Pin = TEST_1_PIN | EX_LED_OUT_PIN | CHARGE_EN_OUT_PIN | TEST_2_PIN;
@@ -177,6 +180,7 @@ static HAL_StatusTypeDef HalConfigure_Gpio_Init(void)
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+#if (SPI_LOGGER_ENABLE == 0)
     /* ========== Configure GPIOB Output Pins ========== */
     /* Configure LED_ERROR_OUT (PB1), LED_STATUS_OUT (PB2), BOOM_LOW_SIDE_OUT_2 (PB12), BOOM_LOW_SIDE_OUT_1 (PB13) */
     GPIO_InitStruct.Pin = LED_ERROR_OUT_PIN | LED_STATUS_OUT_PIN | BOOM_LOW_SIDE_OUT_2_PIN | BOOM_LOW_SIDE_OUT_1_PIN;
@@ -184,6 +188,7 @@ static HAL_StatusTypeDef HalConfigure_Gpio_Init(void)
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+#endif
 
     /* ========== Configure Input Pins ========== */
     /* Configure FUSE_IN (PA12) as input */

@@ -491,3 +491,74 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc_ptr) //TODO add calibratio
 	}
 }
 	#endif
+
+/* Logger SPI Slave Support (for accel_link emulation) ---------------------------*/
+
+#ifdef SPI_LOGGER_ENABLE
+#include "spi_logger.h"
+
+/**
+ * @brief Control SPI_DATA_RDY GPIO pin (ready signal to master)
+ * @param ready: true to set GPIO high (data ready), false to set GPIO low
+ */
+void Logger_GPIO_SetReady(bool ready) {
+    uint8_t pin_state = ready ? GPIO_PIN_SET : GPIO_PIN_RESET;
+    HAL_GPIO_WritePin(LOGGER_SPI_DATA_RDY_PORT, LOGGER_SPI_DATA_RDY_PIN, pin_state);
+}
+
+/**
+ * @brief Transmit a logger frame via SPI2 slave
+ * @param frame: Pointer to frame to transmit
+ */
+void Logger_SPI_TransmitFrame(const Logger_frame_t* frame) {
+    if (!frame) {
+        return;
+    }
+    
+    // Transmit frame via SPI2 (STM32 HAL SPI slave transmit)
+    // Note: In slave mode, this will transmit when master initiates the transaction
+    HAL_SPI_Transmit(&LOGGER_SPI_HANDLE, (uint8_t*)frame, Logger_FRAME_SIZE_BYTES, SPI_TIMEOUT_MS);
+}
+
+/**
+ * @brief Initialize Logger SPI slave with NVIC interrupt
+ */
+void Logger_SPI_Init(void) {
+    // Enable SPI2 interrupt in NVIC
+    HAL_NVIC_SetPriority(SPI2_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(SPI2_IRQn);
+}
+
+// Buffer for SPI slave receive (to trigger interrupt when master reads)
+static uint8_t Logger_spi_rx_buf[Logger_FRAME_SIZE_BYTES];
+
+/**
+ * @brief SPI2 RX Complete callback - called when master completes reading
+ * This is called from HAL_SPI_IRQHandler when RxCplt or TxCplt fires
+ */
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
+    // DEBUG: Signal that callback was entered
+    Test1Toggle();
+    
+    if (hspi == &LOGGER_SPI_HANDLE) {
+        // SPI slave RX complete - master has started reading
+        // Trigger data transmission from queue
+        Test2Toggle();  // DEBUG signal
+        Logger_SPI_RxCallback();
+        
+        // Re-arm the receive to catch next master transaction
+        HAL_SPI_Receive_IT(&LOGGER_SPI_HANDLE, Logger_spi_rx_buf, Logger_FRAME_SIZE_BYTES);
+    }
+}
+
+/**
+ * @brief Arm SPI slave to listen for incoming reads from master
+ * Must be called after Logger_Init to start listening
+ */
+void Logger_SPI_StartListening(void) {
+    // Start listening for master read transactions
+    // When master pulls CS low and sends clocks, this will trigger RxCplt callback
+    HAL_SPI_Receive_IT(&LOGGER_SPI_HANDLE, Logger_spi_rx_buf, Logger_FRAME_SIZE_BYTES);
+}
+
+#endif /* SPI_LOGGER_ENABLE */
