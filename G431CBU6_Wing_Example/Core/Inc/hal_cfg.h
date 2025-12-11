@@ -27,6 +27,7 @@ extern "C" {
 #define SYS_TICK_TIMER_BASE         TIM2        /* System tick timer instance */
 #define DETON_HIGH_SIDE_SWITH_TIMER_BASE    TIM15       /* Detonation high-side switch PWM timer */
 #define PWM_PUMP_TIMER_BASE         TIM1       /* Pump PWM timer */
+#define LOGGER_TIMESTAMP_TIMER_BASE TIM3       /* Logger global timestamp counter (slave to TIM6 @ 100kHz) */
 
 /* Timer Channels ------------------------------------------------------------*/
 #define DETON_HIGH_SIDE_SWITH_CHANNEL       TIM_CHANNEL_2   /* Detonation high-side switch PWM channel */
@@ -154,10 +155,11 @@ extern "C" {
 #define ACC_INT_PIN                 ACC_INT1_PIN
 
 /* External Handle References ------------------------------------------------*/
-extern TIM_HandleTypeDef htim2;     /* System tick timer handle */
-extern TIM_HandleTypeDef htim6;     /* System tick timer handle */
-extern TIM_HandleTypeDef htim15;    /* Detonation high-side switch PWM timer handle */
 extern TIM_HandleTypeDef htim1;    /* Pump PWM timer handle */
+extern TIM_HandleTypeDef htim2;     /* System tick timer handle */
+extern TIM_HandleTypeDef htim3;     /* Logger timestamp timer handle (slave to TIM6 @ 100 kHz) */
+extern TIM_HandleTypeDef htim6;     /* ADC clock timer handle */
+extern TIM_HandleTypeDef htim15;    /* Detonation high-side switch PWM timer handle */
 extern SPI_HandleTypeDef hspi1;    /* Accelerometer SPI handle */
 extern SPI_HandleTypeDef hspi2;    /* Logger SPI2 slave handle */
 extern UART_HandleTypeDef huart2;  /* Main UART handle */
@@ -179,7 +181,7 @@ extern ADC_HandleTypeDef hadc2;
 
 /* Logger SPI Slave Configuration */
 #define LOGGER_SPI_HANDLE           hspi2       /* Logger SPI2 slave handle */
-#define LOGGER_SPI_DATA_RDY_PORT    GPIOC       /* Data ready signal GPIO port */
+#define LOGGER_SPI_DATA_RDY_PORT    GPIOC       /* Data ready signal GxPIO port */
 #define LOGGER_SPI_DATA_RDY_PIN     GPIO_PIN_6  /* Data ready signal GPIO pin (C6) */
 
 

@@ -7,6 +7,7 @@
 #include <math.h>
 #include "init_brd.h"
 #include "acc_proc.h"
+#include "solution_wrapper.h"
 #if	(LIS2DH12_ACC_ENABLE == 1u)
 #include "LIS2DH12.h"
 #elif (LSM6DS3_ACC_ENABLE == 1u)

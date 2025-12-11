@@ -36,6 +36,13 @@ extern "C" {
 #define SET_ERROR_LED(status)             LedErrorSet(status)
 #define SET_STATUS_LED(status)            LedStatusSet(status)
 
+/* SPI Accelerometer Read Status Enum ----------------------------------------*/
+typedef enum {
+    ACC_READ_OK = 0,     /**< SPI read successful */
+    ACC_READ_BUSY,       /**< SPI module busy - transaction in progress */
+    ACC_READ_FAIL        /**< SPI read failed - DMA or transmission error */
+} acc_read_status_t;
+
 /* External Variables --------------------------------------------------------*/
 extern TIM_HandleTypeDef htim14;
 extern TIM_HandleTypeDef htim16;
@@ -51,7 +58,7 @@ void delay_us(uint16_t us);
 bool SpiReadRegister(uint8_t address, uint8_t* value, uint8_t num);
 bool SpiWriteSingleRegister(uint8_t address, uint8_t value);
 bool ReadAccIntGpio (void);
-bool SpiGetAccData (uint8_t *rd_data_ptr, app_cbk_fn cbk);
+acc_read_status_t SpiGetAccData (uint8_t *rd_data_ptr, app_cbk_fn cbk);
 bool AdcGetVoltage (app_cbk_fn cbk);
 void TestLedSet (bool state);
 void Test2LedToggle (void);
@@ -101,6 +108,7 @@ void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin);
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart);
 void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi);
 void HAL_SPI_DMAErrorCallback(SPI_HandleTypeDef *hspi);
+bool Logger_SPI_Poll_CS(void);
 // void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc_ptr);  /* ADC not used */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim);
 

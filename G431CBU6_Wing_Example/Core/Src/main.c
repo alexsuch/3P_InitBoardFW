@@ -54,7 +54,6 @@ UART_HandleTypeDef hlpuart1;
 OPAMP_HandleTypeDef hopamp2;
 
 SPI_HandleTypeDef hspi2;
-DMA_HandleTypeDef hdma_spi2_rx;
 DMA_HandleTypeDef hdma_spi2_tx;
 
 TIM_HandleTypeDef htim6;
@@ -130,8 +129,6 @@ int main(void)
   Solution_HalInit();
 
   /* --- DAC test setup (unchanged) --- */
-  uint32_t dac_value = 0;
-  volatile HAL_StatusTypeDef dac_status = HAL_OK;
   #define DAC_MAX_VALUE 4095  /* 12-bit DAC maximum value */
   #define DAC_SAMPLES 256
   static uint32_t dac_buffer[DAC_SAMPLES];
@@ -140,23 +137,10 @@ int main(void)
     dac_buffer[i] = ((((uint32_t)i) * DAC_MAX_VALUE) / (DAC_SAMPLES - 1));
   }
 
-    if (HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)dac_buffer, DAC_SAMPLES, DAC_ALIGN_12B_R) != HAL_OK)
+  if (HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)dac_buffer, DAC_SAMPLES, DAC_ALIGN_12B_R) != HAL_OK)
   {
     Error_Handler();
   }
-
-  /* --- ADC2 DMA accumulation setup --- */
-  #define ADC2_DMA_SAMPLES 512
-  static uint16_t adc2_dma_buffer[ADC2_DMA_SAMPLES] __attribute__((aligned(4)));
-  static uint16_t adc2_dma_copy_buffer[ADC2_DMA_SAMPLES] __attribute__((aligned(4)));
-
-  volatile uint16_t adc2_single_result = 0;
-
-    if (HAL_ADC_Start_DMA(&hadc2, adc2_dma_buffer, ADC2_DMA_SAMPLES) != HAL_OK) {
-    Error_Handler();
-  }
-
-
 
   /* Init application layer */
   App_InitRun();
@@ -168,14 +152,6 @@ int main(void)
   {
     App_Task ();
     
-    adc2_single_result++;
-    if (adc2_single_result > 200) {
-      for (int i = 0; i < ADC2_DMA_SAMPLES; i++) {
-        adc2_dma_copy_buffer[i] = adc2_dma_buffer[i];
-      }
-      adc2_single_result = 0;
-    }
-    __NOP();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -577,9 +553,6 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel2_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
-  /* DMA2_Channel1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Channel1_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA2_Channel1_IRQn);
   /* DMA2_Channel2_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Channel2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Channel2_IRQn);

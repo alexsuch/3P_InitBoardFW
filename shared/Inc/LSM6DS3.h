@@ -76,12 +76,24 @@ extern "C" {
 
 /*************************** Configuration Values ***************************/
 /* CTRL1_XL: Accelerometer configurations */
-#define LSM6DS3_CTRL1_XL_HIT_VAL      0xA4U  /* 6.66 kHz, ±16g (ODR=1010, FS=01) */
-#define LSM6DS3_CTRL1_XL_MOVE_VAL     0x40U  /* 104 Hz, ±2g */
+/* Dynamic ODR based on project configuration */
+#if defined(LSM6DS3_ODR_VALUE)
+    #define LSM6DS3_CTRL1_XL_HIT_VAL      ((LSM6DS3_ODR_VALUE & 0xF0) | 0x04U)  /* Configured Hz, ±16g */
+    #define LSM6DS3_CTRL1_XL_MOVE_VAL     ((LSM6DS3_ODR_VALUE & 0xF0) | 0x00U)  /* Configured Hz, ±2g */
+#else
+    #define LSM6DS3_CTRL1_XL_HIT_VAL      0xA4U  /* Default: 6.66 kHz, ±16g (ODR=1010, FS=01) */
+    #define LSM6DS3_CTRL1_XL_MOVE_VAL     0x40U  /* Default: 104 Hz, ±2g */
+#endif
 
 /* CTRL2_G: Gyroscope configurations */
-#define LSM6DS3_CTRL2_G_HIT_VAL       0xACU  /* 6.66 kHz, 2000 dps (ODR=1010, FS=11) */
-#define LSM6DS3_CTRL2_G_MOVE_VAL      0x40U  /* 104 Hz, 245 dps (ODR=0100, FS=00) */
+/* Dynamic ODR based on project configuration */
+#if defined(LSM6DS3_ODR_VALUE)
+    #define LSM6DS3_CTRL2_G_HIT_VAL       ((LSM6DS3_ODR_VALUE & 0xF0) | 0x0CU)  /* Configured Hz, 2000 dps */
+    #define LSM6DS3_CTRL2_G_MOVE_VAL      ((LSM6DS3_ODR_VALUE & 0xF0) | 0x00U)  /* Configured Hz, 245 dps */
+#else
+    #define LSM6DS3_CTRL2_G_HIT_VAL       0xACU  /* Default: 6.66 kHz, 2000 dps (ODR=1010, FS=11) */
+    #define LSM6DS3_CTRL2_G_MOVE_VAL      0x40U  /* Default: 104 Hz, 245 dps (ODR=0100, FS=00) */
+#endif
 
 /* CTRL3_C: Common configurations */
 #define LSM6DS3_CTRL3_C_VAL           0x44U  /* BDU=1, IF_INC=1 - block data update */

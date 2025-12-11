@@ -9,7 +9,7 @@
 #include "app_config.h"
 #include "uart_configurator.h"
 #if SPI_LOGGER_ENABLE
-#include "spi_logger.h"
+#include "logger.h"
 #endif /* SPI_LOGGER_ENABLE */
 #if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 #include "mavlink_uart.h"
@@ -2172,6 +2172,16 @@ void App_InitRun(void)
 	/* zero all variables */
 	memset(&sysStatus, 0u, sizeof(system_status_t));
 
+
+#if SPI_LOGGER_ENABLE
+	Logger_Init();
+
+	/* Reset all blocks */
+	Timer_ResetAll();
+
+	AccProc_Reset(App_AccProcCbk);
+#else
+
 	start_up = true;
 
 	/* Load configuration */
@@ -2198,10 +2208,6 @@ void App_InitRun(void)
 #if VBAT_MEASURE_FEATURE
 	/* Init ADC measurement */
 	App_AdcInit();
-#endif
-
-#if SPI_LOGGER_ENABLE
-	Logger_Init();
 #endif
 
 	Indication_Reset(&sysStatus.sys_info.error_code);
@@ -2240,6 +2246,7 @@ void App_InitRun(void)
 #else
 	App_InitFinish();
 #endif
+#endif /* SPI_LOGGER_ENABLE */
 }
 
 /***************************************** APP TASKS ********************************************************/
@@ -2371,6 +2378,18 @@ static bool App_UartConfigurationTask(void)
 
 void App_Task (void)
 {
+#if SPI_LOGGER_ENABLE
+	Logger_Task();  // Phase 4: Frame builder - assembles LogFrame_t in unified queue
+
+	//Logger_Demo_Monitor();  /* Monitor data flow (optional, for debugging) */
+
+#if ACC_SUPPORTED_ENABLE
+	AccProc_Task();
+#endif
+
+	/* Timer tick task */
+	Timer_Task();
+#else
 	/* Timer tick task */
 	Timer_Task();
 
@@ -2383,10 +2402,6 @@ void App_Task (void)
 	/* Acceleration processing task */
 #if ACC_SUPPORTED_ENABLE
 	AccProc_Task();
-#endif
-
-#if SPI_LOGGER_ENABLE
-	Logger_Task();
 #endif
 
 #if (OSD_ENABLE == 1u)
@@ -2409,4 +2424,5 @@ void App_Task (void)
 	/* Mavlink Processing */
 	Mavlink_Process();
 #endif
+#endif /* SPI_LOGGER_ENABLE */
 }

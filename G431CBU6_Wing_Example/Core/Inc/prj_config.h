@@ -26,6 +26,55 @@ extern "C" {
 #define LIS2DH12_ACC_ENABLE                           (0u)
 #define LSM6DS3_ACC_ENABLE                            (1u)
 
+/* LSM6DS3 Sampling Frequency Configuration (Hz)
+ * Options: 26, 52, 104, 208, 416, 833, 1666, 3332, 6664
+ * Note: These frequencies are used for both accelerometer and gyroscope
+ * ODR bits [7:4] in CTRL1_XL and CTRL2_G registers
+ */
+#define LSM6DS3_SAMPLING_FREQ_HZ                      (52)  // Valid: 26, 52, 104, 208, 416, 833, 1666, 3332, 6664
+
+/* LSM6DS3 ODR Register Values (from datasheet CTRL1_XL[7:4] and CTRL2_G[7:4])
+ * 0000 = Off
+ * 0001 = 12.5 Hz
+ * 0010 = 26 Hz
+ * 0011 = 52 Hz
+ * 0100 = 104 Hz
+ * 0101 = 208 Hz
+ * 0110 = 416 Hz
+ * 0111 = 833 Hz
+ * 1000 = 1.66 kHz (1666 Hz)
+ * 1001 = 3.33 kHz (3332 Hz)
+ * 1010 = 6.66 kHz (6664 Hz)
+ */
+#if (LSM6DS3_SAMPLING_FREQ_HZ == 26)
+    #define LSM6DS3_ODR_VALUE                         (0x20)  // 26 Hz (0010 binary)
+#elif (LSM6DS3_SAMPLING_FREQ_HZ == 52)
+    #define LSM6DS3_ODR_VALUE                         (0x30)  // 52 Hz (0011 binary)
+#elif (LSM6DS3_SAMPLING_FREQ_HZ == 104)
+    #define LSM6DS3_ODR_VALUE                         (0x40)  // 104 Hz (0100 binary)
+#elif (LSM6DS3_SAMPLING_FREQ_HZ == 208)
+    #define LSM6DS3_ODR_VALUE                         (0x50)  // 208 Hz (0101 binary)
+#elif (LSM6DS3_SAMPLING_FREQ_HZ == 416)
+    #define LSM6DS3_ODR_VALUE                         (0x60)  // 416 Hz (0110 binary)
+#elif (LSM6DS3_SAMPLING_FREQ_HZ == 833)
+    #define LSM6DS3_ODR_VALUE                         (0x70)  // 833 Hz (0111 binary)
+#elif (LSM6DS3_SAMPLING_FREQ_HZ == 1666)
+    #define LSM6DS3_ODR_VALUE                         (0x80)  // 1.66 kHz (1000 binary)
+#elif (LSM6DS3_SAMPLING_FREQ_HZ == 3332)
+    #define LSM6DS3_ODR_VALUE                         (0x90)  // 3.33 kHz (1001 binary)
+#elif (LSM6DS3_SAMPLING_FREQ_HZ == 6664)
+    #define LSM6DS3_ODR_VALUE                         (0xA0)  // 6.66 kHz (1010 binary)
+#else
+    #error "Invalid LSM6DS3_SAMPLING_FREQ_HZ. Choose from: 26, 52, 104, 208, 416, 833, 1666, 3332, 6664"
+#endif
+
+/*-------------------------- ADC Configuration -----------------------------------------*/
+
+#define ADC_SAMPLING_FREQ_KHZ                         (10u)   // ADC sampling frequency in kHz
+#define ADC_DMA_BUFFER_SIZE                           (512u)   // Total DMA buffer size in samples
+#define ADC_DMA_HALF_SIZE                             (ADC_DMA_BUFFER_SIZE / 2)  // Half buffer for callbacks (256 samples @ 512 total)
+#define LOGGER_ADC_BLOCK_SIZE                         (ADC_DMA_HALF_SIZE)  // Samples per ADC block
+
 
 #define RELEASE_CONFIGURATION_ENABLE                  (0u)
 

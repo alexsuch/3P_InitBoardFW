@@ -176,7 +176,7 @@ static HAL_StatusTypeDef HalConfigure_Gpio_Init(void)
     /* ========== Configure GPIOA Output Pins ========== */
     GPIO_InitStruct.Pin = TEST_1_PIN | EX_LED_OUT_PIN | CHARGE_EN_OUT_PIN | TEST_2_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
@@ -930,10 +930,21 @@ static HAL_StatusTypeDef HalConfigure_Tim6_Init(void)
     /* Enable TIM6 clock */
     __HAL_RCC_TIM6_CLK_ENABLE();
 
+    /* Calculate TIM6 period based on ADC sampling frequency
+     * TIM6 is driven by system clock with Prescaler=0
+     * Period = SystemClockFreq / (ADC_SAMPLING_FREQ_KHZ * 1000) - 1
+     * For SYSCLK=168MHz:
+     * - 100 kHz: (168000000 / 100000) - 1 = 1680 - 1 = 1679
+     * - 50 kHz:  (168000000 / 50000) - 1 = 3360 - 1 = 3359
+     * - 200 kHz: (168000000 / 200000) - 1 = 840 - 1 = 839
+     */
+    uint32_t sysclk_freq = HAL_RCC_GetSysClockFreq();
+    uint32_t tim6_period = (sysclk_freq / (ADC_SAMPLING_FREQ_KHZ * 1000)) - 1;
+
     htim6.Instance = TIM6;
     htim6.Init.Prescaler = 0;
     htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-    htim6.Init.Period = 1679;
+    htim6.Init.Period = tim6_period;
     htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
     if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
         return HAL_ERROR;
