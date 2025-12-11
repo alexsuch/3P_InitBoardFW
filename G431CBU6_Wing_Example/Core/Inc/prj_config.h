@@ -80,6 +80,12 @@ extern "C" {
 
 
 #if (RELEASE_CONFIGURATION_ENABLE == 0u) //TEST CONFIGURATION
+
+/*-------------------------- LOGGER MACROS -----------------------------------------*/
+#define TEST_DAC_ENABLE                               (0u) // RELEASE VALUE - 0u
+
+
+
 /*-------------------------- BUILD MACROS -----------------------------------------*/
 #define CONTROL_MODE                                  (MAVLINK_V2_CTRL_SUPP)
 #define VBAT_MEASURE_FEATURE                          (0u)
