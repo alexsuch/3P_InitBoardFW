@@ -41,8 +41,10 @@ DMA_HandleTypeDef hdma_spi1_tx;   /* SPI1 TX DMA handle */
 
 static HAL_StatusTypeDef HalConfigure_Gpio_Init(void);
 static HAL_StatusTypeDef HalConfigure_SysTickTimer_Init(void);
+#if (SPI_LOGGER_ENABLE == 0)
 static HAL_StatusTypeDef HalConfigure_HighSidePwmTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_PumpPwmTimer_Init(void);
+#endif /* SPI_LOGGER_ENABLE == 0 */
 static HAL_StatusTypeDef HalConfigure_MainUart_Init(void);
 static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void);
 static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void);
@@ -257,6 +259,7 @@ static HAL_StatusTypeDef HalConfigure_SysTickTimer_Init(void)
     return HAL_OK;
 }
 
+#if (SPI_LOGGER_ENABLE == 0)
 /**
   * @brief  Initialize detonation high-side switch PWM timer (TIM15) for 138kHz PWM
   * @note   Timer clock: APB2 x2 = 168 MHz (when APB2 prescaler != 1)
@@ -462,6 +465,7 @@ static HAL_StatusTypeDef HalConfigure_PumpPwmTimer_Init(void)
 
     return HAL_OK;
 }
+#endif /* SPI_LOGGER_ENABLE == 0 */
 
 /**
   * @brief  Initialize Main UART (USART2) with full configuration

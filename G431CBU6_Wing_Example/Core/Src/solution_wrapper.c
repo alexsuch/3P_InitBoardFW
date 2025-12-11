@@ -55,14 +55,6 @@
  */
 uint16_t adc2_dma_buffer[ADC_DMA_BUFFER_SIZE] __attribute__((aligned(4)));
 
-#if TEST_DAC_ENABLE
-  /* --- DAC test setup (unchanged) --- */
-  #define DAC_MAX_VALUE 4095  /* 12-bit DAC maximum value */
-  #define DAC_SAMPLES 256
-  static uint32_t dac_buffer[DAC_SAMPLES];
-#endif /* TEST_DAC_ENABLE */
-
-
 /**
  * @brief Initialize HAL and core system peripherals
  *
@@ -92,17 +84,7 @@ void Solution_HalInit (void)
 		Error_Handler();
 	}
 
-#if TEST_DAC_ENABLE
-	for (int i = 0; i < DAC_SAMPLES; i++)
-	{
-		dac_buffer[i] = ((((uint32_t)i) * DAC_MAX_VALUE) / (DAC_SAMPLES - 1));
-	}
 
-	if (HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t*)dac_buffer, DAC_SAMPLES, DAC_ALIGN_12B_R) != HAL_OK)
-	{
-		Error_Handler();
-	}
- #endif /* TEST_DAC_ENABLE */
 }
 
 // ---------------------- SYSTEM TIMER CALLBACKS ------------------------------------
