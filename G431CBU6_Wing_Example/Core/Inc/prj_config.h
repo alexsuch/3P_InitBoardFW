@@ -70,7 +70,7 @@ extern "C" {
 
 /*-------------------------- ADC Configuration -----------------------------------------*/
 
-#define ADC_SAMPLING_FREQ_KHZ                         (10u)   // ADC sampling frequency in kHz
+#define ADC_SAMPLING_FREQ_KHZ                         (100u)   // ADC sampling frequency in kHz
 #define ADC_DMA_BUFFER_SIZE                           (512u)   // Total DMA buffer size in samples
 #define ADC_DMA_HALF_SIZE                             (ADC_DMA_BUFFER_SIZE / 2)  // Half buffer for callbacks (256 samples @ 512 total)
 #define LOGGER_ADC_BLOCK_SIZE                         (ADC_DMA_HALF_SIZE)  // Samples per ADC block

@@ -82,7 +82,7 @@ static void MX_ADC1_Init(void);
 #if TEST_DAC_ENABLE
   /* --- DAC test setup (unchanged) --- */
   #define DAC_MAX_VALUE 4095  /* 12-bit DAC maximum value */
-  #define DAC_SAMPLES 256
+  #define DAC_SAMPLES 151
   static uint32_t dac_buffer[DAC_SAMPLES];
 #endif /* TEST_DAC_ENABLE */
 /* USER CODE END 0 */

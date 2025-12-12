@@ -99,7 +99,7 @@ void Logger_Init(void)
     // Initialize logger configuration
     loggerStat.config.magic = LOGGER_CONFIG_MAGIC;              // 0xCAFE
     loggerStat.config.version = LOGGER_CONFIG_VERSION;          // 1
-    loggerStat.config.adc_sample_rate_hz = ADC_SAMPLING_FREQ_KHZ;  // 100 kHz sampling
+    loggerStat.config.adc_sample_rate_khz = ADC_SAMPLING_FREQ_KHZ;  // 100 kHz sampling
     loggerStat.config.adc_block_size = LOGGER_ADC_BLOCK_SIZE;   // 256 samples per frame
 
     // Initialize SPI2 NVIC for interrupt-driven reception
@@ -152,7 +152,7 @@ int Logger_DrainQueue(void) {
         return 0;
     }
    
-#if 1
+#if 0
     // DEBUG: Fill first 50 bytes with pattern (1..50) for testing
     for (int i = 0; i < 50; i++) {
         ((uint8_t*)&loggerStat.tx_frame)[i] = (uint8_t)(i + 1);

@@ -384,7 +384,7 @@ typedef struct __attribute__((packed)) {
     uint16_t version;               // Protocol version (2B)
 
     // --- Core ADC parameters (4B) ---
-    uint16_t adc_sample_rate_hz;    // Sampling frequency (2B)
+    uint16_t adc_sample_rate_khz;    // Sampling frequency kHz (2B)
     uint16_t adc_block_size;        // Samples per frame (2B)
 
     // --- Extended IMU configuration (24B) ---

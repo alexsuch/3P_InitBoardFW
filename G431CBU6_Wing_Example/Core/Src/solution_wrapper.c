@@ -83,8 +83,9 @@ void Solution_HalInit (void)
 		/* Starting Error */
 		Error_Handler();
 	}
-
-
+#if 0
+Solution_LoggingStart();
+#endif
 }
 
 // ---------------------- SYSTEM TIMER CALLBACKS ------------------------------------
