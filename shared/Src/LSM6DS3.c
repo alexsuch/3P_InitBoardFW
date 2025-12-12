@@ -760,7 +760,6 @@ void Lsm6ds3_Task (void)
 		    case LSM6DS3_STATE_GET_DATA:
 		    	if (ReadAccIntGpio () != false)
 		    	{
-
 		    	    Lsm6ds3_GetData();
 		    	}
 		    	break;

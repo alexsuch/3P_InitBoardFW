@@ -97,7 +97,8 @@ void Logger_ImuOnNewSample(const uint8_t *raw_data) {
     if (!raw_data) {
         return;
     }
-    
+                Test2Toggle();
+            Test2Toggle();
     if (g_imu_buffer.count < 50) {
         // Buffer not full, add new sample
         memcpy(&g_imu_buffer.samples[g_imu_buffer.count].data[0],

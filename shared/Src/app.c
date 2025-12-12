@@ -2379,9 +2379,10 @@ static bool App_UartConfigurationTask(void)
 void App_Task (void)
 {
 #if SPI_LOGGER_ENABLE
+
+
 	Logger_Task();  // Phase 4: Frame builder - assembles LogFrame_t in unified queue
 
-	//Logger_Demo_Monitor();  /* Monitor data flow (optional, for debugging) */
 
 #if ACC_SUPPORTED_ENABLE
 	AccProc_Task();

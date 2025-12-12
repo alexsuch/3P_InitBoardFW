@@ -191,6 +191,8 @@ uint32_t Logger_Task(void)
 {
     uint32_t frames_queued = 0;
     
+
+
     // Check if previous SPI transmission completed and queue needs draining
     // This allows continuous streaming without waiting for ADC block
     if (loggerStat.frame_ctx.spi_state == SPI_STATE_PACKET_SENT_COMPLETE) 
@@ -201,7 +203,9 @@ uint32_t Logger_Task(void)
             loggerStat.frame_ctx.spi_state = SPI_STATE_PACKET_SENT;
         }
     }
-    
+
+
+
     switch (loggerStat.frame_ctx.builder.state) 
     {
     case FRAME_STATE_IDLE:
@@ -242,11 +246,16 @@ uint32_t Logger_Task(void)
                     loggerStat.frame_ctx.builder.state = FRAME_STATE_BUILD;
                 }
             }
+
+
+
         }
         break;
         
     case FRAME_STATE_BUILD:
         {
+            Test1Toggle();
+            Test1Toggle();
             // Check if frame queue has space
             uint32_t queue_size = (loggerStat.frame_ctx.queue_write_idx - loggerStat.frame_ctx.queue_read_idx) 
                                  % LOGGER_FRAME_QUEUE_SIZE;
@@ -302,6 +311,10 @@ uint32_t Logger_Task(void)
             // Reset builder for next frame
             memset(&loggerStat.frame_ctx.builder, 0, sizeof(FrameBuilder_t));
             loggerStat.frame_ctx.builder.state = FRAME_STATE_IDLE;
+
+
+
+
         }
         break;
         
@@ -310,7 +323,10 @@ uint32_t Logger_Task(void)
         break;
     }
     
+
+
     return frames_queued;
+
 }
 
 /**
