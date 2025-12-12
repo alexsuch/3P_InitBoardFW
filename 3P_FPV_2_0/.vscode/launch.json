@@ -1,0 +1,98 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Build & Debug Microcontroller - ST-Link",
+            "cwd": "${workspaceFolder}",
+            "type": "cortex-debug",
+            "executable": "${command:cmake.launchTargetPath}",
+            // Let CMake extension decide executable: "${command:cmake.launchTargetPath}"
+            // Or fixed file path: "${workspaceFolder}/path/to/filename.elf"
+            "request": "launch",
+            "servertype": "stlink",
+            "device": "STM32G030C8Tx", //MCU used
+            "interface": "swd",
+            "serialNumber": "",        //Set ST-Link ID if you use multiple at the same time
+            "runToEntryPoint": "main",
+            "svdFile": "${config:STM32VSCodeExtension.cubeCLT.path}/STMicroelectronics_CMSIS_SVD/STM32G030.svd",
+            "v1": false,               //Change it depending on ST Link version
+            "serverpath": "${config:STM32VSCodeExtension.cubeCLT.path}/STLink-gdb-server/bin/ST-LINK_gdbserver",
+            "stm32cubeprogrammer":"${config:STM32VSCodeExtension.cubeCLT.path}/STM32CubeProgrammer/bin",
+            "stlinkPath": "${config:STM32VSCodeExtension.cubeCLT.path}/STLink-gdb-server/bin/ST-LINK_gdbserver",   
+            "armToolchainPath": "${config:STM32VSCodeExtension.cubeCLT.path}/GNU-tools-for-STM32/bin",
+            "gdbPath":"${config:STM32VSCodeExtension.cubeCLT.path}/GNU-tools-for-STM32/bin/arm-none-eabi-gdb",            
+            "serverArgs": [
+                "-m","0",
+            ],
+                "preLaunchTask": "Build Debug + Generate HEX",
+            //"preLaunchTask": "Build + Flash"
+            /* If you use external loader, add additional arguments */
+            //"serverArgs": ["--extload", "path/to/ext/loader.stldr"],
+        },
+        {
+            "name": "Attach to Microcontroller - ST-Link",
+            "cwd": "${workspaceFolder}",
+            "type": "cortex-debug",
+            "executable": "${command:cmake.launchTargetPath}",
+            // Let CMake extension decide executable: "${command:cmake.launchTargetPath}"
+            // Or fixed file path: "${workspaceFolder}/path/to/filename.elf"
+            "request": "attach",
+            "servertype": "stlink",
+            "device": "STM32G030C8Tx", //MCU used
+            "interface": "swd",
+            "serialNumber": "",        //Set ST-Link ID if you use multiple at the same time
+            "runToEntryPoint": "main",
+            "svdFile": "${config:STM32VSCodeExtension.cubeCLT.path}/STMicroelectronics_CMSIS_SVD/STM32G030.svd",
+            "v1": false,               //Change it depending on ST Link version
+            "serverpath": "${config:STM32VSCodeExtension.cubeCLT.path}/STLink-gdb-server/bin/ST-LINK_gdbserver",
+            "stm32cubeprogrammer":"${config:STM32VSCodeExtension.cubeCLT.path}/STM32CubeProgrammer/bin",
+            "stlinkPath": "${config:STM32VSCodeExtension.cubeCLT.path}/STLink-gdb-server/bin/ST-LINK_gdbserver",   
+            "armToolchainPath": "${config:STM32VSCodeExtension.cubeCLT.path}/GNU-tools-for-STM32/bin",
+            "gdbPath":"${config:STM32VSCodeExtension.cubeCLT.path}/GNU-tools-for-STM32/bin/arm-none-eabi-gdb",            
+            "serverArgs": [
+                "-m","0",
+            ],
+            /* If you use external loader, add additional arguments */
+            //"serverArgs": ["--extload", "path/to/ext/loader.stldr"],
+        },
+        {
+            "name": "Flash STM32 (Run)",
+            "type": "process",
+            "request": "launch",
+            "command": "C:/ST/STM32CubeCLT_1.18.0/STM32CubeProgrammer/bin/STM32_Programmer_CLI",
+            "args": [
+                "--connect", "port=swd",
+                "--download", "${workspaceFolder}/build/Debug/3P_FPV_2_0.hex",
+                "-hardRst", "-rst", "--start"
+            ],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "Build Debug + Generate HEX"
+        },
+        {
+            "name": "Debug ValidationFW - ST-Link",
+            "cwd": "${workspaceFolder}/../ValidationFW/3P_FPV_2_0_Validation",
+            "type": "cortex-debug",
+            "executable": "${workspaceFolder}/../ValidationFW/3P_FPV_2_0_Validation/build/Debug/3P_FPV_2_0_Validation.elf",
+            "request": "launch",
+            "servertype": "stlink",
+            "device": "STM32G030C8Tx",
+            "interface": "swd",
+            "serialNumber": "",
+            "runToEntryPoint": "main",
+            "svdFile": "${config:STM32VSCodeExtension.cubeCLT.path}/STMicroelectronics_CMSIS_SVD/STM32G030.svd",
+            "v1": false,
+            "serverpath": "${config:STM32VSCodeExtension.cubeCLT.path}/STLink-gdb-server/bin/ST-LINK_gdbserver",
+            "stm32cubeprogrammer":"${config:STM32VSCodeExtension.cubeCLT.path}/STM32CubeProgrammer/bin",
+            "stlinkPath": "${config:STM32VSCodeExtension.cubeCLT.path}/STLink-gdb-server/bin/ST-LINK_gdbserver",   
+            "armToolchainPath": "${config:STM32VSCodeExtension.cubeCLT.path}/GNU-tools-for-STM32/bin",
+            "gdbPath":"${config:STM32VSCodeExtension.cubeCLT.path}/GNU-tools-for-STM32/bin/arm-none-eabi-gdb",            
+            "serverArgs": [
+                "-m","0",
+            ],
+            "preLaunchTask": "Build Debug + Generate HEX (Validation)"
+        }
+    ]
+}

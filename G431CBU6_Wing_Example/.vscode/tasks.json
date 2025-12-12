@@ -1,0 +1,120 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Debug + Generate HEX",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build/Debug"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "detail": "Build Debug configuration and generate HEX/BIN files"
+        },
+        {
+            "label": "Configure Debug",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--preset",
+                "Debug"
+            ],
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "detail": "Configure CMake Debug preset"
+        },
+        {
+            "label": "Clean Build",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build/Debug",
+                "--target",
+                "clean"
+            ],
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "detail": "Clean build artifacts"
+        },
+        {
+            "label": "Flash Debug HEX",
+            "type": "shell",
+            "command": "STM32_Programmer_CLI",
+            "args": [
+                "-c",
+                "port=SWD",
+                "-w",
+                "${workspaceFolder}/build/Debug/G431CBU6_Wing_Example.hex",
+                "-v",
+                "-rst"
+            ],
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "detail": "Flash existing Debug HEX file to board via ST-LINK"
+        },
+        {
+            "label": "Build and Flash",
+            "type": "shell",
+            "command": "STM32_Programmer_CLI",
+            "args": [
+                "-c",
+                "port=SWD",
+                "-w",
+                "${workspaceFolder}/build/Debug/G431CBU6_Wing_Example.hex",
+                "-v",
+                "-rst"
+            ],
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "dependsOn": [
+                "Build Debug + Generate HEX"
+            ],
+            "detail": "Build Debug, then flash firmware to board via ST-LINK"
+        },
+        {
+            "label": "Upgrade ST-LINK Firmware",
+            "type": "shell",
+            "command": "STM32_Programmer_CLI",
+            "args": [
+                "-c",
+                "port=SWD",
+                "mode=UR"
+            ],
+            "group": "build",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "detail": "Upgrade ST-LINK firmware on the board"
+        }
+    ]
+}

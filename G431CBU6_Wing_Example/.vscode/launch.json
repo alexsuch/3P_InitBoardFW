@@ -1,0 +1,82 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "STM32 Debug (Cortex-Debug)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/Debug/G431CBU6_Wing_Example.elf",
+            "servertype": "stlink",
+            "device": "STM32G431CB",
+            "interface": "swd",
+            "serialNumber": "37FF71064E573436D8771543",
+            "runToEntryPoint": "main",
+            "svdFile": "C:/ST/STM32CubeCLT_1.18.0/STMicroelectronics_CMSIS_SVD/STM32G431.svd",
+            "v1": false,
+            "serverpath": "C:/ST/STM32CubeIDE_1.15.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.win32_2.1.300.202403291623/tools/bin/ST-LINK_gdbserver.exe",
+            "stm32cubeprogrammer": "C:/ST/STM32CubeIDE_1.15.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.win32_2.1.400.202404281720/tools/bin",
+            "stlinkPath": "C:/ST/STM32CubeIDE_1.15.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.win32_2.1.300.202403291623/tools/bin/ST-LINK_gdbserver.exe",
+            "armToolchainPath": "C:/ST/STM32CubeCLT_1.18.0/GNU-tools-for-STM32/bin",
+            "gdbPath": "C:/ST/STM32CubeCLT_1.18.0/GNU-tools-for-STM32/bin/arm-none-eabi-gdb.exe",
+            "serverArgs": [],
+            "preLaunchTask": "Build Debug + Generate HEX",
+            "showDevDebugOutput": "parsed",
+            "swoConfig": {
+                "enabled": false
+            },
+            "rttConfig": {
+                "enabled": false
+            }
+        },
+        {
+            "name": "STM32 Debug (OpenOCD)",
+            "type": "cppdbg",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/build/Debug/G431CBU6_Wing_Example.elf",
+            "MIMode": "gdb",
+            "miDebuggerPath": "arm-none-eabi-gdb",
+            "miDebuggerServerAddress": "localhost:3333",
+            "debugServerPath": "openocd",
+            "debugServerArgs": "-f interface/stlink.cfg -f target/stm32g4x.cfg",
+            "serverLaunchTimeout": 5000,
+            "filterStderr": true,
+            "filterStdout": false,
+            "serverStarted": "Info : Listening on port 3333 for gdb connections",
+            "preLaunchTask": "Build Debug + Generate HEX",
+            "postDebugTask": "",
+            "logging": {
+                "moduleLoad": true,
+                "trace": false,
+                "engineLogging": false,
+                "programOutput": true,
+                "exceptions": true
+            },
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                },
+                {
+                    "text": "target extended-remote localhost:3333"
+                },
+                {
+                    "text": "monitor reset halt"
+                },
+                {
+                    "text": "load"
+                },
+                {
+                    "text": "monitor reset halt"
+                }
+            ]
+        }
+    ]
+}
