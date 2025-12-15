@@ -31,6 +31,7 @@
 #include "timer.h"
 #include "init_brd.h"
 #include "LIS2DH12.h"
+#include "LSM6DS3.h"
 #include "uart_configurator.h"
 #include "logger.h"
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
@@ -557,6 +558,9 @@ void Solution_LoggingStart(void)
 
 	/* Initialize logger IMU ring buffer (Phase 3) */
 	Logger_ImuRing_Init();
+
+	/* Start LSM6DS3 IMU data polling */
+	Lsm6ds3_StartReadData();  
 
 	/* Start ADC tick timer (100 kHz) */
 	if (HAL_TIM_Base_Start_IT(&ADC_TICK_TIMER_HANDLE) != HAL_OK)

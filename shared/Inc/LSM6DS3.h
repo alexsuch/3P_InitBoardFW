@@ -178,6 +178,25 @@ void Lsm6ds3_GotoShakeMode (void);
 /* Additional functions for gyroscope access */
 void Lsm6ds3_GetGyroData(int16_t** gyro_x, int16_t** gyro_y, int16_t** gyro_z);
 
+/**
+ * @brief Start reading accelerometer and gyroscope data
+ *
+ * Transitions the LSM6DS3 state machine from current state to LSM6DS3_STATE_GET_DATA,
+ * which will begin polling for sensor data on next Lsm6ds3_Task() invocation.
+ *
+ * This is a convenience function that can be called to initiate continuous data
+ * reading after the sensor has been initialized (after Lsm6ds3_GotoHitMode(),
+ * Lsm6ds3_GotoMoveMode(), etc.).
+ *
+ * Returns: void
+ *
+ * Usage:
+ *   Lsm6ds3_GotoHitMode();        // Initialize sensor
+ *   // ... wait for ACC_EVT_HIT_INIT_OK callback ...
+ *   Lsm6ds3_StartReadData();      // Begin continuous data reading
+ */
+void Lsm6ds3_StartReadData(void);
+
 #endif /* LSM6DS3_ACC_ENABLE */
 
 #ifdef __cplusplus

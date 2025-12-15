@@ -27,6 +27,22 @@ static volatile uint16_t timeoutCnt = 0u;
 #if SPI_LOGGER_ENABLE
 
 /**
+ * @brief Start reading accelerometer and gyroscope data
+ *
+ * Transitions the state machine to LSM6DS3_STATE_GET_DATA to initiate
+ * continuous data polling. Call after initialization is complete.
+ *
+ * Returns: void
+ */
+void Lsm6ds3_StartReadData(void)
+{
+	lsm6ds3_Stat.state = LSM6DS3_STATE_GET_DATA;
+	lsm6ds3_Stat.wait_flag = false;
+	lsm6ds3_Stat.retry_cnt = 0u;
+}
+
+
+/**
  * @brief Extract Output Data Rate from LSM6DS3 control register bits [7:4]
  * 
  * Maps ODR code to frequency in Hz:
@@ -479,194 +495,9 @@ static void Lsm6ds3_SetHitParams (void)
 	}
 
 	lsm6ds3_Stat.retry_cnt = 0u;
+#if (SPI_LOGGER_ENABLE == 0u)
 	lsm6ds3_Stat.state = LSM6DS3_STATE_GET_DATA;
-}
-
-static void Lsm6ds3_SetMoveParams (void)
-{
-	uint8_t rdVal = 0u;
-	bool stat = false;
-#if 1
-	/* Software reset first (only once) */
-	if (!lsm6ds3_Stat.reset_done)
-	{
-		if (SpiWriteSingleRegister(LSM6DS3_CTRL3_C, LSM6DS3_CTRL3_C_RESET_VAL) != false)
-		{
-			lsm6ds3_Stat.reset_done = true;
-			/* Wait 50ms for reset to complete */
-			Timer_Start(ACC_TIMEOUT_TMR, 50, Lsm6ds3_PauseCbk);
-			lsm6ds3_Stat.wait_flag = true;
-			return;
-		}
-		else
-		{
-			/* Reset failed */
-			Lsm6ds3_ErrHandler();
-			return;
-		}
-	}
-#endif
-
-	/* Set common control register: BDU=1, IF_INC=1 */
-	if (SpiWriteSingleRegister(LSM6DS3_CTRL3_C, LSM6DS3_CTRL3_C_VAL) != false)
-	{
-		if (SpiReadRegister(LSM6DS3_CTRL3_C, &rdVal, 1) != false)
-		{
-			if (rdVal == LSM6DS3_CTRL3_C_VAL)
-			{
-			    stat = true;
-			}
-		}
-	}
-	if (stat == false)
-	{
-		Lsm6ds3_ErrHandler();
-		return;
-	}
-	else
-	{
-		stat = false;
-	}
-
-	/* Set Accelerometer: 104 Hz, ±2g */
-	if (SpiWriteSingleRegister(LSM6DS3_CTRL1_XL, LSM6DS3_CTRL1_XL_MOVE_VAL) != false)
-	{
-		if (SpiReadRegister(LSM6DS3_CTRL1_XL, &rdVal, 1) != false)
-		{
-			if (rdVal == LSM6DS3_CTRL1_XL_MOVE_VAL)
-			{
-			    stat = true;
-			}
-		}
-	}
-	if (stat == false)
-	{
-		Lsm6ds3_ErrHandler();
-		return;
-	}
-	else
-	{
-		stat = false;
-	}
-
-	/* Set Gyroscope: 104 Hz, 245 dps */
-	if (SpiWriteSingleRegister(LSM6DS3_CTRL2_G, LSM6DS3_CTRL2_G_MOVE_VAL) != false)
-	{
-		if (SpiReadRegister(LSM6DS3_CTRL2_G, &rdVal, 1) != false)
-		{
-			if (rdVal == LSM6DS3_CTRL2_G_MOVE_VAL)
-			{
-			    stat = true;
-			}
-		}
-	}
-	if (stat == false)
-	{
-		Lsm6ds3_ErrHandler();
-		return;
-	}
-	else
-	{
-		stat = false;
-	}
-
-	/* Enable accelerometer axes (CTRL9_XL = 0x18) */
-	if (SpiWriteSingleRegister(0x18, 0x38) != false)
-	{
-		/* Check if value was written */
-		if (SpiReadRegister(0x18, &rdVal, 1) != false)
-		{
-			if (rdVal == 0x38)
-			{
-			    stat = true;
-			}
-		}
-	}
-	if (stat == false)
-	{
-		Lsm6ds3_ErrHandler();
-		return;
-	}
-	else
-	{
-		stat = false;
-	}
-
-	/* Set CTRL7_G for gyroscope high-performance mode (0x16 = 0x00) */
-	if (SpiWriteSingleRegister(0x16, 0x00) != false)
-	{
-		if (SpiReadRegister(0x16, &rdVal, 1) != false)
-		{
-			if (rdVal == 0x00)
-			{
-			    stat = true;
-			}
-		}
-	}
-	if (stat == false)
-	{
-		Lsm6ds3_ErrHandler();
-		return;
-	}
-	else
-	{
-		stat = false;
-	}
-
-	/* Ensure CTRL4_C DRDY_MASK=0 (0x13 = 0x00) */
-	if (SpiWriteSingleRegister(0x13, 0x00) != false)
-	{
-		if (SpiReadRegister(0x13, &rdVal, 1) != false)
-		{
-			if (rdVal == 0x00)
-			{
-			    stat = true;
-			}
-		}
-	}
-	if (stat == false)
-	{
-		Lsm6ds3_ErrHandler();
-		return;
-	}
-	else
-	{
-		stat = false;
-	}
-
-	/* Disable interrupts on INT1 (0x0D = 0x00) */
-	if (SpiWriteSingleRegister(LSM6DS3_INT1_CTRL, LSM6DS3_INT1_CTRL_DRDY_VAL) != false)
-	{
-		if (SpiReadRegister(LSM6DS3_INT1_CTRL, &rdVal, 1) != false)
-		{
-			if (rdVal == LSM6DS3_INT1_CTRL_DRDY_VAL)
-			{
-			    stat = true;
-			}
-		}
-	}
-
-	if (stat == false)
-	{
-		Lsm6ds3_ErrHandler();
-		return;
-	}
-
-	/* Wait 20ms for sensor to stabilize after configuration */
-	lsm6ds3_Stat.wait_flag = true;
-	Timer_Start(ACC_TIMEOUT_TMR, 20, Lsm6ds3_PauseCbk);
-	
-	/* Read STATUS_REG (0x1E) to clear any pending interrupts */
-	uint8_t statusReg = 0;
-	SpiReadRegister(0x1E, &statusReg, 1);
-
-	/* Init is done */
-	lsm6ds3_Stat.retry_cnt = 0u;
-	lsm6ds3_Stat.state = LSM6DS3_STATE_GET_DATA;
-	if (lsm6ds3_sys_cbk != NULL)
-	{
-		lsm6ds3_sys_cbk(SYSTEM_EVT_READY, ACC_EVT_MOVE_INIT_OK);
-	}
+#endif /* SPI_LOGGER_ENABLE */
 }
 
 static void Lsm6ds3_GetDataCbk (system_evt_t evt, uint32_t usr_data)
@@ -676,6 +507,9 @@ static void Lsm6ds3_GetDataCbk (system_evt_t evt, uint32_t usr_data)
 	
 	if (evt == SYSTEM_EVT_READY)
 	{
+#if (SPI_LOGGER_ENABLE == 1u)
+		Logger_ImuOnNewSample(&lsm6ds3_Stat.rd_buff[1]);  // Skip dummy byte, pass 12 raw bytes directly
+#else
 		/* We read starting from 0x22 (OUTX_L_G) with auto-increment via IF_INC, 13 bytes total */
 		/* Read address is 0xA2 = 0x22 | 0x80 (READ bit, auto-increment via CTRL3_C.IF_INC) */
 		/* Data format: 1 dummy byte + 6 gyro bytes + 6 accel bytes */
@@ -692,12 +526,7 @@ static void Lsm6ds3_GetDataCbk (system_evt_t evt, uint32_t usr_data)
 		lsm6ds3_Stat.x_axis = (int16_t)(lsm6ds3_Stat.rd_buff[7] | (lsm6ds3_Stat.rd_buff[8] << 8));
 		lsm6ds3_Stat.y_axis = (int16_t)(lsm6ds3_Stat.rd_buff[9] | (lsm6ds3_Stat.rd_buff[10] << 8));
 		lsm6ds3_Stat.z_axis = (int16_t)(lsm6ds3_Stat.rd_buff[11] | (lsm6ds3_Stat.rd_buff[12] << 8));
-		
-		/* Phase 3: Capture synchronized timestamp and notify logger */
-#if (SPI_LOGGER_ENABLE == 1u)
-		Logger_ImuOnNewSample(&lsm6ds3_Stat.rd_buff[1]);  // Skip dummy byte, pass 12 raw bytes directly
-#else
-		
+
 		/* Report data is ready */
 		if (lsm6ds3_sys_cbk != NULL)
 		{
@@ -753,9 +582,6 @@ void Lsm6ds3_Task (void)
 #endif /* ACC_SHAKE_DETECTION_ENABLE */
 		    case LSM6DS3_STATE_SET_HIT_PARAMS:
 		    	Lsm6ds3_SetHitParams();
-		    	break;
-		    case LSM6DS3_STATE_SET_MOVE_PARAMS:
-		    	Lsm6ds3_SetMoveParams();
 		    	break;
 		    case LSM6DS3_STATE_GET_DATA:
 		    	if (ReadAccIntGpio () != false)

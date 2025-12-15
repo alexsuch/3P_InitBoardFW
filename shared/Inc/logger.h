@@ -288,33 +288,42 @@ uint32_t Logger_ImuRing_GetOverflowCount(void);
 /**
  * @brief Frame format structure (fixed-size frame for efficient SPI transfer)
  *
- * Layout (little-endian, fixed 640 bytes):
+ * Layout (little-endian, fixed 1118 bytes):
  *   Bytes 0-1:       MAGIC_FRAME (0x5A5A)
  *   Bytes 2-3:       Frame counter (uint16_t, increments per frame)
  *   Bytes 4-5:       n_imu (uint16_t, number of IMU samples actually filled)
- *   Bytes 6-517:     adc[256] (256 × int16_t = 512 bytes)
- *   Bytes 518-637:   imu[LOGGER_IMU_BLOCK_SIZE] (10 × ImuRawSample_t = 10 × 12 = 120 bytes)
- *   Bytes 638-639:   crc16 (uint16_t over entire frame)
+ *   Bytes 6-9:       timestamp (uint32_t, TIM6 counter @ 100 kHz of first ADC sample)
+ *   Bytes 10-521:    adc[256] (256 × int16_t = 512 bytes)
+ *   Bytes 522-641:   imu[LOGGER_IMU_BLOCK_SIZE] (10 × ImuRawSample_t = 10 × 12 = 120 bytes)
+ *   Bytes 1120-1121: crc16 (CRC8 checksum, 8-bit value in uint16_t field)
  *
- * Size: Fixed 640 bytes
- *   - Magic (2) + Counter (2) + n_imu (2) = 6 bytes header
+ * Size: Fixed 1122 bytes
+ *   - Magic (2) + Counter (2) + n_imu (2) + Timestamp (4) = 10 bytes header
  *   - ADC block (256 × 2) = 512 bytes
  *   - IMU block (10 × 12) = 120 bytes
- *   - CRC16 (2) = 2 bytes
- *   - Total = 640 bytes (fixed, DMA-friendly SPI transfer)
+ *   - CRC8 (2 bytes field, 8-bit value) = 2 bytes
+ *   - Total = 1122 bytes (fixed, DMA-friendly SPI transfer)
  *
  * Note: n_imu field indicates how many of the LOGGER_IMU_BLOCK_SIZE (10) slots are filled.
  *       Unused IMU slots are zeroed. LOGGER_IMU_BLOCK_SIZE = 10 per Phase 3 configuration.
  *
- * Queue: 10 frames max (6.4 KB total)
+ * CRC Computation (Incremental):
+ *       The CRC8 is computed in 4 stages to reduce interrupt latency:
+ *       Part 1: bytes 0-133 (header + 1st quarter ADC)
+ *       Part 2: bytes 134-261 (2nd quarter ADC)
+ *       Part 3: bytes 262-389 (3rd quarter ADC)
+ *       Part 4: bytes 390-1116 (4th quarter ADC + all IMU, excl. crc field)
+ *       Each stage takes ~3µs @ 168MHz, enabling fast interrupt response.
+ *
+ * Queue: 10 frames max (11.18 KB total)
  */
 typedef struct __attribute__((packed)) {
     uint16_t magic;           // 0x5A5A
-    uint16_t frame_counter;   // Increments per frame
     uint16_t n_imu;           // Number of valid IMU samples (0-50)
+    uint32_t adc_timestamp;       // Timestamp of first ADC sample (TIM6 @ 100 kHz, every 10 µs)
     int16_t adc[256];         // Fixed 256 ADC samples
     ImuRawSample_t imu[LOGGER_IMU_BLOCK_SIZE];   // Fixed 50 IMU raw samples (only first n_imu are valid)
-    uint16_t crc16;           // CRC16 over entire frame
+    uint16_t crc16;           // CRC8 checksum (8-bit value, stored in uint16_t for alignment)
 } LogFrame_t;
 
 /* ============================================================================
@@ -398,9 +407,36 @@ _Static_assert(sizeof(logger_config_t) == 32, "logger_config_t must be exactly 3
  * ============================================================================
  */
 
+/**
+ * @brief Frame builder state machine for incremental CRC8 computation
+ *
+ * Reduces maximum atomic operation latency from ~32 µs (monolithic CRC)
+ * to ~5 µs (per-step), enabling fast interrupt response while maintaining
+ * frame throughput. CRC8 computation is split into 4 independent steps.
+ *
+ * State Flow:
+ *   IDLE → BUILD → CRC_PART1 → CRC_PART2 → CRC_PART3 → CRC_PART4 → IDLE
+ *
+ * Timeline (typical, assuming 5ms Logger_Task() interval):
+ *   - t=0ms:   ADC ready, enter BUILD
+ *   - t=5ms:   Compute CRC part 1 (header + 134 bytes)
+ *   - t=10ms:  Compute CRC part 2 (128 bytes ADC)
+ *   - t=15ms:  Compute CRC part 3 (128 bytes ADC)
+ *   - t=20ms:  Compute CRC part 4 (128 bytes ADC + 120 bytes IMU), queue frame
+ *   - t=25ms:  SPI DMA transmission begins
+ *
+ * Each CRC step processes ~270 bytes @ ~2 cycles/byte = ~3 µs @ 168 MHz.
+ *
+ * @see crc_state_init_step(), crc_state_process_step() for implementation
+ * @see CRC_INCREMENTAL_DESIGN.md for detailed design document
+ */
 typedef enum {
-    FRAME_STATE_IDLE,    // Waiting for ADC block
-    FRAME_STATE_BUILD,   // Frame assembled, ready to queue
+    FRAME_STATE_IDLE,           // Waiting for ADC buffer to fill (256 samples ready)
+    FRAME_STATE_BUILD,          // Assemble frame: copy ADC/IMU, init CRC state (~5 µs)
+    FRAME_STATE_CRC_PART1,      // CRC computation: bytes 0-133 (header + 1st quarter ADC)
+    FRAME_STATE_CRC_PART2,      // CRC computation: bytes 134-261 (2nd quarter ADC)
+    FRAME_STATE_CRC_PART3,      // CRC computation: bytes 262-389 (3rd quarter ADC)
+    FRAME_STATE_CRC_PART4,      // CRC computation: bytes 390-517 (4th quarter ADC + IMU), finalize & queue
 } FrameState_t;
 
 /**
@@ -416,6 +452,24 @@ typedef enum {
     SPI_STATE_PACKET_SENT_COMPLETE, // TxCallback fired, ready to drain queue
 } SpiState_t;
 
+/**
+ * @brief CRC computation state for incremental frame CRC calculation
+ *
+ * Splits CRC8 calculation into 4 parts to reduce interrupt latency.
+ * Each part processes ~270 bytes of the ~1118 byte frame (~25 µs per part).
+ *
+ * Part boundaries (crc8 compute divides frame into 4 segments):
+ *   Part 1: header + 1st quarter ADC (6 + 128 bytes = 134 bytes)
+ *   Part 2: 2nd quarter ADC (128 bytes)
+ *   Part 3: 3rd quarter ADC + 1st quarter IMU (128 + 30 bytes = 158 bytes)
+ *   Part 4: 2nd-4th quarter IMU (90 bytes) + finalize
+ */
+typedef struct {
+    uint8_t crc_current;        // Running CRC value
+    uint32_t crc_offset;        // Current position in frame for next chunk
+    uint32_t crc_chunk_size;    // Bytes to process in current step
+} CrcState_t;
+
 typedef struct {
     int16_t adc[LOGGER_ADC_BLOCK_SIZE];        // Dequeued ADC samples
     ImuRawSample_t imu[LOGGER_IMU_BLOCK_SIZE]; // Dequeued IMU samples
@@ -423,6 +477,8 @@ typedef struct {
     uint16_t imu_count;
     uint32_t adc_ts_first;                      // Timestamp of first ADC sample
     FrameState_t state;
+    CrcState_t crc_state;                       // CRC incremental computation state
+    LogFrame_t *current_frame;                  // Pointer to frame being built (for CRC)
 } FrameBuilder_t;
 
 /* ============================================================================

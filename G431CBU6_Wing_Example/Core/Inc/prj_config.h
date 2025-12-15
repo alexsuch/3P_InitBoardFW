@@ -31,7 +31,7 @@ extern "C" {
  * Note: These frequencies are used for both accelerometer and gyroscope
  * ODR bits [7:4] in CTRL1_XL and CTRL2_G registers
  */
-#define LSM6DS3_SAMPLING_FREQ_HZ                      (104)  // Valid: 26, 52, 104, 208, 416, 833, 1666, 3332, 6664
+#define LSM6DS3_SAMPLING_FREQ_HZ                      (3332)  // Valid: 26, 52, 104, 208, 416, 833, 1666, 3332, 6664
 
 /* LSM6DS3 ODR Register Values (from datasheet CTRL1_XL[7:4] and CTRL2_G[7:4])
  * 0000 = Off
