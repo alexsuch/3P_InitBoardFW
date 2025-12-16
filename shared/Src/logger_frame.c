@@ -465,8 +465,8 @@ int j = 0;
                 
                 // Assemble frame header
                 frame->magic = LOGGER_FRAME_MAGIC;
-                frame->adc_timestamp = loggerStat.frame_ctx.builder.adc_ts_first;
                 frame->n_imu = loggerStat.frame_ctx.builder.imu_count;
+                frame->adc_timestamp = loggerStat.frame_ctx.builder.adc_ts_first;
                 
                 // Copy ADC block (LOGGER_ADC_BLOCK_SIZE samples, fixed)
                 memcpy(frame->adc, loggerStat.frame_ctx.builder.adc, LOGGER_ADC_BLOCK_SIZE * sizeof(int16_t));
@@ -476,13 +476,6 @@ int j = 0;
                     memcpy(frame->imu, 
                            loggerStat.frame_ctx.builder.imu, 
                            loggerStat.frame_ctx.builder.imu_count * sizeof(ImuRawSample_t));
-
-
-                        //    for (j = 0; j < loggerStat.frame_ctx.builder.imu_count; j++)
-                        //    {
-                        //         Test1Toggle();
-                        //         Test1Toggle();
-                        //    }
                     
                     // Zero out remaining IMU slots
                     if (loggerStat.frame_ctx.builder.imu_count < LOGGER_IMU_BLOCK_SIZE) {
@@ -495,10 +488,6 @@ int j = 0;
                     memset(frame->imu, 0, LOGGER_IMU_BLOCK_SIZE * sizeof(ImuRawSample_t));
                 }
                 
-            //Test1Toggle();
-            //Test1Toggle();
-
-
                 // Initialize CRC state machine (Part 1 of 4)
                 loggerStat.frame_ctx.builder.current_frame = frame;
                 loggerStat.frame_ctx.builder.crc_state.crc_current = 0x00;

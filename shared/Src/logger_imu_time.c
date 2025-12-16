@@ -88,6 +88,7 @@ void Logger_ImuRing_Init(void) {
  *
  * Effects:
  *   - Copies 12 bytes directly into buffer (zero ISR overhead)
+ *   - Captures and stores precise timestamp (TIM6 @ 100 kHz)
  *   - Increments count
  *   - If count > 50, discards oldest sample and increments overflow_count
  *
@@ -97,18 +98,21 @@ void Logger_ImuOnNewSample(const uint8_t *raw_data) {
     if (!raw_data) {
         return;
     }
-                Test2Toggle();
-            Test2Toggle();
+
+    uint32_t timestamp = Logger_GetTimestamp();  // Get TIM6 counter @ 100 kHz
+
     if (g_imu_buffer.count < 50) {
         // Buffer not full, add new sample
         memcpy(&g_imu_buffer.samples[g_imu_buffer.count].data[0],
                raw_data, 12);
+        g_imu_buffer.samples[g_imu_buffer.count].timestamp = timestamp;
         g_imu_buffer.count++;
     } else {
         // Buffer full, shift left and add new sample at end
         memmove(&g_imu_buffer.samples[0], &g_imu_buffer.samples[1],
                 49 * sizeof(ImuRawSample_t));
         memcpy(&g_imu_buffer.samples[49].data[0], raw_data, 12);
+        g_imu_buffer.samples[49].timestamp = timestamp;
         g_imu_buffer.overflow_count++;
     }
     
@@ -232,7 +236,7 @@ uint32_t Logger_ImuRing_Dequeue(ImuSample_t *out_buffer, uint32_t count)
         out_buffer[i].ax = (int16_t)(raw[6] | (raw[7] << 8));
         out_buffer[i].ay = (int16_t)(raw[8] | (raw[9] << 8));
         out_buffer[i].az = (int16_t)(raw[10] | (raw[11] << 8));
-        out_buffer[i].timestamp = 0;  // Assigned later by frame builder
+        out_buffer[i].timestamp = g_imu_buffer.samples[i].timestamp;
     }
     
     // Clear buffer after dequeue

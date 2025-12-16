@@ -36,7 +36,7 @@ extern "C" {
 
 #define LOGGER_FRAME_MAGIC              0x5A5A
 #define LOGGER_FRAME_QUEUE_SIZE         10
-#define LOGGER_IMU_BLOCK_SIZE           10
+#define LOGGER_IMU_BLOCK_SIZE           20
 /* LOGGER_ADC_BLOCK_SIZE defined in prj_config.h - typically 256 samples */
 
 /* CRC16 - Simple polynomial */
@@ -180,19 +180,18 @@ uint32_t Logger_AdcBuffer_GetFirstTimestamp(void);
  */
 
 /**
- * @brief Raw IMU sample (12 bytes from SPI buffer)
+ * @brief Raw IMU sample with timestamp (16 bytes)
  *
  * Data format from LSM6DS3 register read:
- *   Bytes 0-1:  OUTX_L_G, OUTX_H_G → gx (int16_t)
- *   Bytes 2-3:  OUTY_L_G, OUTY_H_G → gy (int16_t)
- *   Bytes 4-5:  OUTZ_L_G, OUTZ_H_G → gz (int16_t)
- *   Bytes 6-7:  OUTX_L_XL, OUTX_H_XL → ax (int16_t)
- *   Bytes 8-9:  OUTY_L_XL, OUTY_H_XL → ay (int16_t)
- *   Bytes 10-11: OUTZ_L_XL, OUTZ_H_XL → az (int16_t)
+ *   Bytes 0-11:  Raw 12 bytes from SPI (gx, gy, gz, ax, ay, az as int16_t each)
+ *   Bytes 12-15: timestamp (uint32_t) - TIM6 @ 100 kHz, captured when sample received
  */
-typedef struct {
-    uint8_t data[12];  // Raw 12 bytes from SPI (gx, gy, gz, ax, ay, az as int16_t each)
+typedef struct __attribute__((packed)) {
+    uint8_t data[12];       // Raw 12 bytes from SPI (gx, gy, gz, ax, ay, az as int16_t each)
+    uint32_t timestamp;     // Timestamp of this IMU sample (TIM6 @ 100 kHz, 10 µs resolution, 4 bytes)
 } ImuRawSample_t;
+
+_Static_assert(sizeof(ImuRawSample_t) == 16, "ImuRawSample_t must be 16 bytes");
 
 /**
  * @brief Initialize IMU linear buffer for sample capture
@@ -288,43 +287,44 @@ uint32_t Logger_ImuRing_GetOverflowCount(void);
 /**
  * @brief Frame format structure (fixed-size frame for efficient SPI transfer)
  *
- * Layout (little-endian, fixed 1118 bytes):
+ * Layout (little-endian, fixed 842 bytes):
  *   Bytes 0-1:       MAGIC_FRAME (0x5A5A)
- *   Bytes 2-3:       Frame counter (uint16_t, increments per frame)
- *   Bytes 4-5:       n_imu (uint16_t, number of IMU samples actually filled)
- *   Bytes 6-9:       timestamp (uint32_t, TIM6 counter @ 100 kHz of first ADC sample)
- *   Bytes 10-521:    adc[256] (256 × int16_t = 512 bytes)
- *   Bytes 522-641:   imu[LOGGER_IMU_BLOCK_SIZE] (10 × ImuRawSample_t = 10 × 12 = 120 bytes)
- *   Bytes 1120-1121: crc16 (CRC8 checksum, 8-bit value in uint16_t field)
+ *   Bytes 2-3:       n_imu (uint16_t, number of IMU samples actually filled, 0-20)
+ *   Bytes 4-7:       adc_timestamp (uint32_t, TIM6 counter @ 100 kHz of first ADC sample)
+ *   Bytes 8-519:     adc[256] (256 × int16_t = 512 bytes)
+ *   Bytes 520-839:   imu[LOGGER_IMU_BLOCK_SIZE] (20 × ImuRawSample_t = 20 × 16 = 320 bytes)
+ *   Bytes 840-841:   crc16 (CRC16 checksum)
  *
- * Size: Fixed 1122 bytes
- *   - Magic (2) + Counter (2) + n_imu (2) + Timestamp (4) = 10 bytes header
+ * Size: Fixed 842 bytes
+ *   - Magic (2) + n_imu (2) + adc_timestamp (4) = 8 bytes header
  *   - ADC block (256 × 2) = 512 bytes
- *   - IMU block (10 × 12) = 120 bytes
- *   - CRC8 (2 bytes field, 8-bit value) = 2 bytes
- *   - Total = 1122 bytes (fixed, DMA-friendly SPI transfer)
+ *   - IMU block (20 × 16) = 320 bytes (each sample includes 4B timestamp)
+ *   - CRC16 (2 bytes) = 2 bytes
+ *   - Total = 842 bytes (fixed, DMA-friendly SPI transfer)
  *
- * Note: n_imu field indicates how many of the LOGGER_IMU_BLOCK_SIZE (10) slots are filled.
- *       Unused IMU slots are zeroed. LOGGER_IMU_BLOCK_SIZE = 10 per Phase 3 configuration.
+ * Note: n_imu field indicates how many of the LOGGER_IMU_BLOCK_SIZE (20) slots are filled.
+ *       Unused IMU slots are zeroed. Each IMU sample has its own timestamp.
  *
  * CRC Computation (Incremental):
- *       The CRC8 is computed in 4 stages to reduce interrupt latency:
+ *       The CRC16 is computed in 4 stages to reduce interrupt latency:
  *       Part 1: bytes 0-133 (header + 1st quarter ADC)
  *       Part 2: bytes 134-261 (2nd quarter ADC)
  *       Part 3: bytes 262-389 (3rd quarter ADC)
- *       Part 4: bytes 390-1116 (4th quarter ADC + all IMU, excl. crc field)
+ *       Part 4: bytes 390-840 (4th quarter ADC + all IMU with timestamps, excl. crc field)
  *       Each stage takes ~3µs @ 168MHz, enabling fast interrupt response.
  *
- * Queue: 10 frames max (11.18 KB total)
+ * Queue: 10 frames max (~8.42 KB total)
  */
 typedef struct __attribute__((packed)) {
     uint16_t magic;           // 0x5A5A
-    uint16_t n_imu;           // Number of valid IMU samples (0-50)
-    uint32_t adc_timestamp;       // Timestamp of first ADC sample (TIM6 @ 100 kHz, every 10 µs)
+    uint16_t n_imu;           // Number of valid IMU samples (0-20)
+    uint32_t adc_timestamp;   // Timestamp of first ADC sample (TIM6 @ 100 kHz, every 10 µs)
     int16_t adc[256];         // Fixed 256 ADC samples
-    ImuRawSample_t imu[LOGGER_IMU_BLOCK_SIZE];   // Fixed 50 IMU raw samples (only first n_imu are valid)
-    uint16_t crc16;           // CRC8 checksum (8-bit value, stored in uint16_t for alignment)
+    ImuRawSample_t imu[LOGGER_IMU_BLOCK_SIZE];   // Fixed 20 IMU raw samples with timestamps (only first n_imu are valid)
+    uint16_t crc16;           // CRC16 checksum
 } LogFrame_t;
+
+_Static_assert(sizeof(LogFrame_t) == 842, "LogFrame_t must be 842 bytes");
 
 /* ============================================================================
  * IMU CONFIGURATION STRUCTURE (Phase 5 SPI - Embedded in logger_config_t)
