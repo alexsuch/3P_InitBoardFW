@@ -46,9 +46,6 @@ const uint32_t accShakeSqrtThreshold = ACC_SHAKE_SQRT_TRESHOLD;
 static uint64_t tmp32;
 #else
 static uint32_t tmp32;
-static int16_t x_tmp;
-static int16_t y_tmp;
-static int16_t z_tmp;
 #endif
 
 #if NET_DETECTION_ENABLE

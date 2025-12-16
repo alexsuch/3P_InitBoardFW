@@ -2173,7 +2173,7 @@ void App_InitRun(void)
 	memset(&sysStatus, 0u, sizeof(system_status_t));
 
 
-#if SPI_LOGGER_ENABLE
+#if (SPI_LOGGER_ENABLE == 1u)
 	Logger_Init();
 
 	/* Reset all blocks */
@@ -2378,7 +2378,7 @@ static bool App_UartConfigurationTask(void)
 
 void App_Task (void)
 {
-#if SPI_LOGGER_ENABLE
+#if (SPI_LOGGER_ENABLE == 1u)
 
 
 	Logger_Task();  // Phase 4: Frame builder - assembles LogFrame_t in unified queue

@@ -50,6 +50,45 @@ extern "C" {
 #define LOGGER_CONFIG_MAGIC             0xCAFE
 #define LOGGER_CONFIG_VERSION           1
 
+/* CRC8 Polynomial and table constants */
+#define CRC8_POLYNOMIAL                 0x07
+#define CRC8_INIT                       0x00
+#define CRC8_TABLE_SIZE                 256
+
+/* CRC Frame partitioning offsets (for low-latency frame assembly) */
+#define CRC_PART1_OFFSET                0
+#define CRC_PART1_SIZE                  134
+#define CRC_PART2_OFFSET                134
+#define CRC_PART2_SIZE                  128
+#define CRC_PART3_OFFSET                262
+#define CRC_PART3_SIZE                  128
+#define CRC_PART4_OFFSET                390
+
+/* IMU buffer constants */
+#define IMU_BUFFER_MAX_SAMPLES          50
+#define IMU_RAW_DATA_SIZE               12
+
+/* ADC buffer constants */
+#define ADC_BUFFER_SIZE                 256
+#define ADC_FRAME_READY_FLAG            1
+#define ADC_FRAME_EMPTY_FLAG            0
+
+/* ============================================================================
+ * INTERNAL DATA STRUCTURES (moved from logger_adc_buffer.c and logger_imu_time.c)
+ * ============================================================================
+ */
+
+/**
+ * @brief ADC linear buffer (from logger_adc_buffer.c)
+ */
+#define ADC_BUFFER_MAX_SAMPLES 256
+
+typedef struct {
+    int16_t samples[ADC_BUFFER_MAX_SAMPLES];  // ADC samples array (int16_t), max 256
+    volatile uint32_t ready;                  // 1 = buffer ready, 0 = processed
+    volatile uint32_t block_timestamp;        // Reference timestamp of first sample
+} AdcBuffer_t;
+
 /* ============================================================================
  * PHASE 1: TIMING FOUNDATION
  * ============================================================================
@@ -111,13 +150,10 @@ typedef struct {
  *   - TIM6 running @ 100 kHz
  *   - ADC2 DMA configured and running
  *
- * Effects:
- *   - Clears 256-sample buffer
- *   - Resets ready flag to 0
+ * Effects: Buffer is initialized automatically on first use
  *
- * Returns: void
+ * Note: Direct access via g_adc_buffer.samples and g_adc_buffer.ready
  */
-void Logger_AdcBuffer_Init(void);
 
 /**
  * @brief Check if new ADC buffer is ready (256 samples accumulated)
@@ -194,8 +230,17 @@ typedef struct __attribute__((packed)) {
 _Static_assert(sizeof(ImuRawSample_t) == 16, "ImuRawSample_t must be 16 bytes");
 
 /**
- * @brief Initialize IMU linear buffer for sample capture
+ * @brief IMU raw buffer (from logger_imu_time.c)
  *
+ * Contains up to 50 ImuRawSample_t structures collected from LSM6DS3 at ~104 Hz.
+ * Each sample includes 12 raw bytes (gyro + accel) plus 4-byte timestamp.
+ */
+typedef struct {
+    ImuRawSample_t samples[50];        // Raw sample buffer (50 samples max)
+    volatile uint32_t count;           // Current sample count (0..50)
+} ImuBuffer_t;
+ 
+/**
  * Prerequisites:
  *   - Logger_Timing_Init() completed (TIM6 running @ 100 kHz)
  *   - Logger_RingBuffer_Init() completed
@@ -255,29 +300,11 @@ const ImuRawSample_t *Logger_ImuRing_GetBuffer(uint32_t *out_count);
 /**
  * @brief Clear IMU buffer after frame assembly
  *
- * Call from Logger_Task() after processing current IMU buffer.
+ * Direct access: Set g_imu_buffer.count = 0 after processing current IMU buffer.
  * Resets sample counter to 0 for next batch of samples.
- *
- * Returns: void
  */
-void Logger_ImuRing_Clear(void);
 
-/**
- * @brief Get total IMU samples ever received (debug/statistics)
- *
- * Returns: uint32_t - Total count
- */
-uint32_t Logger_ImuRing_GetTotalSamples(void);
 
-/**
- * @brief Get IMU overflow count (debug/statistics)
- *
- * Overflow occurs when new sample arrives with buffer full (50 samples).
- * Latest sample kept, oldest discarded.
- *
- * Returns: uint32_t - Number of samples discarded due to buffer full
- */
-uint32_t Logger_ImuRing_GetOverflowCount(void);
 
 /* ============================================================================
  * PHASE 4: FRAME BUILDING (Implemented - logger_frame.c)
@@ -698,9 +725,10 @@ int Logger_GetNextFrame(LogFrame_t *out_frame);
  */
 /**
  * @brief Get number of frames pending SPI transmission
- * @return Count of frames queued in unified buffer awaiting transmission
+ * @return Count via direct access: (queue_write_idx - queue_read_idx) % LOGGER_FRAME_QUEUE_SIZE
  */
-uint32_t Logger_GetPendingCount(void);
+
+#if (SPI_LOGGER_ENABLE == 1u)
 
 /**
  * @brief Initialize SPI slave transmission pipeline
@@ -796,6 +824,8 @@ void Logger_SPI_StartListening(void);
  *   Called from LSM6DS3.c::Lsm6ds3_SetHitParams() (~line 338) after register writes verified
  */
 void Logger_OnAccelerometerReady(const imu_config_t *imu_cfg);
+
+#endif  // (SPI_LOGGER_ENABLE == 1u)
 
 #ifdef __cplusplus
 }

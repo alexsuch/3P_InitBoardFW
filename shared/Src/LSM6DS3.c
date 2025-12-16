@@ -490,7 +490,7 @@ static void Lsm6ds3_SetHitParams (void)
 			
 			/* Notify logger with fully populated structure */
 			Logger_OnAccelerometerReady(&imu_cfg);
-#endif /* SPI_LOGGER_ENABLE */
+#endif /* (SPI_LOGGER_ENABLE == 1u) */
 		}
 	}
 

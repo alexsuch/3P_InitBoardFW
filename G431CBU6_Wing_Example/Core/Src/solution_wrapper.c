@@ -391,22 +391,6 @@ acc_read_status_t SpiGetAccData (uint8_t *rd_data_ptr, app_cbk_fn cbk)
 	/* Pull CS LOW to start transaction */
 	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_RESET);
 
-#if 0
-	/* Send address + receive data in one synchronized transaction */
-	/* Takes ~10us @ 5MHz for 13 bytes */
-	if (HAL_SPI_TransmitReceive(&ACC_SPI_HANDLE, spi_wr_buff, rd_data_ptr, data_size + 1, 100) != HAL_OK)
-	{
-		HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
-		Acc_ReportStatus(SYSTEM_EVT_ERROR);
-		return ACC_READ_FAIL;  /* SPI transmission failed */
-	}
-
-	/* Raise CS to end transaction */
-	HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
-	
-	/* Call callback immediately in blocking mode */
-	Acc_ReportStatus(SYSTEM_EVT_READY);
-#else
 	/* Start DMA-based TransmitReceive */
 	/* Takes ~10us @ 5MHz for 13 bytes */
 	if (HAL_SPI_TransmitReceive_DMA(&ACC_SPI_HANDLE, spi_wr_buff, rd_data_ptr, data_size + 1) != HAL_OK)
@@ -414,7 +398,6 @@ acc_read_status_t SpiGetAccData (uint8_t *rd_data_ptr, app_cbk_fn cbk)
 		HAL_GPIO_WritePin(ACC_CS_PORT, ACC_CS_PIN, GPIO_PIN_SET);
 		return ACC_READ_FAIL;  /* DMA start failed */
 	}
-#endif
 
 	return ACC_READ_OK;  /* SPI read initiated successfully */
 }
@@ -515,16 +498,9 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc_ptr)
 	}
 }
 
-/* Logger SPI Slave Support - Enabled when SPI_LOGGER_ENABLE is defined */
-
-#if SPI_LOGGER_ENABLE
-
 // ============================================================================
 // Logger Subsystem: Frame Assembly, ADC Buffering, SPI Slave Communication
 // ============================================================================
-// This section provides frame builder initialization, ADC acquisition control,
-// and SPI slave protocol handling for transmitting sensor data to ESP32 master.
-// All functions below are only compiled when SPI_LOGGER_ENABLE is defined.
 
 /**
  * Global RX buffer – receives 5-byte command from master (cmd + 4 padding bytes).
@@ -532,6 +508,10 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc_ptr)
  * Persistent buffer for SPI DMA reception (not stack-allocated due to asynchronous DMA access).
  */
 static uint8_t logger_spi_rx_cmd_buffer[5] = {0};
+
+/* Logger SPI Slave Support - Enabled when SPI_LOGGER_ENABLE is defined */
+
+#if (SPI_LOGGER_ENABLE == 1u)
 
 /**
  * @brief Start ADC data acquisition and initialize logging subsystem
@@ -552,12 +532,6 @@ void Solution_LoggingStart(void)
 {
 	/* Initialize logger frame builder (Phase 4) */
 	Logger_FrameBuilder_Init();
-
-	/* Initialize logger ADC buffer (Phase 2) */
-	Logger_AdcBuffer_Init();
-
-	/* Initialize logger IMU ring buffer (Phase 3) */
-	Logger_ImuRing_Init();
 
 	/* Start LSM6DS3 IMU data polling */
 	Lsm6ds3_StartReadData();  
@@ -643,22 +617,6 @@ void Logger_SPI_Init(void) {
 }
 
 /**
- * @brief SPI2 RX Complete callback – master sent command byte
- * 
- * Called when master sends 5-byte command to trigger frame transmission.
- * Directly calls Logger_SPI_RxCallback with pointer to received command buffer.
- * RX will be re-armed in HAL_SPI_TransmitFrame functions after TX completes.
- */
-void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
-    if (hspi != &LOGGER_SPI_HANDLE) {
-        return;
-    }
-    
-    // Master sent command bytes – handle the request with buffer pointer
-    Logger_SPI_RxCallback(logger_spi_rx_cmd_buffer);
-}
-
-/**
  * @brief Arm SPI slave to listen for incoming command bytes from master
  * 
  * Call this once during initialization to start the SPI slave.
@@ -669,18 +627,39 @@ void Logger_SPI_StartListening(void) {
     HAL_SPI_Receive_IT(&LOGGER_SPI_HANDLE, logger_spi_rx_cmd_buffer, LOGGER_SPI_RX_COMMAND_SIZE);
 }
 
+#endif /* SPI_LOGGER_ENABLE */
+
+/**
+ * @brief SPI2 RX Complete callback – master sent command byte
+ * 
+ * Called when master sends 5-byte command to trigger frame transmission.
+ * When SPI_LOGGER_ENABLE is enabled, forwards to Logger_SPI_RxCallback.
+ * Otherwise, this is a no-op callback for HAL SPI RX interrupt.
+ */
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
+#if (SPI_LOGGER_ENABLE == 1u)
+    if (hspi != &LOGGER_SPI_HANDLE) {
+        return;
+    }
+    
+    // Master sent command bytes – handle the request with buffer pointer
+    Logger_SPI_RxCallback(logger_spi_rx_cmd_buffer);
+#endif
+}
+
 /**
  * @brief SPI2 TX Complete callback – HAL wrapper
  * 
  * Called by STM32 HAL when DMA transmission completes.
- * Forwards to Logger_SPI_TxCallback for application logic.
+ * When SPI_LOGGER_ENABLE is enabled, forwards to Logger_SPI_TxCallback.
+ * Otherwise, this is a no-op callback for HAL SPI TX interrupt.
  */
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
+#if (SPI_LOGGER_ENABLE == 1u)
     if (hspi != &LOGGER_SPI_HANDLE) {
         return;
     }
     
     Logger_SPI_TxCallback();
+#endif
 }
-
-#endif /* SPI_LOGGER_ENABLE */
