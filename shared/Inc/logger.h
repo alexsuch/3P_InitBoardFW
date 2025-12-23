@@ -24,54 +24,54 @@
 #ifndef SHARED_INC_LOGGER_H_
 #define SHARED_INC_LOGGER_H_
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include "prj_config.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-
-#define LOGGER_FRAME_MAGIC              0x5A5A
-#define LOGGER_FRAME_QUEUE_SIZE         10
-#define LOGGER_IMU_BLOCK_SIZE           20
+#define LOGGER_FRAME_MAGIC 0x5A5A
+#define LOGGER_FRAME_QUEUE_SIZE 10
+#define LOGGER_IMU_BLOCK_SIZE 20
 /* LOGGER_ADC_BLOCK_SIZE defined in prj_config.h - typically 256 samples */
 
 /* CRC16 - Simple polynomial */
-#define CRC16_POLY                      0xA001  // Reversed CRC16-CCITT
-#define CRC16_INIT                      0xFFFF
+#define CRC16_POLY 0xA001  // Reversed CRC16-CCITT
+#define CRC16_INIT 0xFFFF
 
 /* SPI Protocol - Command definitions */
-#define LOGGER_SPI_CMD_CONFIG           42      // Config command (0x2A) - retrieve logger_config_t
-#define LOGGER_SPI_RX_COMMAND_SIZE      5       // RX buffer size: command byte + 4 padding bytes
+#define LOGGER_SPI_CMD_CONFIG 42      // Config command (0x2A) - retrieve logger_config_t
+#define LOGGER_SPI_RX_COMMAND_SIZE 5  // RX buffer size: command byte + 4 padding bytes
 
-#define LOGGER_CONFIG_MAGIC             0xCAFE
-#define LOGGER_CONFIG_VERSION           1
+#define LOGGER_CONFIG_MAGIC 0xCAFE
+#define LOGGER_CONFIG_VERSION 1
 
 /* CRC8 Polynomial and table constants */
-#define CRC8_POLYNOMIAL                 0x07
-#define CRC8_INIT                       0x00
-#define CRC8_TABLE_SIZE                 256
+#define CRC8_POLYNOMIAL 0x07
+#define CRC8_INIT 0x00
+#define CRC8_TABLE_SIZE 256
 
 /* CRC Frame partitioning offsets (for low-latency frame assembly) */
-#define CRC_PART1_OFFSET                0
-#define CRC_PART1_SIZE                  134
-#define CRC_PART2_OFFSET                134
-#define CRC_PART2_SIZE                  128
-#define CRC_PART3_OFFSET                262
-#define CRC_PART3_SIZE                  128
-#define CRC_PART4_OFFSET                390
+#define CRC_PART1_OFFSET 0
+#define CRC_PART1_SIZE 134
+#define CRC_PART2_OFFSET 134
+#define CRC_PART2_SIZE 128
+#define CRC_PART3_OFFSET 262
+#define CRC_PART3_SIZE 128
+#define CRC_PART4_OFFSET 390
 
 /* IMU buffer constants */
-#define IMU_BUFFER_MAX_SAMPLES          50
-#define IMU_RAW_DATA_SIZE               12
+#define IMU_BUFFER_MAX_SAMPLES 50
+#define IMU_RAW_DATA_SIZE 12
 
 /* ADC buffer constants */
-#define ADC_BUFFER_SIZE                 256
-#define ADC_FRAME_READY_FLAG            1
-#define ADC_FRAME_EMPTY_FLAG            0
+#define ADC_BUFFER_SIZE 256
+#define ADC_FRAME_READY_FLAG 1
+#define ADC_FRAME_EMPTY_FLAG 0
 
 /* ============================================================================
  * INTERNAL DATA STRUCTURES (moved from logger_adc_buffer.c and logger_imu_time.c)
@@ -134,8 +134,8 @@ void Logger_TIM6_UpdateCallback(void);
  * Size: 6 bytes (uint16_t adc_value + uint32_t timestamp)
  */
 typedef struct {
-    uint16_t adc_value;    // 12-bit ADC reading (0-4095)
-    uint32_t timestamp;    // TIM3->CNT @ 100 kHz (every 10 µs)
+    uint16_t adc_value;  // 12-bit ADC reading (0-4095)
+    uint32_t timestamp;  // TIM3->CNT @ 100 kHz (every 10 µs)
 } AdcSample_t;
 
 /* ============================================================================
@@ -172,7 +172,7 @@ bool Logger_AdcBuffer_IsReady(void);
  * Note: Buffer remains valid until next ADC_COMPLETE interrupt.
  *       Call after checking Logger_AdcBuffer_IsReady() == 1.
  */
-const int16_t *Logger_AdcBuffer_GetBuffer(uint32_t *out_count);
+const int16_t* Logger_AdcBuffer_GetBuffer(uint32_t* out_count);
 
 /**
  * @brief Clear ready flag after processing current ADC buffer
@@ -200,7 +200,7 @@ void Logger_AdcBuffer_ClearReady(void);
  * @param dma_buffer: Pointer to DMA result buffer (256 samples)
  * @param count: Number of samples (256 expected)
  */
-void Logger_AdcBuffer_OnComplete(const uint16_t *dma_buffer, uint32_t count);
+void Logger_AdcBuffer_OnComplete(const uint16_t* dma_buffer, uint32_t count);
 
 /**
  * @brief Get reference timestamp for current ADC block (first sample)
@@ -223,8 +223,8 @@ uint32_t Logger_AdcBuffer_GetFirstTimestamp(void);
  *   Bytes 12-15: timestamp (uint32_t) - TIM6 @ 100 kHz, captured when sample received
  */
 typedef struct __attribute__((packed)) {
-    uint8_t data[12];       // Raw 12 bytes from SPI (gx, gy, gz, ax, ay, az as int16_t each)
-    uint32_t timestamp;     // Timestamp of this IMU sample (TIM6 @ 100 kHz, 10 µs resolution, 4 bytes)
+    uint8_t data[12];    // Raw 12 bytes from SPI (gx, gy, gz, ax, ay, az as int16_t each)
+    uint32_t timestamp;  // Timestamp of this IMU sample (TIM6 @ 100 kHz, 10 µs resolution, 4 bytes)
 } ImuRawSample_t;
 
 _Static_assert(sizeof(ImuRawSample_t) == 16, "ImuRawSample_t must be 16 bytes");
@@ -236,10 +236,10 @@ _Static_assert(sizeof(ImuRawSample_t) == 16, "ImuRawSample_t must be 16 bytes");
  * Each sample includes 12 raw bytes (gyro + accel) plus 4-byte timestamp.
  */
 typedef struct {
-    ImuRawSample_t samples[50];        // Raw sample buffer (50 samples max)
-    volatile uint32_t count;           // Current sample count (0..50)
+    ImuRawSample_t samples[50];  // Raw sample buffer (50 samples max)
+    volatile uint32_t count;     // Current sample count (0..50)
 } ImuBuffer_t;
- 
+
 /**
  * Prerequisites:
  *   - Logger_Timing_Init() completed (TIM6 running @ 100 kHz)
@@ -276,7 +276,7 @@ void Logger_ImuRing_Init(void);
  *       Logger_ImuOnNewSample(&lsm6ds3_Stat.rd_buff[1]);  // Skip dummy byte, pass 12 raw bytes
  *   #endif
  */
-void Logger_ImuOnNewSample(const uint8_t *raw_data);
+void Logger_ImuOnNewSample(const uint8_t* raw_data);
 
 /**
  * @brief Get current IMU buffer fill level
@@ -295,7 +295,7 @@ uint32_t Logger_ImuRing_GetCount(void);
  *
  * Note: Buffer ownership remains in logger; caller should copy if keeping data.
  */
-const ImuRawSample_t *Logger_ImuRing_GetBuffer(uint32_t *out_count);
+const ImuRawSample_t* Logger_ImuRing_GetBuffer(uint32_t* out_count);
 
 /**
  * @brief Clear IMU buffer after frame assembly
@@ -303,8 +303,6 @@ const ImuRawSample_t *Logger_ImuRing_GetBuffer(uint32_t *out_count);
  * Direct access: Set g_imu_buffer.count = 0 after processing current IMU buffer.
  * Resets sample counter to 0 for next batch of samples.
  */
-
-
 
 /* ============================================================================
  * PHASE 4: FRAME BUILDING (Implemented - logger_frame.c)
@@ -343,12 +341,12 @@ const ImuRawSample_t *Logger_ImuRing_GetBuffer(uint32_t *out_count);
  * Queue: 10 frames max (~8.42 KB total)
  */
 typedef struct __attribute__((packed)) {
-    uint16_t magic;           // 0x5A5A
-    uint16_t n_imu;           // Number of valid IMU samples (0-20)
-    uint32_t adc_timestamp;   // Timestamp of first ADC sample (TIM6 @ 100 kHz, every 10 µs)
-    int16_t adc[256];         // Fixed 256 ADC samples
-    ImuRawSample_t imu[LOGGER_IMU_BLOCK_SIZE];   // Fixed 20 IMU raw samples with timestamps (only first n_imu are valid)
-    uint16_t crc16;           // CRC16 checksum
+    uint16_t magic;                             // 0x5A5A
+    uint16_t n_imu;                             // Number of valid IMU samples (0-20)
+    uint32_t adc_timestamp;                     // Timestamp of first ADC sample (TIM6 @ 100 kHz, every 10 µs)
+    int16_t adc[256];                           // Fixed 256 ADC samples
+    ImuRawSample_t imu[LOGGER_IMU_BLOCK_SIZE];  // Fixed 20 IMU raw samples with timestamps (only first n_imu are valid)
+    uint16_t crc16;                             // CRC16 checksum
 } LogFrame_t;
 
 _Static_assert(sizeof(LogFrame_t) == 842, "LogFrame_t must be 842 bytes");
@@ -369,35 +367,35 @@ _Static_assert(sizeof(LogFrame_t) == 842, "LogFrame_t must be 842 bytes");
  */
 typedef struct __attribute__((packed)) {
     // Offset 0-3: Presence and identification (4 bytes)
-    uint8_t accel_present;          // 1 if accelerometer enabled (ODR > 0), 0 otherwise
-    uint8_t gyro_present;           // 1 if gyroscope enabled (ODR > 0), 0 otherwise
-    uint8_t chip_id;                // WHO_AM_I register value (0x69 for LSM6DS3)
-    uint8_t reserved_pad;           // Padding for alignment
+    uint8_t accel_present;  // 1 if accelerometer enabled (ODR > 0), 0 otherwise
+    uint8_t gyro_present;   // 1 if gyroscope enabled (ODR > 0), 0 otherwise
+    uint8_t chip_id;        // WHO_AM_I register value (0x69 for LSM6DS3)
+    uint8_t reserved_pad;   // Padding for alignment
 
     // Offset 4-7: Output Data Rates (4 bytes)
-    uint16_t accel_odr_hz;          // Decoded from CTRL1_XL[7:4] (0-6664 Hz)
-    uint16_t gyro_odr_hz;           // Decoded from CTRL2_G[7:4] (0-6664 Hz)
+    uint16_t accel_odr_hz;  // Decoded from CTRL1_XL[7:4] (0-6664 Hz)
+    uint16_t gyro_odr_hz;   // Decoded from CTRL2_G[7:4] (0-6664 Hz)
 
     // Offset 8-11: Full-scale ranges (4 bytes)
-    uint8_t accel_range_g;          // Decoded from CTRL1_XL[3:2]: 2, 4, 8, or 16 G
-    uint8_t reserved_align;         // Alignment byte for uint16_t gyro_range_dps
-    uint16_t gyro_range_dps;        // Decoded from CTRL2_G[3:2]: 245, 500, 1000, or 2000 DPS
+    uint8_t accel_range_g;    // Decoded from CTRL1_XL[3:2]: 2, 4, 8, or 16 G
+    uint8_t reserved_align;   // Alignment byte for uint16_t gyro_range_dps
+    uint16_t gyro_range_dps;  // Decoded from CTRL2_G[3:2]: 245, 500, 1000, or 2000 DPS
 
     // Offset 12-16: Control register snapshots (5 bytes)
-    uint8_t reserved0;              // CTRL1_XL (0x10) snapshot - Accel ODR + FS
-    uint8_t reserved1;              // CTRL2_G (0x11) snapshot - Gyro ODR + FS
-    uint8_t reserved2;              // CTRL3_C (0x12) snapshot - Common control (BDU, IF_INC)
-    uint8_t reserved3;              // CTRL7_G (0x16) snapshot - Gyro HP mode
-    uint8_t reserved4;              // CTRL4_C (0x13) snapshot - DRDY control
+    uint8_t reserved0;  // CTRL1_XL (0x10) snapshot - Accel ODR + FS
+    uint8_t reserved1;  // CTRL2_G (0x11) snapshot - Gyro ODR + FS
+    uint8_t reserved2;  // CTRL3_C (0x12) snapshot - Common control (BDU, IF_INC)
+    uint8_t reserved3;  // CTRL7_G (0x16) snapshot - Gyro HP mode
+    uint8_t reserved4;  // CTRL4_C (0x13) snapshot - DRDY control
 
     // Offset 17-23: Reserved for future expansion (7 bytes)
-    uint8_t reserved5;              // Future: Additional sensor parameters
-    uint8_t reserved6;              // Future: LIS2DH12 or other IMU support
-    uint8_t reserved7;              // Future: Expansion slot
-    uint8_t reserved8;              // Future: Expansion slot
-    uint8_t reserved9;              // Future: Expansion slot
-    uint8_t reserved10;             // Future: Expansion slot
-    uint8_t reserved11;             // Future: Expansion slot
+    uint8_t reserved5;   // Future: Additional sensor parameters
+    uint8_t reserved6;   // Future: LIS2DH12 or other IMU support
+    uint8_t reserved7;   // Future: Expansion slot
+    uint8_t reserved8;   // Future: Expansion slot
+    uint8_t reserved9;   // Future: Expansion slot
+    uint8_t reserved10;  // Future: Expansion slot
+    uint8_t reserved11;  // Future: Expansion slot
 } imu_config_t;
 
 _Static_assert(sizeof(imu_config_t) == 24, "imu_config_t must be exactly 24 bytes");
@@ -416,15 +414,15 @@ _Static_assert(sizeof(imu_config_t) == 24, "imu_config_t must be exactly 24 byte
  */
 
 typedef struct __attribute__((packed)) {
-    uint16_t magic;                 // 0xCAFE — validity check (2B)
-    uint16_t version;               // Protocol version (2B)
+    uint16_t magic;    // 0xCAFE — validity check (2B)
+    uint16_t version;  // Protocol version (2B)
 
     // --- Core ADC parameters (4B) ---
-    uint16_t adc_sample_rate_khz;    // Sampling frequency kHz (2B)
-    uint16_t adc_block_size;        // Samples per frame (2B)
+    uint16_t adc_sample_rate_khz;  // Sampling frequency kHz (2B)
+    uint16_t adc_block_size;       // Samples per frame (2B)
 
     // --- Extended IMU configuration (24B) ---
-    imu_config_t imu_config;        // Nested IMU config structure
+    imu_config_t imu_config;  // Nested IMU config structure
 } logger_config_t;
 
 _Static_assert(sizeof(logger_config_t) == 32, "logger_config_t must be exactly 32 bytes");
@@ -458,25 +456,25 @@ _Static_assert(sizeof(logger_config_t) == 32, "logger_config_t must be exactly 3
  * @see CRC_INCREMENTAL_DESIGN.md for detailed design document
  */
 typedef enum {
-    FRAME_STATE_IDLE,           // Waiting for ADC buffer to fill (256 samples ready)
-    FRAME_STATE_BUILD,          // Assemble frame: copy ADC/IMU, init CRC state (~5 µs)
-    FRAME_STATE_CRC_PART1,      // CRC computation: bytes 0-133 (header + 1st quarter ADC)
-    FRAME_STATE_CRC_PART2,      // CRC computation: bytes 134-261 (2nd quarter ADC)
-    FRAME_STATE_CRC_PART3,      // CRC computation: bytes 262-389 (3rd quarter ADC)
-    FRAME_STATE_CRC_PART4,      // CRC computation: bytes 390-517 (4th quarter ADC + IMU), finalize & queue
+    FRAME_STATE_IDLE,       // Waiting for ADC buffer to fill (256 samples ready)
+    FRAME_STATE_BUILD,      // Assemble frame: copy ADC/IMU, init CRC state (~5 µs)
+    FRAME_STATE_CRC_PART1,  // CRC computation: bytes 0-133 (header + 1st quarter ADC)
+    FRAME_STATE_CRC_PART2,  // CRC computation: bytes 134-261 (2nd quarter ADC)
+    FRAME_STATE_CRC_PART3,  // CRC computation: bytes 262-389 (3rd quarter ADC)
+    FRAME_STATE_CRC_PART4,  // CRC computation: bytes 390-517 (4th quarter ADC + IMU), finalize & queue
 } FrameState_t;
 
 /**
  * @brief SPI transmission state machine for queue draining
- * 
+ *
  * IDLE:                  No transmission in progress, can start new transfers
  * PACKET_SENT:           DMA transmission initiated, waiting for TxCallback
  * PACKET_SENT_COMPLETE:  TxCallback completed, Logger_Task() should drain queue
  */
 typedef enum {
-    SPI_STATE_IDLE,                 // Initial state, ready for new transfers
-    SPI_STATE_PACKET_SENT,          // Transmission started, waiting for DMA complete
-    SPI_STATE_PACKET_SENT_COMPLETE, // TxCallback fired, ready to drain queue
+    SPI_STATE_IDLE,                  // Initial state, ready for new transfers
+    SPI_STATE_PACKET_SENT,           // Transmission started, waiting for DMA complete
+    SPI_STATE_PACKET_SENT_COMPLETE,  // TxCallback fired, ready to drain queue
 } SpiState_t;
 
 /**
@@ -492,20 +490,20 @@ typedef enum {
  *   Part 4: 2nd-4th quarter IMU (90 bytes) + finalize
  */
 typedef struct {
-    uint8_t crc_current;        // Running CRC value
-    uint32_t crc_offset;        // Current position in frame for next chunk
-    uint32_t crc_chunk_size;    // Bytes to process in current step
+    uint8_t crc_current;      // Running CRC value
+    uint32_t crc_offset;      // Current position in frame for next chunk
+    uint32_t crc_chunk_size;  // Bytes to process in current step
 } CrcState_t;
 
 typedef struct {
-    int16_t adc[LOGGER_ADC_BLOCK_SIZE];        // Dequeued ADC samples
-    ImuRawSample_t imu[LOGGER_IMU_BLOCK_SIZE]; // Dequeued IMU samples
+    int16_t adc[LOGGER_ADC_BLOCK_SIZE];         // Dequeued ADC samples
+    ImuRawSample_t imu[LOGGER_IMU_BLOCK_SIZE];  // Dequeued IMU samples
     uint16_t adc_count;
     uint16_t imu_count;
-    uint32_t adc_ts_first;                      // Timestamp of first ADC sample
+    uint32_t adc_ts_first;  // Timestamp of first ADC sample
     FrameState_t state;
-    CrcState_t crc_state;                       // CRC incremental computation state
-    LogFrame_t *current_frame;                  // Pointer to frame being built (for CRC)
+    CrcState_t crc_state;       // CRC incremental computation state
+    LogFrame_t* current_frame;  // Pointer to frame being built (for CRC)
 } FrameBuilder_t;
 
 /* ============================================================================
@@ -514,15 +512,15 @@ typedef struct {
  */
 
 typedef struct {
-    FrameBuilder_t builder;                              // Active frame builder
-    LogFrame_t frame_queue[LOGGER_FRAME_QUEUE_SIZE];     // 10 complete frames (Phase 4+5 unified queue)
+    FrameBuilder_t builder;                           // Active frame builder
+    LogFrame_t frame_queue[LOGGER_FRAME_QUEUE_SIZE];  // 10 complete frames (Phase 4+5 unified queue)
     volatile uint32_t queue_write_idx;
     volatile uint32_t queue_read_idx;
     uint16_t frame_counter;
     uint32_t stats_frames_built;
     uint32_t stats_frames_dropped;
-    volatile uint32_t spi_pending_count;                 // Track frames pending SPI transmission
-    volatile SpiState_t spi_state;                       // SPI transmission state machine
+    volatile uint32_t spi_pending_count;  // Track frames pending SPI transmission
+    volatile SpiState_t spi_state;        // SPI transmission state machine
 } FrameContext_t;
 
 /* ============================================================================
@@ -547,11 +545,11 @@ typedef struct {
  *       for direct SPI reception without unnecessary indirection.
  */
 typedef struct {
-    FrameContext_t frame_ctx;                      // Frame builder state + queue
-    logger_config_t config;                        // Configuration structure
-    LogFrame_t tx_frame;                           // TX buffer for SPI DMA
-    uint8_t rx_cmd;                                // Extracted command byte
-    volatile uint8_t config_sent;                  // 1 = config just sent, skip one drain cycle
+    FrameContext_t frame_ctx;      // Frame builder state + queue
+    logger_config_t config;        // Configuration structure
+    LogFrame_t tx_frame;           // TX buffer for SPI DMA
+    uint8_t rx_cmd;                // Extracted command byte
+    volatile uint8_t config_sent;  // 1 = config just sent, skip one drain cycle
 } logger_status_t;
 
 /* ============================================================================
@@ -657,11 +655,7 @@ uint32_t Logger_Task(void);
  *   - Advances read pointer (frame removed from queue)
  *   - Called from Phase 5 SPI DMA transmission handler
  */
-int Logger_GetNextFrame(LogFrame_t *out_frame);
-
-
-
-
+int Logger_GetNextFrame(LogFrame_t* out_frame);
 
 /* ============================================================================
  * UTILITY: Compiler guard for SPI_LOGGER_ENABLE
@@ -751,7 +745,7 @@ void Logger_Init(void);
  *
  * @note Called from SPI2 interrupt context; keep execution time minimal
  */
-void Logger_SPI_RxCallback(const uint8_t *rx_buffer);
+void Logger_SPI_RxCallback(const uint8_t* rx_buffer);
 
 /**
  * @brief SPI Slave TX Complete callback – handle transmission completion
@@ -785,7 +779,7 @@ void Logger_GPIO_SetReady(bool ready);
  * @note Blocking transfer; function returns when transmission completes
  * @note Automatically manages GPIO ready signal and re-arms RX
  */
-void Logger_SPI_Transmit(const uint8_t *buffer, uint16_t size);
+void Logger_SPI_Transmit(const uint8_t* buffer, uint16_t size);
 
 /**
  * @brief Initialize SPI2 slave and NVIC interrupt
@@ -823,7 +817,7 @@ void Logger_SPI_StartListening(void);
  * Integration point:
  *   Called from LSM6DS3.c::Lsm6ds3_SetHitParams() (~line 338) after register writes verified
  */
-void Logger_OnAccelerometerReady(const imu_config_t *imu_cfg);
+void Logger_OnAccelerometerReady(const imu_config_t* imu_cfg);
 
 #endif  // (SPI_LOGGER_ENABLE == 1u)
 

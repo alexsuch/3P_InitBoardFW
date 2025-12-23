@@ -1,8 +1,8 @@
 #pragma once
 
+#include <init_brd.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <init_brd.h>
 
 // MSP Protocol feature toggles
 #define MSP_V2_ENABLE 0  // Set to 1 to enable MSP v2 support
@@ -11,7 +11,7 @@
 // MSP v2 Protocol constants
 #define MSP_V2_HEADER_SIZE 5
 #define MSP_V2_CRC_SIZE 2
-#endif // MSP_V2_ENABLE
+#endif  // MSP_V2_ENABLE
 
 #define MSP_V2_MAX_PAYLOAD_SIZE 255
 
@@ -22,15 +22,15 @@
 #define MSP_SET_NAME_MAX_LENGTH 16
 
 // OSD Message formatting constants
-#define OSD_MAX_MESSAGE_LENGTH          16      // Maximum OSD message length (chars)
-#define OSD_MIN_BUFFER_SIZE             17      // Minimum buffer size (16 + null terminator)
-#define OSD_TIMER_MAX_VALUE             999     // Maximum timer value (3 digits)
-#define OSD_TIMER_DIGITS                3       // Number of digits for timer display
-#define OSD_TIMER_STRING_LENGTH         6       // Timer string length "S:030s" = 6 chars
-#define OSD_MIN_SPACES_FOR_ALIGNMENT    1       // Minimum spaces needed for alignment
-#define OSD_BOOM_MESSAGE_LENGTH         7       // "BOOM!!!" length
-#define OSD_ERROR_PREFIX_LENGTH         5       // "ERR: " prefix length
-#define OSD_ERROR_BLINK_SYMBOL          "_"     // Symbol used for error blinking effect
+#define OSD_MAX_MESSAGE_LENGTH 16       // Maximum OSD message length (chars)
+#define OSD_MIN_BUFFER_SIZE 17          // Minimum buffer size (16 + null terminator)
+#define OSD_TIMER_MAX_VALUE 999         // Maximum timer value (3 digits)
+#define OSD_TIMER_DIGITS 3              // Number of digits for timer display
+#define OSD_TIMER_STRING_LENGTH 6       // Timer string length "S:030s" = 6 chars
+#define OSD_MIN_SPACES_FOR_ALIGNMENT 1  // Minimum spaces needed for alignment
+#define OSD_BOOM_MESSAGE_LENGTH 7       // "BOOM!!!" length
+#define OSD_ERROR_PREFIX_LENGTH 5       // "ERR: " prefix length
+#define OSD_ERROR_BLINK_SYMBOL "_"      // Symbol used for error blinking effect
 
 // OSD Message LUT (Lookup Table) indices
 typedef enum {
@@ -72,11 +72,10 @@ typedef struct {
     uint16_t payload_size;
     uint16_t crc;
 } msp_v2_packet_t;
-#endif // MSP_V2_ENABLE
+#endif  // MSP_V2_ENABLE
 
-typedef struct
-{
-	bool update_status;
+typedef struct {
+    bool update_status;
     bool error_blink_state;  // Flag for error message blinking (true = show error, false = show empty)
 
     uint8_t tx_buffer[64];
@@ -85,7 +84,7 @@ typedef struct
     // Callback function and system state pointer
     app_ext_cbk_fn system_callback;
     init_board_system_info_t* system_info;  // Pointer to system state data
-}mspOsdStatus_t;
+} mspOsdStatus_t;
 
 #if MSP_V2_ENABLE
 /**
@@ -100,7 +99,7 @@ typedef struct
  * @return true if encoding successful, false otherwise
  * @note The generated status string must not exceed 16 characters (MSP_SET_NAME limit)
  */
-bool msp_osd_encode_bomb_status_v2(uint8_t armed, uint16_t safeTime, uint16_t selfDestroyTime, uint8_t *buffer, uint16_t buffer_size, uint16_t *packet_size);
+bool msp_osd_encode_bomb_status_v2(uint8_t armed, uint16_t safeTime, uint16_t selfDestroyTime, uint8_t* buffer, uint16_t buffer_size, uint16_t* packet_size);
 
 /**
  * @brief Calculate MSP v2 CRC16 checksum
@@ -109,7 +108,7 @@ bool msp_osd_encode_bomb_status_v2(uint8_t armed, uint16_t safeTime, uint16_t se
  * @param length Length of data
  * @return CRC16 checksum
  */
-uint16_t msp_osd_calculate_crc16_v2(const uint8_t *data, uint16_t length);
+uint16_t msp_osd_calculate_crc16_v2(const uint8_t* data, uint16_t length);
 
 /**
  * @brief Validate MSP v2 packet structure and CRC
@@ -118,8 +117,8 @@ uint16_t msp_osd_calculate_crc16_v2(const uint8_t *data, uint16_t length);
  * @param packet_size Size of the packet
  * @return true if packet is valid, false otherwise
  */
-bool msp_osd_validate_packet_v2(const uint8_t *packet, uint16_t packet_size);
-#endif // MSP_V2_ENABLE
+bool msp_osd_validate_packet_v2(const uint8_t* packet, uint16_t packet_size);
+#endif  // MSP_V2_ENABLE
 
 /**
  * @brief Calculate MSP v1 XOR checksum (for compatibility with Reefwing-MSP)
@@ -128,7 +127,7 @@ bool msp_osd_validate_packet_v2(const uint8_t *packet, uint16_t packet_size);
  * @param length Length of data
  * @return XOR checksum
  */
-uint8_t msp_osd_calculate_xor_checksum_v1(const uint8_t *data, uint16_t length);
+uint8_t msp_osd_calculate_xor_checksum_v1(const uint8_t* data, uint16_t length);
 
 /**
  * @brief Encode MSP v1 packet with OSD status message based on system_info
@@ -143,7 +142,7 @@ uint8_t msp_osd_calculate_xor_checksum_v1(const uint8_t *data, uint16_t length);
  * @param packet_size Output parameter for the actual packet size
  * @return true if encoding successful, false otherwise
  */
-bool msp_osd_encode_bomb_status_v1(const init_board_system_info_t* system_info, uint8_t *buffer, uint16_t buffer_size, uint16_t *packet_size);
+bool msp_osd_encode_bomb_status_v1(const init_board_system_info_t* system_info, uint8_t* buffer, uint16_t buffer_size, uint16_t* packet_size);
 
 /**
  * @brief OSD MSP task to handle periodic updates

@@ -1,0 +1,15 @@
+BasedOnStyle: Google
+UseTab: Never
+TabWidth: 4
+IndentWidth: 4
+ColumnLimit: 160
+SortIncludes: true
+BreakBeforeBraces: Attach
+AllowAllParametersOfDeclarationOnNextLine: true
+AlignAfterOpenBracket: DontAlign
+BinPackArguments: false
+AllowShortBlocksOnASingleLine: Empty
+KeepEmptyLinesAtTheStartOfBlocks: false
+SpaceBeforeParens: ControlStatements
+SpacesInContainerLiterals: true
+PointerAlignment: Left
