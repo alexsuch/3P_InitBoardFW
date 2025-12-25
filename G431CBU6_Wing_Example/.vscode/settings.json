@@ -11,5 +11,9 @@
   },
   "clang-format.enable": true,
   "clang-format.style": "file",
-  "clang-format.fallbackStyle": "Google"
+  "clang-format.fallbackStyle": "Google",
+  "cmake.cmakePath": "cube-cmake",
+  "cmake.configureArgs": ["-DCMAKE_COMMAND=cube-cmake"],
+
+  "cortex-debug.stm32cubeprogrammer.windows": "c:/ST/STM32CubeCLT_1.20.0/STM32CubeProgrammer/bin"
 }
