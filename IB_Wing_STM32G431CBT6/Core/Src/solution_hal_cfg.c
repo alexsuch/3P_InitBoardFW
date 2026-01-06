@@ -86,16 +86,18 @@ void Solution_HalConfigure(void) {
     if (HalConfigure_PumpPwmTimer_Init() != HAL_OK) {
         Error_Handler();
     }
-
-    /* Initialize VUSA UART */
-    if (HalConfigure_VusaUart_Init() != HAL_OK) {
-        Error_Handler();
-    }
 #endif
     /* Initialize Main UART */
     if (HalConfigure_MainUart_Init() != HAL_OK) {
         Error_Handler();
     }
+
+#if (SPI_LOGGER_ENABLE == 0)
+    /* Initialize VUSA UART (only when not using Logger mode) */
+    if (HalConfigure_VusaUart_Init() != HAL_OK) {
+        Error_Handler();
+    }
+#endif
 
     /* Initialize ADC2 */
     if (HalConfigure_Adc2_Init() != HAL_OK) {
@@ -156,6 +158,9 @@ static HAL_StatusTypeDef HalConfigure_Gpio_Init(void) {
 #if (SPI_LOGGER_ENABLE == 0)
     /* GPIOB outputs: LED_ERROR, LED_STATUS, BOOM_LOW_SIDE_OUT_1, BOOM_LOW_SIDE_OUT_2 - all LOW */
     HAL_GPIO_WritePin(GPIOB, LED_ERROR_OUT_PIN | LED_STATUS_OUT_PIN | BOOM_LOW_SIDE_OUT_1_PIN | BOOM_LOW_SIDE_OUT_2_PIN, GPIO_PIN_RESET);
+#else
+    /* GPIOB outputs: LOGGER_SPI_DATA_RDY - initially LOW (no data ready) */
+    HAL_GPIO_WritePin(LOGGER_SPI_DATA_RDY_PORT, LOGGER_SPI_DATA_RDY_PIN, GPIO_PIN_RESET);
 #endif
 
     /* ========== Configure GPIOA Output Pins ========== */
@@ -166,13 +171,22 @@ static HAL_StatusTypeDef HalConfigure_Gpio_Init(void) {
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 #if (SPI_LOGGER_ENABLE == 0)
-    /* ========== Configure GPIOB Output Pins ========== */
+    /* ========== Configure GPIOB Output Pins (standard detonation mode) ========== */
     /* Configure LED_ERROR_OUT (PB1), LED_STATUS_OUT (PB2), BOOM_LOW_SIDE_OUT_2 (PB12), BOOM_LOW_SIDE_OUT_1 (PB13) */
     GPIO_InitStruct.Pin = LED_ERROR_OUT_PIN | LED_STATUS_OUT_PIN | BOOM_LOW_SIDE_OUT_2_PIN | BOOM_LOW_SIDE_OUT_1_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+#else
+    /* ========== Configure GPIOB Output Pins (logger mode) ========== */
+    /* When SPI_LOGGER_ENABLE: PB11 is used for VUSA UART RX (configured in HalConfigure_VusaUart_Init)
+       Configure LOGGER_SPI_DATA_RDY (PB9) as output push-pull for Logger ready signal */
+    GPIO_InitStruct.Pin = LOGGER_SPI_DATA_RDY_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(LOGGER_SPI_DATA_RDY_PORT, &GPIO_InitStruct);
 #endif
 
     /* ========== Configure Input Pins ========== */

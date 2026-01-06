@@ -1025,6 +1025,9 @@ void Logger_SPI_RxCallback(const uint8_t* rx_buffer) {
         // Next drain cycle will skip, then transition to frame mode
         loggerStat.config_sent = 1;
 
+        Test1Toggle();
+        Test1Toggle();
+
         // Start DMA transmission of config and mark state
         Logger_SPI_Transmit((uint8_t*)&loggerStat.tx_frame, sizeof(logger_config_t));
         loggerStat.frame_ctx.spi_state = SPI_STATE_PACKET_SENT;

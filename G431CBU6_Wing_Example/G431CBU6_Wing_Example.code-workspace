@@ -5,10 +5,15 @@
       "path": "."
     },
     {
+      "name": "IB_Wing_STM32G431CBT6",
+      "path": "../IB_Wing_STM32G431CBT6"
+    },
+    {
       "name": "shared",
       "path": "../shared"
     },
     {
+      "name": "logger",
       "path": "../../3p-logger-next/logger"
     }
   ],
@@ -18,6 +23,7 @@
       "--query-driver=${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/13.3.1+st.9/bin/arm-none-eabi-gcc.exe",
       "--query-driver=${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/13.3.1+st.9/bin/arm-none-eabi-g++.exe"
     ],
-    "stm32cube-ide-clangd.path": "cube"
+    "stm32cube-ide-clangd.path": "cube",
+    "powershell.cwd": "IB_Wing_STM32G431CBT6"
   }
 }

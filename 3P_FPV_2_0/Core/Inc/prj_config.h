@@ -140,7 +140,7 @@ extern "C" {
 #else //RELEASE CONFIGURATION !!!!!!!!!
 /*-------------------------- BUILD MACROS -----------------------------------------*/
 #define CONTROL_MODE                                  (PWM_CTRL_SUPP)
-#define VBAT_MEASURE_FEATURE                          (1u)
+#define VBAT_MEASURE_FEATURE                          (0u) // RELEASE VALUE - 1u TODO OSAV CHANGE!!!!
 #define START_UP_DELAY_ENABLE                         (1u)
 #define UART_ENABLE                                   (1u)
 #define ACC_SUPPORTED_ENABLE                          (1u)
@@ -160,8 +160,8 @@ extern "C" {
 #define LSM6DS3_ACC_ENABLE                            (0u)
 #define ACC_NO_DIVIDE_ENABLE                          (1u)
 
-#define ACC_HIT_THRESHOLD_MG                          (12000u)  // units in mili G //RELEASE VALUE - 12G - 12000u
-#define ACC_BUFF_SIZE                                 (6u) //RELEASE VALUE - WINDOW SIZE = 6u
+#define ACC_HIT_THRESHOLD_MG                          (7000u)  // units in mili G //RELEASE VALUE - 12G - 12000u TODO OSAV CHANGE!!!!
+#define ACC_BUFF_SIZE                                 (3u) //RELEASE VALUE - WINDOW SIZE = 6u TODO OSAV CHANGE!!!!
 
 #define NET_DETECTION_ENABLE                          (1u)
 #define ACC_NET_BUFF_SIZE                             (100u)
