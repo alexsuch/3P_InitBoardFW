@@ -788,11 +788,17 @@ static void App_StickCbk(system_evt_t evt, uint32_t usr_data) {
 /***************************************** MAVLINK CONTROL ********************************************************/
 #if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 static bool App_MavlinkIsAble2Arm(void) {
-    return (sysStatus.sys_info.prearm_flag != 0) && (sysStatus.arm_enabled != false) &&
+    return (sysStatus.sys_info.prearm_flag != 0) &&
 #if ACC_SHAKE_DETECTION_ENABLE
            (sysStatus.sys_info.shake_detected != 0) &&
 #endif /* ACC_SHAKE_DETECTION_ENABLE */
-           (sysStatus.sys_info.speed_altitude_flag != 0);
+#if FLIGHT_DETECTION_ENABLE
+           (sysStatus.sys_info.is_flying != 0) &&
+#endif /* FLIGHT_DETECTION_ENABLE */
+#if FLIGHT_SPEED_ALTITUDE_DETECTION_ENABLE
+           (sysStatus.sys_info.speed_altitude_flag != 0) &&
+#endif /* FLIGHT_SPEED_ALTITUDE_DETECTION_ENABLE */
+           (sysStatus.arm_enabled != false);
 }
 
 static void App_MavlinkFlightParamsTimerCbk(uint8_t timer_id) {
@@ -938,6 +944,7 @@ static uint8_t App_MavlinkCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr
                 }
                 break;
 
+#if FLIGHT_SPEED_ALTITUDE_DETECTION_ENABLE
             case MAVLINK_EVT_SPEED_RECEIVED:
                 // Speed data received from autopilot
                 if (usr_ptr != NULL) {
@@ -957,7 +964,25 @@ static uint8_t App_MavlinkCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr
                     App_MavlinkFlightParamsCheck();
                 }
                 break;
+#endif /* FLIGHT_SPEED_ALTITUDE_DETECTION_ENABLE */
 
+#if FLIGHT_DETECTION_ENABLE
+            case MAVLINK_EVT_AUTOPILOT_FLYING:
+                // Autopilot is in flight (IN_AIR, TAKEOFF, or LANDING state)
+                sysStatus.sys_info.is_flying = 1;
+                /* Try to arm and start charging */
+                App_MavlinkTry2Arm();
+                break;
+
+            case MAVLINK_EVT_AUTOPILOT_LANDED:
+                // Autopilot is on ground (ON_GROUND state)
+                sysStatus.sys_info.is_flying = 0;
+                /* Set system to disarm state if system is not able to arm */
+                if (sysStatus.state != SYSTEM_STATE_DISARM) {
+                    App_DisarmHandler(false);
+                }
+                break;
+#endif /* FLIGHT_DETECTION_ENABLE */
             default:
                 // Unknown Mavlink event
                 break;
@@ -1762,8 +1787,6 @@ static void App_InitCbk(void) {
         App_FuseCheckRun();
         /* Set board state to discharged */
         sysStatus.sys_info.board_state = BOARD_STATE_DISCHARGED;
-
-        //AccProc_HitDetectionStart();  // OSAV TODO: check if required
     }
 }
 

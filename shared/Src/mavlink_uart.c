@@ -37,6 +37,7 @@ static uint8_t Mavlink_GetSequenceNumber(void);
 static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload);
 static void Mavlink_ProcessVfrHud(const uint8_t* payload);
 static void Mavlink_ProcessCommandLong(const uint8_t* payload);
+static void Mavlink_ProcessExtendedSysState(const uint8_t* payload);
 static void Mavlink_SendCommandAck(uint16_t command, uint8_t result);
 static mavlink_custom_mode_t Mavlink_EncodeCustomMode(void);
 static void Mavlink_SendInitBoardHeartbeat(void);
@@ -169,6 +170,7 @@ static mavlink_custom_mode_t Mavlink_EncodeCustomMode(void) {
     custom_mode.bitfield.is_ignition_done = state->is_ignition_done;        // 1 bit (29) - auto-truncated by compiler
     custom_mode.bitfield.prearm_flag = state->prearm_flag;                  // 1 bit (30) - autopilot prearm state
     custom_mode.bitfield.speed_altitude_flag = state->speed_altitude_flag;  // 1 bit (31) - autopilot speed/altitude control state
+    custom_mode.bitfield.is_flying = state->is_flying;                      // 1 bit (30 new) - autopilot flight state
 
     return custom_mode;
 }
@@ -292,6 +294,10 @@ static void Mavlink_ProcessReceivedMessage(void) {
             Mavlink_ProcessCommandLong(payload);
             break;
 
+        case MAVLINK_MSG_ID_EXTENDED_SYS_STATE:
+            Mavlink_ProcessExtendedSysState(payload);
+            break;
+
         default:
             // Unknown message, ignore
             break;
@@ -307,15 +313,12 @@ static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload) {
     (void)payload[HEARTBEAT_TYPE_INDEX];       // Suppress unused warning
     (void)payload[HEARTBEAT_AUTOPILOT_INDEX];  // Suppress unused warning
 
-    // Extract custom mode (4 bytes) - contains ARM/PREARM states from ESP32 GPIO
-    uint32_t custom_mode_raw = payload[HEARTBEAT_CUSTOM_MODE_INDEX] | (payload[HEARTBEAT_CUSTOM_MODE_INDEX + 1] << 8) |
-                               (payload[HEARTBEAT_CUSTOM_MODE_INDEX + 2] << 16) | (payload[HEARTBEAT_CUSTOM_MODE_INDEX + 3] << 24);
+    // Extract base_mode (byte 2) to check ARMING state from bit 7 (MAV_MODE_FLAG_SAFETY_ARMED)
+    uint8_t base_mode = payload[HEARTBEAT_BASE_MODE_INDEX];
 
-    // Decode ARM state from 32-bit custom mode
-    mavlink_autopilot_states_t autopilot_states;
-    autopilot_states.raw = custom_mode_raw;
-
-    uint32_t new_arm_state = autopilot_states.bitfield.arm_state;  // Bits 0-3 - auto-extracted by compiler
+    // Check if MAV_MODE_FLAG_SAFETY_ARMED (0x80) is set in base_mode
+    // If bit 7 is set → ARMED, if bit 7 is clear → DISARMED
+    uint8_t new_arm_state = (base_mode & MAV_MODE_FLAG_SAFETY_ARMED) ? MAVLINK_AUTOPILOT_ARM_ARMED : MAVLINK_AUTOPILOT_ARM_DISARMED;
 
     // Check for ARM state changes and notify application with specific events
     if (new_arm_state != mavlink_state.autopilot_arm_state) {
@@ -329,8 +332,8 @@ static void Mavlink_ProcessAutopilotHeartbeat(const uint8_t* payload) {
         }
     }
 
-    // Note: PREARM state is now handled via asynchronous commands (MAVLINK_CMD_PREARM_ENABLE/DISABLE)
-    // instead of being encoded in HEARTBEAT messages
+    // Note 1: ARM state is now encoded in base_mode bit 7 (MAV_MODE_FLAG_SAFETY_ARMED)
+    // Note 2: PREARM state is handled via asynchronous commands (MAVLINK_CMD_PREARM_ENABLE/DISABLE)
 
     // Autopilot connection timeout timer is already restarted in Mavlink_ProcessReceivedMessage()
     // when any message from autopilot is received, including this heartbeat
@@ -368,6 +371,26 @@ static void Mavlink_ProcessVfrHud(const uint8_t* payload) {
 
         // Send altitude data (already in m - no conversion needed)
         mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_ALTITUDE_RECEIVED, &mavlink_state.vfr_hud_data.altitude_m);
+    }
+}
+
+/**
+ * @brief Process EXTENDED_SYS_STATE message from autopilot
+ * @param payload Message payload (2 bytes)
+ */
+static void Mavlink_ProcessExtendedSysState(const uint8_t* payload) {
+    // Extract landed_state (byte 1)
+    uint8_t landed_state = payload[EXTENDED_SYS_STATE_LANDED_STATE_INDEX];
+
+    // Notify application about flight state with appropriate event
+    if (mavlink_state.system_callback) {
+        if (landed_state == MAV_LANDED_STATE_ON_GROUND) {
+            // On ground - trigger LANDED event
+            mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_LANDED, NULL);
+        } else if (landed_state == MAV_LANDED_STATE_IN_AIR || landed_state == MAV_LANDED_STATE_TAKEOFF || landed_state == MAV_LANDED_STATE_LANDING) {
+            // In air (flying, taking off, or landing) - trigger FLYING event
+            mavlink_state.system_callback(SYSTEM_EVT_READY, MAVLINK_EVT_AUTOPILOT_FLYING, NULL);
+        }
     }
 }
 

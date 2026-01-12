@@ -473,13 +473,21 @@ static HAL_StatusTypeDef HalConfigure_MainUart_Init(void) {
     __HAL_RCC_GPIOA_CLK_ENABLE();
 
     /* ========== GPIO Configuration ========== */
-    /* Configure TX pin (PA2) and RX pin (PA3) */
-    GPIO_InitStruct.Pin = MAIN_UART_TX_PIN | MAIN_UART_RX_PIN;
+    /* Configure TX pin (PA2) - No pull resistor */
+    GPIO_InitStruct.Pin = MAIN_UART_TX_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = MAIN_UART_GPIO_AF;
     HAL_GPIO_Init(MAIN_UART_TX_PORT, &GPIO_InitStruct);
+
+    /* Configure RX pin (PA3) - Pull-up resistor */
+    GPIO_InitStruct.Pin = MAIN_UART_RX_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = MAIN_UART_GPIO_AF;
+    HAL_GPIO_Init(MAIN_UART_RX_PORT, &GPIO_InitStruct);
 
     /* ========== NVIC Configuration ========== */
     /* Configure USART2 interrupt */

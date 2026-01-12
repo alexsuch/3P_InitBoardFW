@@ -28,6 +28,7 @@ extern "C" {
 #define LSM6DS3_WHO_AM_I 0x0FU
 /** Device Identification (Who am I) **/
 #define LSM6DS3_ID 0x69U
+#define LSM6DSL_ID 0x6AU
 
 /* Control registers */
 #define LSM6DS3_CTRL1_XL 0x10U /* Accelerometer control */
