@@ -247,6 +247,7 @@ typedef struct {
     uint8_t shake_detected;             // Startup shake detection flag (0-1)
     uint8_t low_pwr_self_dest_allowed;  // Low power self-destruct allowed flag (0-1)
     uint8_t is_flying;                  // Autopilot flight state (0=LANDED, 1=FLYING) (0-1)
+    uint8_t is_charge_enabled;          // Autopilot charge state (0=DISABLED, 1=ENABLED) (0-1)
 } init_board_system_info_t;
 
 typedef struct {

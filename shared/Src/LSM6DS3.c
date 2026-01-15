@@ -415,7 +415,6 @@ static void Lsm6ds3_SetHitParams(void) {
                 .reserved8 = 0,
                 .reserved9 = 0,
                 .reserved10 = 0,
-                .reserved11 = 0,
             };
 
             /* Decode ODR from register bits [7:4] */

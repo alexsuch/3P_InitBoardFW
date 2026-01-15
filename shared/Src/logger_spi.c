@@ -31,6 +31,7 @@
  */
 
 #include "logger.h"
+#include "mavlink_uart.h"
 #include "prj_config.h"
 #include "solution_wrapper.h"
 
@@ -641,6 +642,11 @@ void Logger_FrameBuilder_Init(void) {
     /* Initialize logger IMU ring buffer (Phase 3) */
     memset(&g_imu_buffer, 0, sizeof(ImuBuffer_t));
 
+    /* Initialize MAVLink fields */
+    loggerStat.frame_ctx.builder.mavlink_events = 0;
+    loggerStat.frame_ctx.builder.mavlink_speed = 0;
+    loggerStat.frame_ctx.builder.mavlink_altitude = 0;
+
     loggerStat.frame_ctx.builder.state = FRAME_STATE_IDLE;
 }
 
@@ -659,9 +665,11 @@ void Logger_FrameBuilder_Init(void) {
 void Logger_Init(void) {
     // Initialize logger configuration
     loggerStat.config.magic = LOGGER_CONFIG_MAGIC;                  // 0xCAFE
-    loggerStat.config.version = LOGGER_CONFIG_VERSION;              // 1
+    loggerStat.config.version_major = LOGGER_CONFIG_VERSION_MAJOR;  // 0
+    loggerStat.config.version_minor = LOGGER_CONFIG_VERSION_MINOR;  // 1
     loggerStat.config.adc_sample_rate_khz = ADC_SAMPLING_FREQ_KHZ;  // 100 kHz sampling
     loggerStat.config.adc_block_size = LOGGER_ADC_BLOCK_SIZE;       // 256 samples per frame
+    loggerStat.config.mavlink_logging_enabled = 1;                  // MAVLink logging enabled
 
     // Initialize SPI2 NVIC for interrupt-driven reception
     Logger_SPI_Init();
@@ -824,6 +832,21 @@ uint32_t Logger_Task(void) {
                     // No IMU data, zero entire IMU block
                     memset(frame->imu, 0, LOGGER_IMU_BLOCK_SIZE * sizeof(ImuRawSample_t));
                 }
+
+                // Copy MAVLink event data
+                frame->mavlink_log.event_flags = loggerStat.frame_ctx.builder.mavlink_events;
+                frame->mavlink_log.speed_ms = loggerStat.frame_ctx.builder.mavlink_speed;
+                frame->mavlink_log.altitude_m = loggerStat.frame_ctx.builder.mavlink_altitude;
+
+                if (loggerStat.frame_ctx.builder.mavlink_events != 0) {
+                    Test1Toggle();
+                    Test1Toggle();
+                }
+
+                // Reset MAVLink fields in builder for next frame
+                loggerStat.frame_ctx.builder.mavlink_events = 0;
+                loggerStat.frame_ctx.builder.mavlink_speed = 0;
+                loggerStat.frame_ctx.builder.mavlink_altitude = 0;
 
                 // Initialize CRC state machine (Part 1 of 4)
                 loggerStat.frame_ctx.builder.current_frame = frame;
@@ -1040,6 +1063,63 @@ void Logger_SPI_RxCallback(const uint8_t* rx_buffer) {
         // Unknown command: clear GPIO and skip DMA
         Logger_GPIO_SetReady(false);
     }
+}
+
+/**
+ * @brief MAVLink event callback for logger (replaces App_MavlinkCbk in logging mode)
+ *
+ * Captures all MAVLink events and telemetry data for inclusion in log frames.
+ * Accumulates event flags and data during the current frame window.
+ * Data is reset after Logger_Task() copies it to the assembled frame.
+ *
+ * Event Processing:
+ *   - All events: Set corresponding bit in mavlink_events bitmask (bit N for event 0x0N)
+ *   - MAVLINK_EVT_SPEED_RECEIVED (0x0A): Copy uint16_t groundspeed from usr_ptr
+ *   - MAVLINK_EVT_ALTITUDE_RECEIVED (0x0B): Copy int32_t altitude from usr_ptr
+ *
+ * Integration:
+ *   - Called from MAVLink UART handler when autopilot events occur
+ *   - Registered via Mavlink_Init(Logger_MavlinkCbk, ...) in App_InitRun
+ *   - Data merged into LogFrame_t.mavlink_log during FRAME_STATE_BUILD
+ *
+ * @param evt: System event type (SYSTEM_EVT_READY, SYSTEM_EVT_ERROR, etc.)
+ * @param usr_data: MAVLink event type (mavlink_event_t enum cast to uint32_t)
+ * @param usr_ptr: Pointer to event-specific data (uint16_t* for speed, int32_t* for altitude)
+ *
+ * Returns: 0 (standard callback return)
+ */
+uint8_t Logger_MavlinkCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr) {
+    // Ignore non-MAVLink events
+    if (evt != SYSTEM_EVT_READY) {
+        return 0;
+    }
+
+    // Set event flag bit (bit N = event 0x0N)
+    // usr_data contains mavlink_event_t enum value (0x00-0x0F)
+    if (usr_data < 32) {  // Safety check: only set bits 0-31
+        loggerStat.frame_ctx.builder.mavlink_events |= (1U << usr_data);
+    }
+
+    // Copy telemetry data for specific events
+    switch ((mavlink_event_t)usr_data) {
+        case MAVLINK_EVT_SPEED_RECEIVED:
+            if (usr_ptr != NULL) {
+                loggerStat.frame_ctx.builder.mavlink_speed = *(uint16_t*)usr_ptr;
+            }
+            break;
+
+        case MAVLINK_EVT_ALTITUDE_RECEIVED:
+            if (usr_ptr != NULL) {
+                loggerStat.frame_ctx.builder.mavlink_altitude = *(int32_t*)usr_ptr;
+            }
+            break;
+
+        default:
+            // Other events: only flag is logged, no data copy needed
+            break;
+    }
+
+    return 0;
 }
 
 /**

@@ -12,6 +12,10 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 
+/*-------------------------- LOGGER MACROS -----------------------------------------*/
+#define SPI_LOGGER_ENABLE (1u)  // RELEASE VALUE - 0u
+#define TEST_DAC_ENABLE (1u)    // RELEASE VALUE - 0u
+
 /*-------------------------- APP VERSION & DEVICE TYPE-----------------------------------------*/
 #define APP_MINOR_VERSION (0u)
 #define APP_MAJOR_VERSION (2u)
@@ -78,10 +82,6 @@ extern "C" {
 #define RELEASE_CONFIGURATION_ENABLE (0u)
 
 #if (RELEASE_CONFIGURATION_ENABLE == 0u)  // TEST CONFIGURATION
-
-/*-------------------------- LOGGER MACROS -----------------------------------------*/
-#define SPI_LOGGER_ENABLE (0u)  // RELEASE VALUE - 0u
-#define TEST_DAC_ENABLE (0u)    // RELEASE VALUE - 0u
 
 /*-------------------------- BUILD MACROS -----------------------------------------*/
 #define CONTROL_MODE (MAVLINK_V2_CTRL_SUPP)
