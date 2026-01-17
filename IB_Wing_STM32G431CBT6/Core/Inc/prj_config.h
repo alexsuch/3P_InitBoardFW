@@ -12,6 +12,10 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 
+/*-------------------------- LOGGER MACROS -----------------------------------------*/
+#define SPI_LOGGER_ENABLE (1u)  // RELEASE VALUE - 0u
+#define TEST_DAC_ENABLE (1u)    // RELEASE VALUE - 0u
+
 /*-------------------------- APP VERSION & DEVICE TYPE-----------------------------------------*/
 #define APP_MINOR_VERSION (0u)
 #define APP_MAJOR_VERSION (2u)
@@ -79,23 +83,20 @@ extern "C" {
 
 #if (RELEASE_CONFIGURATION_ENABLE == 0u)  // TEST CONFIGURATION
 
-/*-------------------------- LOGGER MACROS -----------------------------------------*/
-#define TEST_DAC_ENABLE (1u)  // RELEASE VALUE - 0u
-
 /*-------------------------- BUILD MACROS -----------------------------------------*/
 #define CONTROL_MODE (MAVLINK_V2_CTRL_SUPP)
 #define VBAT_MEASURE_FEATURE (0u)
 #define ACC_SUPPORTED_ENABLE (1u)
 #define START_UP_DELAY_ENABLE (1u)
 #define UART_ENABLE (0u)
-#define SPI_LOGGER_ENABLE (1u)
+
 /*--------------------------- VUSA MACROS -----------------------------------------*/
 #define VUSA_ENABLE (1u)          // RELEASE VALUE - 1u
 #define VUSA_ENABLE_DEFAULT (1u)  // RELEASE VALUE - 1u
 
 /*--------------------------- OSD MACROS -----------------------------------------*/
-#define OSD_ENABLE (1u)          // RELEASE VALUE - 1u
-#define OSD_ENABLE_DEFAULT (1u)  // RELEASE VALUE - 1u
+#define OSD_ENABLE (0u)          // RELEASE VALUE - 1u
+#define OSD_ENABLE_DEFAULT (0u)  // RELEASE VALUE - 1u
 
 /*----------------------------PWM 2 MACROS -----------------------------------------*/
 #define PWM2_INPUT_ENABLE_DEFAULT (0u)  // RELEASE VALUE - 1u
@@ -170,15 +171,8 @@ extern "C" {
 /* Disable Buzzer */
 #define BUZZER_DISABLE (1u)
 
-/*----------------------------- Mavlink parameters -----------------------*/
-#if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
-// Timing Configuration
-#define MAVLINK_INITBOARD_HEARTBEAT_INTERVAL_MS (750u)
-#define MAVLINK_CONNECTION_TIMEOUT_MS (3000u)
-#endif /* MAVLINK_V2_CTRL_SUPP */
-
 /*----------------------------- Test parameters -----------------------*/
-#define SELF_DESTROY_DISABLE (0u)  // RELEASE VALUE - 0u
+#define SELF_DESTROY_DISABLE (1u)  // RELEASE VALUE - 0u
 
 #define TEST_SELF_DESTROY_ONLY_MODE (0u)    // RELEASE VALUE - 0u
 #define TEST_SELF_DESTROY_MINING_MODE (0u)  // RELEASE VALUE - 0u
@@ -193,6 +187,9 @@ extern "C" {
 // Timing Configuration
 #define MAVLINK_INITBOARD_HEARTBEAT_INTERVAL_MS (750u)
 #define MAVLINK_CONNECTION_TIMEOUT_MS (3000u)
+
+#define FLIGHT_DETECTION_ENABLE (1u)                 // Enable flight detection - RELEASE: enabled
+#define FLIGHT_SPEED_ALTITUDE_DETECTION_ENABLE (1u)  // Enable flight detection - RELEASE: enabled
 
 #define FLIGHT_STABLE_PARAMETERS_TIMEOUT_SEC (4u)   // 7 seconds speed and altitude must be higher than minimum thresholds
 #define FLIGHT_SPEED_MINIMUM_THRESHOLD_M_S (17u)    // 17 m/s

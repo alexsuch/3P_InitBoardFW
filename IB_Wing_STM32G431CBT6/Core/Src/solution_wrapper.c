@@ -63,6 +63,7 @@ uint16_t adc2_dma_buffer[ADC_DMA_BUFFER_SIZE] __attribute__((aligned(4)));
  *   - Resets accelerometer CS pin (inactive high)
  *   - Starts system tick timer (10ms periodic interrupts)
  *   - Enables OPAMP if configured
+ *   - Starts MAIN UART receiving in IT mode
  *
  * Called once at application startup before app initialization
  */
@@ -81,6 +82,10 @@ void Solution_HalInit(void) {
         /* Starting Error */
         Error_Handler();
     }
+
+    /* Start MAIN UART receiving in interrupt mode */
+    UartGetOneByteRx();
+
 #if 0
 Solution_LoggingStart();
 #endif

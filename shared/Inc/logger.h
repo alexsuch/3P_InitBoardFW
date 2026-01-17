@@ -28,6 +28,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "init_brd.h"
 #include "prj_config.h"
 
 #ifdef __cplusplus
@@ -48,7 +49,17 @@ extern "C" {
 #define LOGGER_SPI_RX_COMMAND_SIZE 5  // RX buffer size: command byte + 4 padding bytes
 
 #define LOGGER_CONFIG_MAGIC 0xCAFE
-#define LOGGER_CONFIG_VERSION 1
+#define LOGGER_CONFIG_VERSION_MAJOR 0
+#define LOGGER_CONFIG_VERSION_MINOR 1
+
+/* Logger Configuration Version History:
+ * v0.1 (2026-01-15): Initial MAVLink integration
+ *   - Added mavlink_log_data_t (10 bytes) to LogFrame_t
+ *   - Frame size: 852 bytes (was 842 bytes)
+ *   - Added mavlink_logging_enabled flag to logger_config_t
+ *   - imu_config_t reduced to 23 bytes (was 24 bytes)
+ *   - MAVLink event logging: event_flags (32-bit), speed_ms, altitude_m
+ */
 
 /* CRC8 Polynomial and table constants */
 #define CRC8_POLYNOMIAL 0x07
@@ -62,7 +73,7 @@ extern "C" {
 #define CRC_PART2_SIZE 128
 #define CRC_PART3_OFFSET 262
 #define CRC_PART3_SIZE 128
-#define CRC_PART4_OFFSET 390
+#define CRC_PART4_OFFSET 400
 
 /* IMU buffer constants */
 #define IMU_BUFFER_MAX_SAMPLES 50
@@ -310,6 +321,26 @@ const ImuRawSample_t* Logger_ImuRing_GetBuffer(uint32_t* out_count);
  */
 
 /**
+ * @brief MAVLink event log data structure (embedded in LogFrame_t)
+ *
+ * Contains MAVLink event flags (32-bit bitmask) and telemetry data (speed/altitude).
+ * Event flags accumulate during frame window, then reset after frame assembly.
+ * Speed and altitude are only updated when corresponding events occur, otherwise remain zero.
+ *
+ * Layout (10 bytes total):
+ *   Offset 0-3:  event_flags (uint32_t bitmask, bit N = event N from mavlink_event_t)
+ *   Offset 4-5:  speed_ms (uint16_t groundspeed in m/s, 0 if no MAVLINK_EVT_SPEED_RECEIVED)
+ *   Offset 6-9:  altitude_m (int32_t altitude in meters, 0 if no MAVLINK_EVT_ALTITUDE_RECEIVED)
+ */
+typedef struct __attribute__((packed)) {
+    uint32_t event_flags;  // Bitmask of mavlink_event_t events (bit N = event 0x0N)
+    uint16_t speed_ms;     // Groundspeed in m/s (0 = no data this frame)
+    int32_t altitude_m;    // Altitude in meters (0 = no data this frame)
+} mavlink_log_data_t;
+
+_Static_assert(sizeof(mavlink_log_data_t) == 10, "mavlink_log_data_t must be 10 bytes");
+
+/**
  * @brief Frame format structure (fixed-size frame for efficient SPI transfer)
  *
  * Layout (little-endian, fixed 842 bytes):
@@ -346,24 +377,25 @@ typedef struct __attribute__((packed)) {
     uint32_t adc_timestamp;                     // Timestamp of first ADC sample (TIM6 @ 100 kHz, every 10 µs)
     int16_t adc[256];                           // Fixed 256 ADC samples
     ImuRawSample_t imu[LOGGER_IMU_BLOCK_SIZE];  // Fixed 20 IMU raw samples with timestamps (only first n_imu are valid)
+    mavlink_log_data_t mavlink_log;             // MAVLink event flags + telemetry (10 bytes)
     uint16_t crc16;                             // CRC16 checksum
 } LogFrame_t;
 
-_Static_assert(sizeof(LogFrame_t) == 842, "LogFrame_t must be 842 bytes");
+_Static_assert(sizeof(LogFrame_t) == 852, "LogFrame_t must be 852 bytes");
 
 /* ============================================================================
  * IMU CONFIGURATION STRUCTURE (Phase 5 SPI - Embedded in logger_config_t)
  * ============================================================================
  *
  * Extended IMU configuration with actual hardware register snapshots.
- * Embedded as nested structure within logger_config_t (offset 8-31).
+ * Embedded as nested structure within logger_config_t (offset 8-30).
  *
- * Layout (24 bytes total):
+ * Layout (23 bytes total):
  *   Offset 0-3:   Sensor presence and identification (accel_present, gyro_present, chip_id, pad)
  *   Offset 4-7:   Output Data Rates (accel_odr_hz, gyro_odr_hz)
  *   Offset 8-11:  Full-scale ranges (accel_range_g, alignment byte, gyro_range_dps as uint16_t)
  *   Offset 12-16: Control register snapshots (CTRL1_XL, CTRL2_G, CTRL3_C, CTRL7_G, CTRL4_C)
- *   Offset 17-23: Reserved for future expansion (7 bytes)
+ *   Offset 17-22: Reserved for future expansion (6 bytes)
  */
 typedef struct __attribute__((packed)) {
     // Offset 0-3: Presence and identification (4 bytes)
@@ -388,17 +420,16 @@ typedef struct __attribute__((packed)) {
     uint8_t reserved3;  // CTRL7_G (0x16) snapshot - Gyro HP mode
     uint8_t reserved4;  // CTRL4_C (0x13) snapshot - DRDY control
 
-    // Offset 17-23: Reserved for future expansion (7 bytes)
+    // Offset 17-22: Reserved for future expansion (6 bytes)
     uint8_t reserved5;   // Future: Additional sensor parameters
     uint8_t reserved6;   // Future: LIS2DH12 or other IMU support
     uint8_t reserved7;   // Future: Expansion slot
     uint8_t reserved8;   // Future: Expansion slot
     uint8_t reserved9;   // Future: Expansion slot
     uint8_t reserved10;  // Future: Expansion slot
-    uint8_t reserved11;  // Future: Expansion slot
 } imu_config_t;
 
-_Static_assert(sizeof(imu_config_t) == 24, "imu_config_t must be exactly 24 bytes");
+_Static_assert(sizeof(imu_config_t) == 23, "imu_config_t must be exactly 23 bytes");
 
 /* ============================================================================
  * LOGGER CONFIGURATION (Phase 5 SPI Protocol - Command 0x2A)
@@ -409,20 +440,24 @@ _Static_assert(sizeof(imu_config_t) == 24, "imu_config_t must be exactly 24 byte
  *
  * Size: Fixed 32 bytes (padded to 640-byte DMA frame with zeros)
  * Magic: 0xCAFE (for validation)
- * Version: 1 (extensible for future protocol versions)
- * Layout: 4B header + 4B ADC params + 24B IMU config
+ * Version: Split into major.minor (1B each, extensible for future protocol versions)
+ * Layout: 2B magic + 1B major + 1B minor + 4B ADC params + 23B IMU config + 1B MAVLink flag = 32 bytes
  */
 
 typedef struct __attribute__((packed)) {
-    uint16_t magic;    // 0xCAFE — validity check (2B)
-    uint16_t version;  // Protocol version (2B)
+    uint16_t magic;         // 0xCAFE — validity check (2B)
+    uint8_t version_major;  // Major version (1B)
+    uint8_t version_minor;  // Minor version (1B)
 
     // --- Core ADC parameters (4B) ---
     uint16_t adc_sample_rate_khz;  // Sampling frequency kHz (2B)
     uint16_t adc_block_size;       // Samples per frame (2B)
 
-    // --- Extended IMU configuration (24B) ---
+    // --- Extended IMU configuration (23B) ---
     imu_config_t imu_config;  // Nested IMU config structure
+
+    // --- MAVLink logging control (1B) ---
+    uint8_t mavlink_logging_enabled;  // 1 = MAVLink event logging enabled, 0 = disabled
 } logger_config_t;
 
 _Static_assert(sizeof(logger_config_t) == 32, "logger_config_t must be exactly 32 bytes");
@@ -500,7 +535,10 @@ typedef struct {
     ImuRawSample_t imu[LOGGER_IMU_BLOCK_SIZE];  // Dequeued IMU samples
     uint16_t adc_count;
     uint16_t imu_count;
-    uint32_t adc_ts_first;  // Timestamp of first ADC sample
+    uint32_t adc_ts_first;     // Timestamp of first ADC sample
+    uint32_t mavlink_events;   // Accumulated MAVLink event flags (bitmask)
+    uint16_t mavlink_speed;    // Last received groundspeed (m/s)
+    int32_t mavlink_altitude;  // Last received altitude (m)
     FrameState_t state;
     CrcState_t crc_state;       // CRC incremental computation state
     LogFrame_t* current_frame;  // Pointer to frame being built (for CRC)
@@ -723,6 +761,28 @@ int Logger_GetNextFrame(LogFrame_t* out_frame);
  */
 
 #if (SPI_LOGGER_ENABLE == 1u)
+
+/**
+ * @brief MAVLink event callback for logger (replaces App_MavlinkCbk in logging mode)
+ *
+ * Captures all MAVLink events and telemetry data for inclusion in log frames:
+ *   - Sets event bit in frame builder's event_flags bitmask (bit N for event 0x0N)
+ *   - Copies speed data when MAVLINK_EVT_SPEED_RECEIVED (0x0A) occurs
+ *   - Copies altitude data when MAVLINK_EVT_ALTITUDE_RECEIVED (0x0B) occurs
+ *   - All other events only set their corresponding flag bit
+ *
+ * Called from MAVLink UART handler when events occur (e.g., VFR_HUD, heartbeat, arming).
+ * Event flags and data accumulate during frame window, then reset after Logger_Task() assembly.
+ *
+ * @param evt: System event type (SYSTEM_EVT_READY, SYSTEM_EVT_ERROR, etc.)
+ * @param usr_data: MAVLink event type (mavlink_event_t enum cast to uint32_t)
+ * @param usr_ptr: Pointer to event-specific data (uint16_t* for speed, int32_t* for altitude)
+ *
+ * Returns: 0 (standard callback return)
+ *
+ * Integration: Register via Mavlink_Init(Logger_MavlinkCbk, ...) in App_InitRun
+ */
+uint8_t Logger_MavlinkCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr);
 
 /**
  * @brief Initialize SPI slave transmission pipeline

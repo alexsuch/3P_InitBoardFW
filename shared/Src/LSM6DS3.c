@@ -221,7 +221,7 @@ static void Lsm6ds3_CheckID(void) {
 
     if (spi_result != false) {
         /* DEBUG: Set breakpoint here and check rdVal */
-        if (rdVal == LSM6DS3_ID) {
+        if ((rdVal == LSM6DS3_ID) || (rdVal == LSM6DSL_ID)) {
             /* Init is done */
             if (lsm6ds3_sys_cbk != NULL) {
                 /* move to idle if response is correct */
@@ -415,7 +415,6 @@ static void Lsm6ds3_SetHitParams(void) {
                 .reserved8 = 0,
                 .reserved9 = 0,
                 .reserved10 = 0,
-                .reserved11 = 0,
             };
 
             /* Decode ODR from register bits [7:4] */

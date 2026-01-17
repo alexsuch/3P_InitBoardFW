@@ -15,6 +15,9 @@
     {
       "name": "logger",
       "path": "../../3p-logger-next/logger"
+    },
+    {
+      "path": "../MavlinkEmulator"
     }
   ],
   "settings": {

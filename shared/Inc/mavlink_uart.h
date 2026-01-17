@@ -57,10 +57,26 @@
 #define MAVLINK_COMP_ID_INITBOARD 0x42    // 66 - Initiation Board Component
 
 // Message IDs
-#define MAVLINK_MSG_ID_HEARTBEAT 0x00     // 0
-#define MAVLINK_MSG_ID_VFR_HUD 0x4A       // 74
-#define MAVLINK_MSG_ID_COMMAND_LONG 0x4C  // 76
-#define MAVLINK_MSG_ID_COMMAND_ACK 0x4D   // 77
+#define MAVLINK_MSG_ID_HEARTBEAT 0x00           // 0
+#define MAVLINK_MSG_ID_VFR_HUD 0x4A             // 74
+#define MAVLINK_MSG_ID_COMMAND_LONG 0x4C        // 76
+#define MAVLINK_MSG_ID_COMMAND_ACK 0x4D         // 77
+#define MAVLINK_MSG_ID_EXTENDED_SYS_STATE 0xF5  // 245
+
+// EXTENDED_SYS_STATE message payload indices (relative to payload start)
+#define EXTENDED_SYS_STATE_VTOL_STATE_INDEX 0    // VTOL state
+#define EXTENDED_SYS_STATE_LANDED_STATE_INDEX 1  // Landed state
+#define EXTENDED_SYS_STATE_PAYLOAD_SIZE 2        // EXTENDED_SYS_STATE payload size
+
+// MAV_LANDED_STATE values
+#define MAV_LANDED_STATE_UNDEFINED 0  // MAV landed state is unknown
+#define MAV_LANDED_STATE_ON_GROUND 1  // MAV is landed (on ground)
+#define MAV_LANDED_STATE_IN_AIR 2     // MAV is in air
+#define MAV_LANDED_STATE_TAKEOFF 3    // MAV currently taking off
+#define MAV_LANDED_STATE_LANDING 4    // MAV currently landing
+
+// MAV_VTOL_STATE values
+#define MAV_VTOL_STATE_UNDEFINED 0  // MAV is not configured as VTOL
 
 // VFR_HUD message payload indices (relative to payload start)
 #define VFR_HUD_AIRSPEED_INDEX 0     // Airspeed (4 bytes float)
@@ -75,6 +91,9 @@
 #define MAV_TYPE_GENERIC 0x00       // 0
 #define MAV_AUTOPILOT_INVALID 0x08  // 8
 #define MAV_STATE_ACTIVE 0x04       // 4
+
+// MAV base_mode flags
+#define MAV_MODE_FLAG_SAFETY_ARMED (1 << 7)  // 0x80 - Vehicle armed (safety lock not armed)
 
 // MAV Result codes
 #define MAV_RESULT_ACCEPTED 0x00              // 0 - Command accepted
@@ -161,7 +180,9 @@ typedef enum {
     MAVLINK_EVT_SPEED_RECEIVED = 0x0A,             // 10 - Speed data received from autopilot
     MAVLINK_EVT_ALTITUDE_RECEIVED = 0x0B,          // 11 - Altitude data received from autopilot
     MAVLINK_EVT_AUTOPILOT_CHARGE = 0x0C,           // 12 - Charge command received from autopilot
-    MAVLINK_EVT_AUTOPILOT_DISCHARGE = 0x0D         // 13 - Discharge command received from autopilot
+    MAVLINK_EVT_AUTOPILOT_DISCHARGE = 0x0D,        // 13 - Discharge command received from autopilot
+    MAVLINK_EVT_AUTOPILOT_FLYING = 0x0E,           // 14 - Autopilot changed to FLYING state (landed_state=IN_AIR)
+    MAVLINK_EVT_AUTOPILOT_LANDED = 0x0F            // 15 - Autopilot changed to LANDED state (landed_state=ON_GROUND)
 } mavlink_event_t;
 
 /**
@@ -198,7 +219,8 @@ typedef union {
         uint32_t is_ignition_done : 1;     // Bit 27:     Ignition done flag (0-1)
         uint32_t prearm_flag : 1;          // Bit 28:     Autopilot prearm flag
         uint32_t speed_altitude_flag : 1;  // Bit 29: Autopilot speed/altitude flag
-        uint32_t reserved : 2;             // Bits 30-31: Reserved for future use
+        uint32_t is_flying : 1;            // Bit 30:     Flight state (0=LANDED, 1=FLYING)
+        uint32_t reserved : 1;             // Bit 31:     Reserved for future use
     } bitfield;
     uint32_t raw;  // Raw 32-bit value
 } mavlink_custom_mode_t;

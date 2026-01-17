@@ -788,11 +788,17 @@ static void App_StickCbk(system_evt_t evt, uint32_t usr_data) {
 /***************************************** MAVLINK CONTROL ********************************************************/
 #if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
 static bool App_MavlinkIsAble2Arm(void) {
-    return (sysStatus.sys_info.prearm_flag != 0) && (sysStatus.arm_enabled != false) &&
+    return (sysStatus.sys_info.prearm_flag != 0) && (sysStatus.sys_info.is_charge_enabled != 0) &&
 #if ACC_SHAKE_DETECTION_ENABLE
            (sysStatus.sys_info.shake_detected != 0) &&
 #endif /* ACC_SHAKE_DETECTION_ENABLE */
-           (sysStatus.sys_info.speed_altitude_flag != 0);
+#if FLIGHT_DETECTION_ENABLE
+           (sysStatus.sys_info.is_flying != 0) &&
+#endif /* FLIGHT_DETECTION_ENABLE */
+#if FLIGHT_SPEED_ALTITUDE_DETECTION_ENABLE
+           (sysStatus.sys_info.speed_altitude_flag != 0) &&
+#endif /* FLIGHT_SPEED_ALTITUDE_DETECTION_ENABLE */
+           (sysStatus.arm_enabled != false);
 }
 
 static void App_MavlinkFlightParamsTimerCbk(uint8_t timer_id) {
@@ -917,7 +923,7 @@ static uint8_t App_MavlinkCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr
                 sysStatus.arm_enabled = false;
 
                 /* Set system to disarm state if system is not able to arm */
-                if (sysStatus.state != SYSTEM_STATE_DISARM) {
+                if (sysStatus.state > SYSTEM_STATE_DISARM) {
                     App_DisarmHandler(false);
                 }
                 break;
@@ -933,11 +939,28 @@ static uint8_t App_MavlinkCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr
                 // Autopilot PREARM disabled
                 sysStatus.sys_info.prearm_flag = 0;
                 /* Set system to disarm state if system is not able to arm */
-                if (sysStatus.state != SYSTEM_STATE_DISARM) {
+                if (sysStatus.state > SYSTEM_STATE_DISARM) {
                     App_DisarmHandler(false);
                 }
                 break;
 
+            case MAVLINK_EVT_AUTOPILOT_CHARGE:
+                // Autopilot charge enabled
+                sysStatus.sys_info.is_charge_enabled = 1;
+                /* Try to arm and start charging */
+                App_MavlinkTry2Arm();
+                break;
+
+            case MAVLINK_EVT_AUTOPILOT_DISCHARGE:
+                // Autopilot charge disabled
+                sysStatus.sys_info.is_charge_enabled = 0;
+                /* Set system to disarm state if system is not able to arm */
+                if (sysStatus.state > SYSTEM_STATE_DISARM) {
+                    App_DisarmHandler(false);
+                }
+                break;
+
+#if FLIGHT_SPEED_ALTITUDE_DETECTION_ENABLE
             case MAVLINK_EVT_SPEED_RECEIVED:
                 // Speed data received from autopilot
                 if (usr_ptr != NULL) {
@@ -957,7 +980,25 @@ static uint8_t App_MavlinkCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr
                     App_MavlinkFlightParamsCheck();
                 }
                 break;
+#endif /* FLIGHT_SPEED_ALTITUDE_DETECTION_ENABLE */
 
+#if FLIGHT_DETECTION_ENABLE
+            case MAVLINK_EVT_AUTOPILOT_FLYING:
+                // Autopilot is in flight (IN_AIR, TAKEOFF, or LANDING state)
+                sysStatus.sys_info.is_flying = 1;
+                /* Try to arm and start charging */
+                App_MavlinkTry2Arm();
+                break;
+
+            case MAVLINK_EVT_AUTOPILOT_LANDED:
+                // Autopilot is on ground (ON_GROUND state)
+                sysStatus.sys_info.is_flying = 0;
+                /* Set system to disarm state if system is not able to arm */
+                if (sysStatus.state > SYSTEM_STATE_DISARM) {
+                    App_DisarmHandler(false);
+                }
+                break;
+#endif /* FLIGHT_DETECTION_ENABLE */
             default:
                 // Unknown Mavlink event
                 break;
@@ -1762,8 +1803,6 @@ static void App_InitCbk(void) {
         App_FuseCheckRun();
         /* Set board state to discharged */
         sysStatus.sys_info.board_state = BOARD_STATE_DISCHARGED;
-
-        //AccProc_HitDetectionStart();  // OSAV TODO: check if required
     }
 }
 
@@ -1808,6 +1847,16 @@ void App_InitRun(void) {
     Timer_ResetAll();
 
     AccProc_Reset(App_AccProcCbk);
+
+#if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
+    /* Initialize flight parameters */
+    sysStatus.current_speed_ms = 0;
+    sysStatus.current_altitude_m = 0;
+    sysStatus.sys_info.speed_altitude_flag = 0;
+
+    /* Init Mavlink processing */
+    Mavlink_Init(Logger_MavlinkCbk, &sysStatus.sys_info);
+#endif /* (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP) */
 #else
 
     start_up = true;
@@ -2001,6 +2050,11 @@ void App_Task(void) {
 
     /* Timer tick task */
     Timer_Task();
+
+#if (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP)
+    /* Mavlink Processing */
+    Mavlink_Process();
+#endif
 #else
     /* Timer tick task */
     Timer_Task();
