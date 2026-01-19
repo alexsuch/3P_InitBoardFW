@@ -163,6 +163,8 @@ extern UART_HandleTypeDef huart3;        /* VUSA UART handle */
 extern DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
 extern OPAMP_HandleTypeDef hopamp2;      /* OPAMP2 handle (CubeMX-generated in main.c) */
 extern ADC_HandleTypeDef hadc2;
+extern DAC_HandleTypeDef hdac1;          /* DAC1 handle (defined in solution_hal_cfg.c when TEST_DAC_ENABLE == 1u) */
+extern DMA_HandleTypeDef hdma_dac1_ch1;  /* DAC1 DMA handle (defined in solution_hal_cfg.c when TEST_DAC_ENABLE == 1u) */
 
 /* DAC Configuration (Test Signal Generation) -------------------------------*/
 #define SYS_TICK_TIMER_HANDLE htim2

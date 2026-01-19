@@ -33,12 +33,12 @@ UART_HandleTypeDef huart3; /* VUSA UART handle */
 /* DMA handles */
 DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
 
-#if (TEST_DAC_ENABLE == 1u)
+// #if (TEST_DAC_ENABLE == 1u)
 /* DAC handles */
-DAC_HandleTypeDef hdac1;           /* Test DAC handle */
-DMA_HandleTypeDef hdma_dac1_ch1;   /* Test DAC DMA handle */
+DAC_HandleTypeDef hdac1;               /* Test DAC handle */
+DMA_HandleTypeDef hdma_dac1_ch1;       /* Test DAC DMA handle */
 uint32_t dac_test_buffer[DAC_SAMPLES]; /* Test DAC waveform buffer */
-#endif
+// #endif
 
 /* SPI handles */
 SPI_HandleTypeDef hspi1;        /* Accelerometer SPI handle */
@@ -1014,7 +1014,5 @@ HAL_StatusTypeDef Solution_DacStart(void) {
 }
 #else
 /* Dummy function when DAC disabled */
-HAL_StatusTypeDef Solution_DacStart(void) {
-    return HAL_OK;
-}
+HAL_StatusTypeDef Solution_DacStart(void) { return HAL_OK; }
 #endif /* TEST_DAC_ENABLE */
