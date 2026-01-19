@@ -29,6 +29,9 @@
 #include "hal_cfg.h"
 #include "init_brd.h"
 #include "logger.h"
+#if PIEZO_DETECTION_ENABLE
+#include "piezo_proc.h"
+#endif /* PIEZO_DETECTION_ENABLE */
 #include "main.h"
 #include "prj_config.h"
 #include "solution_hal_cfg.h"
@@ -45,16 +48,16 @@
 // ============================================================================
 
 /* ADC2 DMA circular buffer configuration
- * Size: ADC_DMA_BUFFER_SIZE samples × 2 bytes = ADC_DMA_BUFFER_SIZE * 2 bytes
+ * Size depends on build mode:
+ *   - Logger mode (SPI_LOGGER_ENABLE=1): LOGGER_ADC_DMA_BUFFER_SIZE samples (typically 512)
+ *   - Piezo mode (SPI_LOGGER_ENABLE=0): PIEZO_ADC_DMA_BLOCK samples (typically 16)
  * Used for configurable frequency synchronized sampling with DMA callbacks
- *
- * Architecture:
- *   - Total: ADC_DMA_BUFFER_SIZE samples (from prj_config.h)
- *   - Half-complete: first ADC_DMA_HALF_SIZE samples → Frame 1 ready
- *   - Complete: next ADC_DMA_HALF_SIZE samples → Frame 2 ready
- *   - Both halves allow frame builder to process immediately
  */
-uint16_t adc2_dma_buffer[ADC_DMA_BUFFER_SIZE] __attribute__((aligned(4)));
+#if (SPI_LOGGER_ENABLE == 1u)
+uint16_t adc2_dma_buffer[LOGGER_ADC_DMA_BUFFER_SIZE] __attribute__((aligned(4)));
+#else
+uint16_t adc2_dma_buffer[PIEZO_ADC_DMA_BLOCK] __attribute__((aligned(4)));
+#endif
 
 /**
  * @brief Initialize HAL and core system peripherals
@@ -86,9 +89,29 @@ void Solution_HalInit(void) {
     /* Start MAIN UART receiving in interrupt mode */
     UartGetOneByteRx();
 
-#if 0
-Solution_LoggingStart();
+#if (TEST_DAC_ENABLE == 1u)
+    /* Start DAC DMA (after TIM6 is configured but before it starts) */
+    if (Solution_DacStart() != HAL_OK) {
+        Error_Handler();
+    }
 #endif
+
+#if ((SPI_LOGGER_ENABLE == 0u) && (PIEZO_DETECTION_ENABLE == 1u))
+    /* Start ADC tick timer (100 kHz) */
+    if (HAL_TIM_Base_Start_IT(&ADC_TICK_TIMER_HANDLE) != HAL_OK) {
+        Error_Handler();
+    }
+
+    /* 1. Calibrate ADC2 for best SNR */
+    if (HAL_ADCEx_Calibration_Start(&ADC_PIEZO_HANDLE, ADC_SINGLE_ENDED) != HAL_OK) {
+        Error_Handler();
+    }
+
+    /* 2. Start ADC2 DMA circular buffer for synchronized configurable kHz sampling */
+    if (HAL_ADC_Start_DMA(&ADC_PIEZO_HANDLE, (uint32_t*)adc2_dma_buffer, PIEZO_ADC_DMA_BLOCK) != HAL_OK) {
+        Error_Handler();
+    }
+#endif /* ((SPI_LOGGER_ENABLE == 0u) && (PIEZO_DETECTION_ENABLE == 1u)) */
 }
 
 // ---------------------- SYSTEM TIMER CALLBACKS ------------------------------------
@@ -395,9 +418,9 @@ bool SpiReadRegister(uint8_t address, uint8_t* value, uint8_t num) {
 // ---------------------- ADC OPERATIONS -----------------------------------
 
 /**
- * @brief ADC2 DMA half-complete callback (first ADC_DMA_HALF_SIZE samples ready)
+ * @brief ADC2 DMA half-complete callback (first LOGGER_ADC_DMA_HALF_SIZE samples ready)
  *
- * Called when ADC2 DMA has filled first half of circular buffer (ADC_DMA_HALF_SIZE samples).
+ * Called when ADC2 DMA has filled first half of circular buffer (LOGGER_ADC_DMA_HALF_SIZE samples).
  * Triggers ADC data processing via Logger_AdcBuffer_OnComplete (when SPI_LOGGER_ENABLE).
  *
  * This allows frame assembly to begin while second half is still being acquired,
@@ -406,16 +429,22 @@ bool SpiReadRegister(uint8_t address, uint8_t* value, uint8_t num) {
 void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc_ptr) {
     if (hadc_ptr == &ADC_PIEZO_HANDLE) {
 #if SPI_LOGGER_ENABLE
-        /* Phase 2: Copy first ADC_DMA_HALF_SIZE samples from DMA buffer */
-        Logger_AdcBuffer_OnComplete(adc2_dma_buffer, ADC_DMA_HALF_SIZE);
+        /* Phase 2: Copy first LOGGER_ADC_DMA_HALF_SIZE samples from DMA buffer */
+        Logger_AdcBuffer_OnComplete(adc2_dma_buffer, LOGGER_ADC_DMA_HALF_SIZE);
 #endif /* SPI_LOGGER_ENABLE */
+        Test1Toggle();
+        Test1Toggle();
+#if PIEZO_DETECTION_ENABLE
+        /* Piezo processing: first half of DMA buffer */
+        Piezo_OnDmaHalf();
+#endif /* PIEZO_DETECTION_ENABLE */
     }
 }
 
 /**
- * @brief ADC2 DMA complete callback (second ADC_DMA_HALF_SIZE samples ready)
+ * @brief ADC2 DMA complete callback (second LOGGER_ADC_DMA_HALF_SIZE samples ready)
  *
- * Called when ADC2 DMA circular buffer wraps and fills second half (samples ADC_DMA_HALF_SIZE..ADC_DMA_BUFFER_SIZE).
+ * Called when ADC2 DMA circular buffer wraps and fills second half (samples LOGGER_ADC_DMA_HALF_SIZE..LOGGER_ADC_DMA_BUFFER_SIZE).
  * Triggers ADC data processing via Logger_AdcBuffer_OnComplete (when SPI_LOGGER_ENABLE).
  *
  * Completes the frame assembly cycle, allowing Logger_Task() to build and queue frame
@@ -424,9 +453,14 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc_ptr) {
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc_ptr) {
     if (hadc_ptr == &ADC_PIEZO_HANDLE) {
 #if SPI_LOGGER_ENABLE
-        /* Phase 2: Copy second ADC_DMA_HALF_SIZE samples from DMA buffer */
-        Logger_AdcBuffer_OnComplete(&adc2_dma_buffer[ADC_DMA_HALF_SIZE], ADC_DMA_HALF_SIZE);
+        /* Phase 2: Copy second LOGGER_ADC_DMA_HALF_SIZE samples from DMA buffer */
+        Logger_AdcBuffer_OnComplete(&adc2_dma_buffer[LOGGER_ADC_DMA_HALF_SIZE], LOGGER_ADC_DMA_HALF_SIZE);
 #endif /* SPI_LOGGER_ENABLE */
+
+#if PIEZO_DETECTION_ENABLE
+        /* Piezo processing: second half of DMA buffer */
+        Piezo_OnDmaFull();
+#endif /* PIEZO_DETECTION_ENABLE */
     }
 }
 
@@ -478,7 +512,7 @@ void Solution_LoggingStart(void) {
     }
 
     /* 2. Start ADC2 DMA circular buffer for synchronized configurable kHz sampling */
-    if (HAL_ADC_Start_DMA(&ADC_PIEZO_HANDLE, (uint32_t*)adc2_dma_buffer, ADC_DMA_BUFFER_SIZE) != HAL_OK) {
+    if (HAL_ADC_Start_DMA(&ADC_PIEZO_HANDLE, (uint32_t*)adc2_dma_buffer, LOGGER_ADC_DMA_BUFFER_SIZE) != HAL_OK) {
         Error_Handler();
     }
 }

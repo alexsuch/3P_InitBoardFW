@@ -33,6 +33,13 @@ UART_HandleTypeDef huart3; /* VUSA UART handle */
 /* DMA handles */
 DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
 
+#if (TEST_DAC_ENABLE == 1u)
+/* DAC handles */
+DAC_HandleTypeDef hdac1;           /* Test DAC handle */
+DMA_HandleTypeDef hdma_dac1_ch1;   /* Test DAC DMA handle */
+uint32_t dac_test_buffer[DAC_SAMPLES]; /* Test DAC waveform buffer */
+#endif
+
 /* SPI handles */
 SPI_HandleTypeDef hspi1;        /* Accelerometer SPI handle */
 DMA_HandleTypeDef hdma_spi1_rx; /* SPI1 RX DMA handle */
@@ -109,10 +116,12 @@ void Solution_HalConfigure(void) {
         Error_Handler();
     }
 
-    /* Initialize DAC1 */
+#if (TEST_DAC_ENABLE == 1u)
+    /* Initialize DAC1 (Test Signal Generator) */
     if (HalConfigure_Dac1_Init() != HAL_OK) {
         Error_Handler();
     }
+#endif
 
     /* Initialize Accelerometer SPI */
     if (HalConfigure_AccSpi_Init() != HAL_OK) {
@@ -132,7 +141,14 @@ void Solution_HalConfigure(void) {
 static HAL_StatusTypeDef HalConfigure_DMA_Init(void) {
     __HAL_RCC_DMAMUX1_CLK_ENABLE();
     __HAL_RCC_DMA1_CLK_ENABLE();
-    /* Optionally, configure NVIC priorities for global DMA interrupts here */
+    __HAL_RCC_DMA2_CLK_ENABLE();
+
+#if (TEST_DAC_ENABLE == 1u)
+    /* DMA1_Channel1_IRQn interrupt configuration for DAC DMA */
+    HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+#endif
+
     return HAL_OK;
 }
 
@@ -851,11 +867,7 @@ static HAL_StatusTypeDef HalConfigure_Adc2_Init(void) {
     /* Link DMA to ADC2 handle */
     __HAL_LINKDMA(&hadc2, DMA_Handle, hdma_adc2);
 
-    /* NVIC configuration for DMA */
-    HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
-
-    /* NVIC configuration for ADC2 */
+    /* NVIC configuration for ADC2 (DMA interrupt already configured in MX_DMA_Init) */
     HAL_NVIC_SetPriority(ADC1_2_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(ADC1_2_IRQn);
 
@@ -928,10 +940,9 @@ static HAL_StatusTypeDef HalConfigure_Tim6_Init(void) {
     return HAL_OK;
 }
 
+#if (TEST_DAC_ENABLE == 1u)
 static HAL_StatusTypeDef HalConfigure_Dac1_Init(void) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
-    extern DMA_HandleTypeDef hdma_dac1_ch1;
-    extern DAC_HandleTypeDef hdac1;
     DAC_ChannelConfTypeDef sConfig = {0};
     HAL_StatusTypeDef status;
 
@@ -939,15 +950,15 @@ static HAL_StatusTypeDef HalConfigure_Dac1_Init(void) {
     __HAL_RCC_DAC1_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
 
-    /* Configure DAC1 GPIO */
-    GPIO_InitStruct.Pin = DAC1_OUT1_PIN;
+    /* Configure DAC GPIO */
+    GPIO_InitStruct.Pin = TEST_DAC_GPIO_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(DAC1_OUT1_PORT, &GPIO_InitStruct);
+    HAL_GPIO_Init(TEST_DAC_GPIO_PORT, &GPIO_InitStruct);
 
-    /* DMA for DAC1_CH1 (CubeMX) */
-    hdma_dac1_ch1.Instance = DMA1_Channel1;
-    hdma_dac1_ch1.Init.Request = DMA_REQUEST_DAC1_CHANNEL1;
+    /* DMA for DAC1_CH1 */
+    hdma_dac1_ch1.Instance = TEST_DAC_DMA_INSTANCE;
+    hdma_dac1_ch1.Init.Request = TEST_DAC_DMA_REQUEST;
     hdma_dac1_ch1.Init.Direction = DMA_MEMORY_TO_PERIPH;
     hdma_dac1_ch1.Init.PeriphInc = DMA_PINC_DISABLE;
     hdma_dac1_ch1.Init.MemInc = DMA_MINC_ENABLE;
@@ -958,31 +969,52 @@ static HAL_StatusTypeDef HalConfigure_Dac1_Init(void) {
     status = HAL_DMA_Init(&hdma_dac1_ch1);
     if (status != HAL_OK) return status;
 
-    /* Link DMA to DAC1 handle */
+    /* Link DMA to DAC handle */
     __HAL_LINKDMA(&hdac1, DMA_Handle1, hdma_dac1_ch1);
 
-    /* NVIC configuration for DMA1_Channel1 */
-    HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
-
-    /* DAC1 configuration */
-    hdac1.Instance = DAC1;
+    /* DAC configuration */
+    hdac1.Instance = TEST_DAC_INSTANCE;
     if (HAL_DAC_Init(&hdac1) != HAL_OK) return HAL_ERROR;
 
+    /* DAC channel configuration */
     sConfig.DAC_HighFrequency = DAC_HIGH_FREQUENCY_INTERFACE_MODE_AUTOMATIC;
     sConfig.DAC_DMADoubleDataMode = DISABLE;
     sConfig.DAC_SignedFormat = DISABLE;
     sConfig.DAC_SampleAndHold = DAC_SAMPLEANDHOLD_DISABLE;
-    sConfig.DAC_Trigger = DAC_TRIGGER_T6_TRGO;
+    sConfig.DAC_Trigger = TEST_DAC_TRIGGER;
     sConfig.DAC_Trigger2 = DAC_TRIGGER_NONE;
     sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
     sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_EXTERNAL;
     sConfig.DAC_UserTrimming = DAC_TRIMMING_FACTORY;
-    if (HAL_DAC_ConfigChannel(&hdac1, &sConfig, DAC_CHANNEL_1) != HAL_OK) return HAL_ERROR;
+    if (HAL_DAC_ConfigChannel(&hdac1, &sConfig, TEST_DAC_CHANNEL) != HAL_OK) return HAL_ERROR;
 
-    /* NVIC configuration for DAC */
-    HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
+    /* Initialize DAC waveform buffer (ramp pattern) */
+    for (int i = 0; i < DAC_SAMPLES; i++) {
+        dac_test_buffer[i] = ((((uint32_t)i) * DAC_MAX_VALUE) / (DAC_SAMPLES - 1));
+    }
+
+    /* Note: DAC DMA start moved to Solution_HalInit() to ensure TIM6 is running first */
 
     return HAL_OK;
 }
+
+/**
+ * @brief  Start DAC DMA after TIM6 is configured
+ * @note   Called from Solution_HalInit() after timer initialization
+ * @retval HAL status
+ */
+HAL_StatusTypeDef Solution_DacStart(void) {
+#if (TEST_DAC_ENABLE == 1u)
+    /* Start DAC with DMA - must be called after TIM6 is initialized */
+    if (HAL_DAC_Start_DMA(&hdac1, TEST_DAC_CHANNEL, (uint32_t*)dac_test_buffer, DAC_SAMPLES, DAC_ALIGN_12B_R) != HAL_OK) {
+        return HAL_ERROR;
+    }
+#endif
+    return HAL_OK;
+}
+#else
+/* Dummy function when DAC disabled */
+HAL_StatusTypeDef Solution_DacStart(void) {
+    return HAL_OK;
+}
+#endif /* TEST_DAC_ENABLE */

@@ -709,7 +709,8 @@ int Logger_DrainQueue(void) {
     // If we just finished sending config, skip this cycle and reset flag
     if (loggerStat.config_sent == 1) {
         Solution_LoggingStart();  // Start logging after config sent
-
+        Test2Toggle();
+        Test2Toggle();
         loggerStat.config_sent = 0;  // Reset for next cycle
     }
 

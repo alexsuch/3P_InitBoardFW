@@ -83,10 +83,6 @@ extern "C" {
 #define VUSA_UART_DMA_IRQ DMA1_Channel4_IRQn
 #define VUSA_UART_IRQn USART3_IRQn
 
-/* DAC1 GPIO Configuration */
-#define DAC1_OUT1_PORT GPIOA
-#define DAC1_OUT1_PIN GPIO_PIN_4
-
 /* ADC2 GPIO Configuration */
 #define ADC2_IN_PORT GPIOA
 #define ADC2_IN_PIN GPIO_PIN_7
@@ -168,7 +164,7 @@ extern DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
 extern OPAMP_HandleTypeDef hopamp2;      /* OPAMP2 handle (CubeMX-generated in main.c) */
 extern ADC_HandleTypeDef hadc2;
 
-/* Macro Definitions ---------------------------------------------------------*/
+/* DAC Configuration (Test Signal Generation) -------------------------------*/
 #define SYS_TICK_TIMER_HANDLE htim2
 #define ADC_TICK_TIMER_HANDLE htim6
 #define DETON_HIGH_SIDE_SWITH_TIMER_HANDLE htim15
@@ -198,6 +194,38 @@ extern ADC_HandleTypeDef hadc2;
 /* OPAMP Configuration ------------------------------------------------------*/
 /* OPAMP instance used in the design (OPAMP1/OPAMP2/etc.) */
 #define OPAMP_INSTANCE OPAMP2
+
+/* DAC Configuration (Test Signal Generation) -------------------------------*/
+#define TEST_DAC_INSTANCE DAC1
+#define TEST_DAC_CHANNEL DAC_CHANNEL_1
+#define TEST_DAC_GPIO_PORT GPIOA
+#define TEST_DAC_GPIO_PIN GPIO_PIN_4
+#define TEST_DAC_DMA_INSTANCE DMA1_Channel1
+#define TEST_DAC_DMA_REQUEST DMA_REQUEST_DAC1_CHANNEL1
+#define TEST_DAC_DMA_IRQ DMA1_Channel1_IRQn
+#define TEST_DAC_TRIGGER DAC_TRIGGER_T6_TRGO
+
+/* DAC Test Signal Parameters */
+#define DAC_MAX_VALUE 4095 /* 12-bit DAC maximum value */
+#define DAC_SAMPLES 151    /* Number of samples in DAC waveform buffer */
+
+/* External Handle References ------------------------------------------------*/
+extern TIM_HandleTypeDef htim1;          /* Pump PWM timer handle */
+extern TIM_HandleTypeDef htim2;          /* System tick timer handle */
+extern TIM_HandleTypeDef htim3;          /* Logger timestamp timer handle (slave to TIM6 @ 100 kHz) */
+extern TIM_HandleTypeDef htim6;          /* ADC clock timer handle */
+extern TIM_HandleTypeDef htim15;         /* Detonation high-side switch PWM timer handle */
+extern SPI_HandleTypeDef hspi1;          /* Accelerometer SPI handle */
+extern SPI_HandleTypeDef hspi2;          /* Logger SPI2 slave handle */
+extern UART_HandleTypeDef huart2;        /* Main UART handle */
+extern UART_HandleTypeDef huart3;        /* VUSA UART handle */
+extern DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
+extern OPAMP_HandleTypeDef hopamp2;      /* OPAMP2 handle (CubeMX-generated in main.c) */
+extern ADC_HandleTypeDef hadc2;
+
+#if (TEST_DAC_ENABLE == 1u)
+extern uint32_t dac_test_buffer[DAC_SAMPLES]; /* Test DAC waveform buffer */
+#endif
 
 #ifdef __cplusplus
 }

@@ -5,6 +5,9 @@
 
 #include "acc_proc.h"
 #include "app_config.h"
+#if PIEZO_DETECTION_ENABLE
+#include "piezo_proc.h"
+#endif /* PIEZO_DETECTION_ENABLE */
 #include "indication.h"
 #include "init_brd.h"
 #include "solution_wrapper.h"
@@ -1009,6 +1012,30 @@ static uint8_t App_MavlinkCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr
 }
 #endif
 
+/***************************************** PIEZO PROCESSING  ********************************************************/
+
+#if PIEZO_DETECTION_ENABLE
+static void App_PiezoProcCbk(system_evt_t evt, uint32_t usr_data) {
+    if (evt == SYSTEM_EVT_READY) {
+        switch (usr_data) {
+            case PIEZO_EVT_INIT_OK:
+                // Piezo subsystem initialized successfully
+                break;
+            case PIEZO_EVT_TRIGGER_DETECTED:
+                // Quick trigger detected in ISR (for diagnostics)
+                break;
+            case PIEZO_EVT_SNAPSHOT_READY:
+                // Snapshot ready for analysis in main loop
+                // User can call piezo_try_get_snapshot() to retrieve data
+                // TODO: Implement heavy analysis (FFT, pattern matching, etc.)
+                break;
+            default:
+                break;
+        }
+    }
+}
+#endif /* PIEZO_DETECTION_ENABLE */
+
 /***************************************** ACCELEROMETER PROCESSING  ********************************************************/
 
 static void App_AccProcCbk(system_evt_t evt, uint32_t usr_data) {
@@ -1823,6 +1850,11 @@ void App_InitFinish(void) {
     Mavlink_Init(App_MavlinkCbk, &sysStatus.sys_info);
 #endif /* CONTROL_MODE == MAVLINK_V2_CTRL_SUPP */
 
+#if PIEZO_DETECTION_ENABLE
+    /* Init Piezo processing */
+    Piezo_Init(App_PiezoProcCbk);
+#endif /* PIEZO_DETECTION_ENABLE */
+
 #if VUSA_ENABLE
     if (sysStatus.config->vusaEnable != false) {
         /* Start Vusa functionality */
@@ -2061,6 +2093,11 @@ void App_Task(void) {
 
     /* Pending Application tasks */
     App_Process();
+
+#if PIEZO_DETECTION_ENABLE
+    /* Piezo snapshot extraction and analysis */
+    Piezo_Task();
+#endif /* PIEZO_DETECTION_ENABLE */
 
     /* LED/Sound indication */
     Indication_Task();

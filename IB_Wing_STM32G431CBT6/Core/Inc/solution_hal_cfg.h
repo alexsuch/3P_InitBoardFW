@@ -34,6 +34,13 @@ extern "C" {
  */
 void Solution_HalConfigure(void);
 
+/**
+ * @brief  Start DAC DMA after TIM6 is running
+ * @note   Call this function from Solution_HalInit() after timer start
+ * @retval HAL status
+ */
+HAL_StatusTypeDef Solution_DacStart(void);
+
 #ifdef __cplusplus
 }
 #endif
