@@ -4,20 +4,23 @@
     {
       "name": "STM32 Debug (Cortex-Debug / ST-LINK) — PATH",
       "type": "cortex-debug",
-      "request": "launch",
+      "request": "attach",
       "cwd": "${workspaceFolder}",
       "executable": "${workspaceFolder}/build/Debug/IB_Wing_STM32G431CBT6.elf",
       "device": "STM32G431CB",
       "servertype": "stlink",
       "interface": "swd",
       "runToEntryPoint": "main",
-      // "svdFile": "${workspaceFolder}/svd/STM32G431.svd",
+
+      "svdFile": "${workspaceFolder}/svd/STM32G431.svd",
+
       // Все через PATH:
       "gdbPath": "arm-none-eabi-gdb.exe",
-      "serverpath": "C:/ST/STM32CubeIDE_1.15.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.win32_2.1.300.202403291623/tools/bin/ST-LINK_gdbserver.exe",
-      "preLaunchTask": "Build Debug + Generate HEX",
+      "serverpath": "ST-LINK_gdbserver.exe",
+
+      "preLaunchTask": "Erase and Flash Debug",
       "serverArgs": [],
-      "showDevDebugOutput": "raw",
+      "showDevDebugOutput": "parsed",
       "swoConfig": {
         "enabled": false
       },

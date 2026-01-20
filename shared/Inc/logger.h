@@ -437,12 +437,15 @@ _Static_assert(sizeof(imu_config_t) == 23, "imu_config_t must be exactly 23 byte
  *
  * Device configuration structure sent to ESP32 master via command 42 (0x2A).
  * Defines ADC and IMU parameters for proper frame interpretation.
+ * Also written as a 64-byte header at the beginning of each log file.
  *
- * Size: Fixed 32 bytes (padded to 640-byte DMA frame with zeros)
+ * Size: Fixed 64 bytes (padded to 640-byte DMA frame with zeros)
  * Magic: 0xCAFE (for validation)
  * Version: Split into major.minor (1B each, extensible for future protocol versions)
- * Layout: 2B magic + 1B major + 1B minor + 4B ADC params + 23B IMU config + 1B MAVLink flag = 32 bytes
+ * Layout: 2B magic + 1B major + 1B minor + 4B ADC params + 23B IMU config + 1B MAVLink flag + 32B reserved = 64 bytes
  */
+
+#define LOGGER_CONFIG_SIZE_BYTES 64u
 
 typedef struct __attribute__((packed)) {
     uint16_t magic;         // 0xCAFE — validity check (2B)
@@ -458,9 +461,12 @@ typedef struct __attribute__((packed)) {
 
     // --- MAVLink logging control (1B) ---
     uint8_t mavlink_logging_enabled;  // 1 = MAVLink event logging enabled, 0 = disabled
+
+    // --- Reserved bytes for future expansion (32B) ---
+    uint8_t reserved[32];  // Reserved for future use, ensures 64-byte total size
 } logger_config_t;
 
-_Static_assert(sizeof(logger_config_t) == 32, "logger_config_t must be exactly 32 bytes");
+_Static_assert(sizeof(logger_config_t) == LOGGER_CONFIG_SIZE_BYTES, "logger_config_t must be exactly 64 bytes");
 
 /* ============================================================================
  * FRAME BUILDER STATE MACHINE (Phase 4 internal types)

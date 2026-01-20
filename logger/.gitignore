@@ -1,0 +1,14 @@
+temp
+.pio
+managed_components
+/include/build_info.h
+.monitor_port
+monitor_wrapper.py
+monitor.bat
+
+.nx/installation
+.nx/cache
+.nx/workspace-data
+.cache
+build
+CMakeFiles

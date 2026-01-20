@@ -5,17 +5,12 @@
       "label": "Build Debug + Generate HEX",
       "type": "shell",
       "command": "cmake",
-      "args": [
-        "--build",
-        "${workspaceFolder}/build/Debug"
-      ],
+      "args": ["--build", "${workspaceFolder}/build/Debug"],
       "group": {
         "kind": "build",
         "isDefault": true
       },
-      "problemMatcher": [
-        "$gcc"
-      ],
+      "problemMatcher": ["$gcc"],
       "presentation": {
         "reveal": "always",
         "panel": "shared"
@@ -26,10 +21,7 @@
       "label": "Configure Debug",
       "type": "shell",
       "command": "cmake",
-      "args": [
-        "--preset",
-        "Debug"
-      ],
+      "args": ["--preset", "Debug"],
       "group": "build",
       "problemMatcher": [],
       "presentation": {
@@ -94,20 +86,14 @@
         "reveal": "always",
         "panel": "shared"
       },
-      "dependsOn": [
-        "Build Debug + Generate HEX"
-      ],
+      "dependsOn": ["Build Debug + Generate HEX"],
       "detail": "Build Debug, then flash firmware to board via ST-LINK"
     },
     {
       "label": "Upgrade ST-LINK Firmware",
       "type": "shell",
       "command": "STM32_Programmer_CLI",
-      "args": [
-        "-c",
-        "port=SWD",
-        "mode=UR"
-      ],
+      "args": ["-c", "port=SWD", "mode=UR"],
       "group": "build",
       "problemMatcher": [],
       "presentation": {
@@ -115,6 +101,54 @@
         "panel": "shared"
       },
       "detail": "Upgrade ST-LINK firmware on the board"
+    },
+    {
+      "label": "Mass Erase (100 kHz)",
+      "type": "shell",
+      "command": "STM32_Programmer_CLI",
+      "args": ["-c", "port=SWD", "mode=UR", "freq=100", "-e", "all"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "detail": "Mass erase STM32 flash at 100 kHz (stable for custom PCB)"
+    },
+    {
+      "label": "Flash Debug (100 kHz, No Erase)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-Command",
+        "Start-Sleep -Seconds 2; STM32_Programmer_CLI -c port=SWD mode=HotPlug freq=100 -d ${workspaceFolder}/build/Debug/IB_Wing_STM32G431CBT6.elf --skipErase -rst"
+      ],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "detail": "Flash firmware at 100 kHz using HotPlug mode (no reset needed)"
+    },
+    {
+      "label": "Erase and Flash Debug",
+      "type": "shell",
+      "command": "echo",
+      "args": ["Erase and Flash completed"],
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "dependsOn": [
+        "Build Debug + Generate HEX",
+        "Mass Erase (100 kHz)",
+        "Flash Debug (100 kHz, No Erase)"
+      ],
+      "dependsOrder": "sequence",
+      "detail": "Build, mass erase, then flash firmware at 100 kHz"
     },
     {
       "label": "Format All Files",

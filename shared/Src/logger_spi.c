@@ -17,7 +17,7 @@
  *
  * SPI Protocol (Master: ESP32, Slave: STM32):
  *   - Master sends CMD 42 at startup to request config
- *   - Slave responds with logger_config_t (32B) via DMA
+ *   - Slave responds with logger_config_t (64B) via DMA
  *   - After config TX: Frames auto-stream from queue
  *   - GPIO_READY signals data availability during transmission
  *
@@ -1009,7 +1009,7 @@ void Logger_SPI_TxCallback(void) {
  *
  * SPI Protocol (Auto-Streaming):
  *   - Master initiates with single CMD 42 (0x2A) at startup
- *   - Slave responds by transmitting logger_config_t (32 bytes) via DMA
+ *   - Slave responds by transmitting logger_config_t (64 bytes) via DMA
  *   - After config TX complete: Logger_Task() automatically streams queued frames
  *   - No manual READ commands needed - frames auto-send when available
  *

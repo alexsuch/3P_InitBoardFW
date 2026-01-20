@@ -1,0 +1,8 @@
+version: "1.0.0"
+dependencies:
+  idf: ">=5.5"
+  esp_tinyusb: "~2.0.1"
+  # esp_tinyusb is conditionally managed by manage_tinyusb_dependency.py pre-build script
+  # Only ESP32S2, ESP32S3, ESP32P4, and ESP32H4 support TinyUSB
+  # The script will add/remove this dependency based on the target before dependency resolution
+  bblanchon/arduinojson: "^7.4.2"

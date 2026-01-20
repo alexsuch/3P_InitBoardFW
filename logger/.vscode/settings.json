@@ -1,0 +1,78 @@
+{
+  "idf.pythonInstallPath": "C:\\Espressif\\tools\\idf-python\\3.11.2\\python.exe",
+  "idf.espIdfPathWin": "C:/Espressif/frameworks/esp-idf-v5.5.2/",
+  "idf.toolsPathWin": "C:\\Espressif",
+  "idf.flashType": "JTAG",
+  "idf.openOcdConfigs": ["board/esp32s3-builtin.cfg"],
+  "idf.portWin": "COM4",
+  "idf.openOcdLaunchArgs": ["-f", "board/esp32s3-builtin.cfg"],
+  "idf.sdkconfigDefaults": ["sdkconfig.defaults"],
+  "editor.formatOnSave": true,
+  "editor.formatOnPaste": false,
+  "lrutabs.maxTabs": 8,
+  "[c]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools"
+  },
+  "[cpp]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools"
+  },
+  "[h]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools"
+  },
+  "C_Cpp.clang_format_style": "file",
+  "files.associations": {
+    "*.h": "c"
+  },
+  "clang-format.enable": true,
+  "clang-format.style": "Google",
+  "clang-format.fallbackStyle": "Google",
+  "clang-format.exclude": [
+    "**/lib/**",
+    "**/lib/PsychiHttp/**",
+    "**/lib/hal-*/**",
+    "**/docs/**",
+    "**/memory-bank/**",
+    "**/web-ui/**",
+    "**/managed_components/**",
+    "**/data/**",
+    "**/test/**",
+    "**/tests/**",
+    "**/*.md",
+    "**/*.txt",
+    "**/*.json",
+    "**/*.xml",
+    "**/*.yml",
+    "**/*.yaml",
+    "**/platformio.ini",
+    "**/CMakeLists.txt",
+    "**/sdkconfig*",
+    "**/package*.json",
+    "**/*.webmanifest",
+    "**/*.css",
+    "**/*.scss",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.html",
+    "**/*.svg",
+    "**/*.png",
+    "**/*.jpg",
+    "**/*.jpeg",
+    "**/*.gif",
+    "**/*.ico",
+    "**/*.gz",
+    "**/*.csv"
+  ],
+  "C_Cpp.clang_format_fallbackStyle": "Google",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32s3"
+  },
+  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=C:\\Espressif\\tools\\xtensa-esp-elf\\esp-14.2.0_20241119\\xtensa-esp-elf\\bin\\xtensa-esp32s3-elf-gcc.exe",
+    "--compile-commands-dir=c:\\projects\\3p\\3p-logger-next\\logger\\build"
+  ],
+  "idf.monitorPort": "COM4"
+}
