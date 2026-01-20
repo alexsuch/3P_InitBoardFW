@@ -165,6 +165,13 @@ extern OPAMP_HandleTypeDef hopamp2;      /* OPAMP2 handle (CubeMX-generated in m
 extern ADC_HandleTypeDef hadc2;
 extern DAC_HandleTypeDef hdac1;
 extern DMA_HandleTypeDef hdma_dac1_ch1;
+extern COMP_HandleTypeDef hcomp1;
+
+/* COMP1 Hit Detection Configuration (DAC1 threshold) -----------------------*/
+#define COMP1_INSTANCE COMP1
+#define COMP1_IRQn COMP1_2_3_IRQn
+#define COMP1_INP_PORT GPIOA
+#define COMP1_INP_PIN GPIO_PIN_1
 
 /* DAC Configuration (Test Signal Generation) -------------------------------*/
 #define SYS_TICK_TIMER_HANDLE htim2

@@ -91,7 +91,7 @@ void Solution_HalInit(void) {
 
 #if (TEST_DAC_ENABLE == 1u)
     /* Start DAC DMA (after TIM6 is configured but before it starts) */
-    if (Solution_DacStart() != HAL_OK) {
+    if (Solution_TestDacStart() != HAL_OK) {
         Error_Handler();
     }
 #endif

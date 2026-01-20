@@ -54,7 +54,8 @@ DMA_HandleTypeDef hdma_spi2_tx;
 TIM_HandleTypeDef htim6;
 
 /* USER CODE BEGIN PV */
-
+/* Comparator trigger flag */
+static volatile uint8_t comp1_triggered = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -121,16 +122,12 @@ int main(void) {
     /* Init Solution HAL layer */
     Solution_HalInit();
 
-#if 0
-    for (int i = 0; i < DAC_SAMPLES; i++) {
-        dac_buffer[i] = ((((uint32_t)i) * DAC_MAX_VALUE) / (DAC_SAMPLES - 1));
-    }
-
-    if (HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t *)dac_buffer, DAC_SAMPLES, DAC_ALIGN_12B_R) != HAL_OK) {
+#if (COMP_HIT_DETECTION_ENABLE == 1u)
+    /* Start COMP1 comparator with DAC1 threshold for hit detection */
+    if (Solution_Comp1Dac1Start() != HAL_OK) {
         Error_Handler();
     }
 #endif
-    /* Init application layer */
 
     /* Init application layer */
     App_InitRun();
@@ -413,8 +410,8 @@ static void MX_DMA_Init(void) {
 
     /* DMA interrupt init */
     /* DMA1_Channel2_IRQn interrupt configuration */
-    // HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
-    // HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+    HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
     /* DMA2_Channel2_IRQn interrupt configuration */
     HAL_NVIC_SetPriority(DMA2_Channel2_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(DMA2_Channel2_IRQn);
@@ -468,7 +465,22 @@ static void MX_GPIO_Init(void) {
 }
 
 /* USER CODE BEGIN 4 */
+/**
+ * @brief  Comparator trigger callback (called when PA1 exceeds DAC1 threshold)
+ * @param  hcomp: pointer to COMP handle
+ * @retval None
+ */
+void HAL_COMP_TriggerCallback(COMP_HandleTypeDef *hcomp) {
+    if (hcomp->Instance == COMP1) {
+        /* Set flag indicating threshold exceeded on PA1 */
+        comp1_triggered = 1;
+        Test2Toggle();
+        Test2Toggle();
 
+        /* Optional: Add your threshold detection logic here */
+        /* Example: toggle LED, start ADC sampling, log event, etc. */
+    }
+}
 /* USER CODE END 4 */
 
 /**

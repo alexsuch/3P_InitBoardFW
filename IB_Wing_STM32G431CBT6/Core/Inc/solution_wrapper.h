@@ -33,6 +33,11 @@ extern "C" {
 
 #define UART_BUFFER_SIZE (64u)
 
+/* COMP1 DAC Threshold Configuration -----------------------------------------*/
+#define COMP_DAC_VREF_MV 3300u
+#define COMP_DAC_THRESHOLD_MV 200u
+#define COMP_DAC_THRESHOLD_VALUE ((COMP_DAC_THRESHOLD_MV * 4095UL) / COMP_DAC_VREF_MV)
+
 #define SET_ERROR_LED(status) LedErrorSet(status)
 #define SET_STATUS_LED(status) LedStatusSet(status)
 

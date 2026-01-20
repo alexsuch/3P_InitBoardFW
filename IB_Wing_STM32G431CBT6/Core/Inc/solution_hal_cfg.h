@@ -39,7 +39,14 @@ void Solution_HalConfigure(void);
  * @note   Call this function from Solution_HalInit() after timer start
  * @retval HAL status
  */
-HAL_StatusTypeDef Solution_DacStart(void);
+HAL_StatusTypeDef Solution_TestDacStart(void);
+
+/**
+ * @brief  Start COMP1 comparator with DAC1 threshold for hit detection
+ * @note   Call this function after Solution_HalConfigure()
+ * @retval HAL status
+ */
+HAL_StatusTypeDef Solution_Comp1Dac1Start(void);
 
 #ifdef __cplusplus
 }

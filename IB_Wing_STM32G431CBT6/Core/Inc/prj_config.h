@@ -13,9 +13,11 @@ extern "C" {
 #include <stdlib.h>
 
 /*-------------------------- LOGGER MACROS -----------------------------------------*/
-#define SPI_LOGGER_ENABLE (1u)  // RELEASE VALUE - 0u
+#define SPI_LOGGER_ENABLE (0u)  // RELEASE VALUE - 0u
 
-#define TEST_DAC_ENABLE (1u)  // RELEASE VALUE - 0u
+#define TEST_DAC_ENABLE (0u)  // RELEASE VALUE - 0u
+
+#define COMP_HIT_DETECTION_ENABLE (1u)  // RELEASE VALUE - 1u
 /*-------------------------- ADC Logger Configuration -----------------------------------------*/
 #define LOGGER_ADC_DMA_BUFFER_SIZE (512u)                          // Total DMA buffer size in samples
 #define LOGGER_ADC_DMA_HALF_SIZE (LOGGER_ADC_DMA_BUFFER_SIZE / 2)  // Half buffer for callbacks

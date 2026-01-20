@@ -19,6 +19,7 @@
 #include "hal_cfg.h"
 #include "main.h"
 #include "prj_config.h"
+#include "solution_wrapper.h"
 
 /* Private variables ---------------------------------------------------------*/
 /* Timer handles */
@@ -57,7 +58,12 @@ static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void);
 static HAL_StatusTypeDef HalConfigure_Opamp_Init(void);
 static HAL_StatusTypeDef HalConfigure_Adc2_Init(void);
 static HAL_StatusTypeDef HalConfigure_Tim6_Init(void);
+#if (TEST_DAC_ENABLE == 1u)
 static HAL_StatusTypeDef HalConfigure_Dac1_Init(void);
+#endif
+#if (COMP_HIT_DETECTION_ENABLE == 1u)
+static HAL_StatusTypeDef HalConfigure_Comp1_Dac1_Init(void);
+#endif
 static HAL_StatusTypeDef HalConfigure_DMA_Init(void);
 
 /**
@@ -105,18 +111,25 @@ void Solution_HalConfigure(void) {
 #endif
 
     /* Initialize ADC2 */
-    // if (HalConfigure_Adc2_Init() != HAL_OK) {
-    //     Error_Handler();
-    // }
+    if (HalConfigure_Adc2_Init() != HAL_OK) {
+        Error_Handler();
+    }
 
     /* Initialize TIM6 */
-    // if (HalConfigure_Tim6_Init() != HAL_OK) {
-    //     Error_Handler();
-    // }
+    if (HalConfigure_Tim6_Init() != HAL_OK) {
+        Error_Handler();
+    }
 
 #if (TEST_DAC_ENABLE == 1u)
     /* Initialize DAC1 (Test Signal Generator) */
     if (HalConfigure_Dac1_Init() != HAL_OK) {
+        Error_Handler();
+    }
+#endif
+
+#if (COMP_HIT_DETECTION_ENABLE == 1u)
+    /* Initialize COMP1 with DAC1 threshold for hit detection */
+    if (HalConfigure_Comp1_Dac1_Init() != HAL_OK) {
         Error_Handler();
     }
 #endif
@@ -141,15 +154,9 @@ static HAL_StatusTypeDef HalConfigure_DMA_Init(void) {
     __HAL_RCC_DMA1_CLK_ENABLE();
     __HAL_RCC_DMA2_CLK_ENABLE();
 
-    /* DMA1_Channel2_IRQn interrupt configuration for ADC2 */
-    HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
-
-#if (TEST_DAC_ENABLE == 1u)
-    /* DMA1_Channel1_IRQn interrupt configuration for DAC */
-    HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
-#endif
+    // /* DMA1_Channel2_IRQn interrupt configuration for ADC2 */
+    // HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
+    // HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
 
     return HAL_OK;
 }
@@ -869,6 +876,10 @@ static HAL_StatusTypeDef HalConfigure_Adc2_Init(void) {
     /* Link DMA to ADC2 handle */
     __HAL_LINKDMA(&hadc2, DMA_Handle, hdma_adc2);
 
+    /* DMA1_Channel2_IRQn interrupt configuration for ADC2 */
+    HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+
     /* NVIC configuration for ADC2 (DMA interrupt already configured in MX_DMA_Init) */
     HAL_NVIC_SetPriority(ADC1_2_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(ADC1_2_IRQn);
@@ -998,8 +1009,8 @@ static HAL_StatusTypeDef HalConfigure_Dac1_Init(void) {
     }
 
     /* DMA1_Channel1_IRQn interrupt configuration for DAC DMA */
-    // HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
-    // HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+    HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
     /* Initialize DAC waveform buffer (ramp pattern) */
     for (int i = 0; i < DAC_SAMPLES; i++) {
@@ -1020,16 +1031,101 @@ static HAL_StatusTypeDef HalConfigure_Dac1_Init(void) {
  * @note   Called from Solution_HalInit() after timer initialization
  * @retval HAL status
  */
-HAL_StatusTypeDef Solution_DacStart(void) {
-#if (TEST_DAC_ENABLE == 1u)
+HAL_StatusTypeDef Solution_TestDacStart(void) {
     /* Start DAC with DMA - must be called after TIM6 is initialized */
     if (HAL_DAC_Start_DMA(&hdac1, TEST_DAC_CHANNEL, (uint32_t*)dac_test_buffer, DAC_SAMPLES, DAC_ALIGN_12B_R) != HAL_OK) {
         return HAL_ERROR;
     }
-#endif
+
     return HAL_OK;
 }
-#else
-/* Dummy function when DAC disabled */
-HAL_StatusTypeDef Solution_DacStart(void) { return HAL_OK; }
 #endif /* TEST_DAC_ENABLE */
+
+#if (COMP_HIT_DETECTION_ENABLE == 1u)
+/* COMP1 Handle with DAC1 threshold */
+COMP_HandleTypeDef hcomp1;
+
+/**
+ * @brief  Configure COMP1 with DAC1 threshold for hit detection
+ * @note   COMP1 compares PA1 (positive input) vs DAC1 channel 1 (negative input)
+ *         Interrupt generated when PA1 exceeds DAC1 threshold voltage
+ * @retval HAL_OK if successful, HAL_ERROR otherwise
+ */
+static HAL_StatusTypeDef HalConfigure_Comp1_Dac1_Init(void) {
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    DAC_ChannelConfTypeDef sConfig = {0};
+
+    /* Enable clocks */
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_DAC1_CLK_ENABLE();
+
+    /* Configure PA1 as analog input for COMP1 positive input */
+    GPIO_InitStruct.Pin = COMP1_INP_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(COMP1_INP_PORT, &GPIO_InitStruct);
+
+    /* Initialize DAC1 */
+    hdac1.Instance = DAC1;
+    if (HAL_DAC_Init(&hdac1) != HAL_OK) {
+        return HAL_ERROR;
+    }
+
+    /* Configure DAC1 Channel 1 for internal connection to COMP1 */
+    sConfig.DAC_HighFrequency = DAC_HIGH_FREQUENCY_INTERFACE_MODE_AUTOMATIC;
+    sConfig.DAC_DMADoubleDataMode = DISABLE;
+    sConfig.DAC_SignedFormat = DISABLE;
+    sConfig.DAC_SampleAndHold = DAC_SAMPLEANDHOLD_DISABLE;
+    sConfig.DAC_Trigger = DAC_TRIGGER_NONE;  /* No trigger, static threshold */
+    sConfig.DAC_Trigger2 = DAC_TRIGGER_NONE;
+    sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_DISABLE;
+    sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_INTERNAL;  /* Connect to COMP1 */
+    sConfig.DAC_UserTrimming = DAC_TRIMMING_FACTORY;
+    if (HAL_DAC_ConfigChannel(&hdac1, &sConfig, DAC_CHANNEL_1) != HAL_OK) {
+        return HAL_ERROR;
+    }
+
+    /* Initialize COMP1 */
+    hcomp1.Instance = COMP1_INSTANCE;
+    hcomp1.Init.InputPlus = COMP_INPUT_PLUS_IO1;           /* PA1 signal input */
+    hcomp1.Init.InputMinus = COMP_INPUT_MINUS_DAC1_CH1;    /* DAC1 threshold */
+    hcomp1.Init.OutputPol = COMP_OUTPUTPOL_NONINVERTED;
+    hcomp1.Init.Hysteresis = COMP_HYSTERESIS_MEDIUM;       /* Medium hysteresis for noise immunity */
+    hcomp1.Init.BlankingSrce = COMP_BLANKINGSRC_NONE;
+    hcomp1.Init.TriggerMode = COMP_TRIGGERMODE_IT_RISING;  /* Interrupt on rising edge (PA1 > threshold) */
+    if (HAL_COMP_Init(&hcomp1) != HAL_OK) {
+        return HAL_ERROR;
+    }
+
+    /* Configure NVIC for COMP1 interrupt */
+    HAL_NVIC_SetPriority(COMP1_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(COMP1_IRQn);
+
+    return HAL_OK;
+}
+
+/**
+ * @brief  Start COMP1 comparator with DAC1 threshold
+ * @note   Call this function after Solution_HalConfigure()
+ *         Sets DAC1 to threshold voltage and enables COMP1 interrupt
+ * @retval HAL_OK if successful, HAL_ERROR otherwise
+ */
+HAL_StatusTypeDef Solution_Comp1Dac1Start(void) {
+    /* Set DAC1 threshold voltage */
+    if (HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, COMP_DAC_THRESHOLD_VALUE) != HAL_OK) {
+        return HAL_ERROR;
+    }
+
+    /* Start DAC1 channel 1 (provides threshold to COMP1) */
+    if (HAL_DAC_Start(&hdac1, DAC_CHANNEL_1) != HAL_OK) {
+        return HAL_ERROR;
+    }
+
+    /* Start COMP1 with interrupt */
+    if (HAL_COMP_Start(&hcomp1) != HAL_OK) {
+        return HAL_ERROR;
+    }
+
+    return HAL_OK;
+}
+#endif /* COMP_HIT_DETECTION_ENABLE */
