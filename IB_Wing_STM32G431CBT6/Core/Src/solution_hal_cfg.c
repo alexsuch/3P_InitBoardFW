@@ -14,7 +14,6 @@
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
-#include "solution_hal_cfg.h"
 
 #include "hal_cfg.h"
 #include "main.h"
@@ -22,27 +21,18 @@
 #include "solution_wrapper.h"
 
 /* Private variables ---------------------------------------------------------*/
-/* Timer handles */
-TIM_HandleTypeDef htim1;  /* Pump PWM timer handle */
-TIM_HandleTypeDef htim2;  /* System tick timer handle */
-TIM_HandleTypeDef htim15; /* Detonation high-side switch PWM timer handle */
-
-/* UART handles */
-UART_HandleTypeDef huart2; /* Main UART handle */
-UART_HandleTypeDef huart3; /* VUSA UART handle */
-
-/* DMA handles */
+TIM_HandleTypeDef htim1;          /* Pump PWM timer handle */
+TIM_HandleTypeDef htim2;          /* System tick timer handle */
+TIM_HandleTypeDef htim15;         /* Detonation high-side switch PWM timer handle */
+UART_HandleTypeDef huart2;        /* Main UART handle */
+UART_HandleTypeDef huart3;        /* VUSA UART handle */
 DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
-
-/* DAC handles */
-DAC_HandleTypeDef hdac1;               /* Test DAC handle */
-DMA_HandleTypeDef hdma_dac1_ch1;       /* Test DAC DMA handle */
-uint32_t dac_test_buffer[DAC_SAMPLES]; /* Test DAC waveform buffer */
-
-/* SPI handles */
-SPI_HandleTypeDef hspi1;        /* Accelerometer SPI handle */
-DMA_HandleTypeDef hdma_spi1_rx; /* SPI1 RX DMA handle */
-DMA_HandleTypeDef hdma_spi1_tx; /* SPI1 TX DMA handle */
+DAC_HandleTypeDef hdac1;          /* Test DAC handle */
+DMA_HandleTypeDef hdma_dac1_ch1;  /* Test DAC DMA handle */
+SPI_HandleTypeDef hspi1;          /* Accelerometer SPI handle */
+DMA_HandleTypeDef hdma_spi1_rx;   /* SPI1 RX DMA handle */
+DMA_HandleTypeDef hdma_spi1_tx;   /* SPI1 TX DMA handle */
+COMP_HandleTypeDef hcomp1;
 
 /* Private function prototypes -----------------------------------------------*/
 
@@ -51,13 +41,13 @@ static HAL_StatusTypeDef HalConfigure_SysTickTimer_Init(void);
 #if (SPI_LOGGER_ENABLE == 0)
 static HAL_StatusTypeDef HalConfigure_HighSidePwmTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_PumpPwmTimer_Init(void);
+static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void);
 #endif /* SPI_LOGGER_ENABLE == 0 */
 static HAL_StatusTypeDef HalConfigure_MainUart_Init(void);
-static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void);
 static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void);
 static HAL_StatusTypeDef HalConfigure_Opamp_Init(void);
 static HAL_StatusTypeDef HalConfigure_Adc2_Init(void);
-static HAL_StatusTypeDef HalConfigure_Tim6_Init(void);
+static HAL_StatusTypeDef HalConfigure_AdcTickTimer_Init(void);
 #if (TEST_DAC_ENABLE == 1u)
 static HAL_StatusTypeDef HalConfigure_Dac1_Init(void);
 #endif
@@ -115,8 +105,8 @@ void Solution_HalConfigure(void) {
         Error_Handler();
     }
 
-    /* Initialize TIM6 */
-    if (HalConfigure_Tim6_Init() != HAL_OK) {
+    /* Initialize ADC Tick Timer */
+    if (HalConfigure_AdcTickTimer_Init() != HAL_OK) {
         Error_Handler();
     }
 
@@ -153,10 +143,6 @@ static HAL_StatusTypeDef HalConfigure_DMA_Init(void) {
     __HAL_RCC_DMAMUX1_CLK_ENABLE();
     __HAL_RCC_DMA1_CLK_ENABLE();
     __HAL_RCC_DMA2_CLK_ENABLE();
-
-    // /* DMA1_Channel2_IRQn interrupt configuration for ADC2 */
-    // HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
-    // HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
 
     return HAL_OK;
 }
@@ -243,9 +229,9 @@ static HAL_StatusTypeDef HalConfigure_SysTickTimer_Init(void) {
 
     /* ========== Configure timer base ========== */
     SYS_TICK_TIMER_HANDLE.Instance = SYS_TICK_TIMER_BASE;
-    SYS_TICK_TIMER_HANDLE.Init.Prescaler = 1679; /* 1680 divider */
+    SYS_TICK_TIMER_HANDLE.Init.Prescaler = SYS_TICK_TIMER_PRESCALER; /* 1680 divider */
     SYS_TICK_TIMER_HANDLE.Init.CounterMode = TIM_COUNTERMODE_UP;
-    SYS_TICK_TIMER_HANDLE.Init.Period = 999; /* 1000 counts */
+    SYS_TICK_TIMER_HANDLE.Init.Period = SYS_TICK_TIMER_PERIOD; /* 1000 counts */
     SYS_TICK_TIMER_HANDLE.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
     SYS_TICK_TIMER_HANDLE.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
 
@@ -271,8 +257,8 @@ static HAL_StatusTypeDef HalConfigure_SysTickTimer_Init(void) {
 
     /* ========== NVIC Configuration ========== */
     /* Configure TIM2 interrupt */
-    HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(TIM2_IRQn);
+    HAL_NVIC_SetPriority(SYS_TICK_TIMER_IRQ, 0, 0);
+    HAL_NVIC_EnableIRQ(SYS_TICK_TIMER_IRQ);
 
     return HAL_OK;
 }
@@ -302,9 +288,9 @@ static HAL_StatusTypeDef HalConfigure_HighSidePwmTimer_Init(void) {
 
     /* ========== Configure timer base ========== */
     DETON_HIGH_SIDE_SWITH_TIMER_HANDLE.Instance = DETON_HIGH_SIDE_SWITH_TIMER_BASE;
-    DETON_HIGH_SIDE_SWITH_TIMER_HANDLE.Init.Prescaler = 0; /* No prescaler for high resolution */
+    DETON_HIGH_SIDE_SWITH_TIMER_HANDLE.Init.Prescaler = DETON_PWM_TIMER_PRESCALER; /* No prescaler for high resolution */
     DETON_HIGH_SIDE_SWITH_TIMER_HANDLE.Init.CounterMode = TIM_COUNTERMODE_UP;
-    DETON_HIGH_SIDE_SWITH_TIMER_HANDLE.Init.Period = 1216; /* 168MHz / 1217 = 138kHz */
+    DETON_HIGH_SIDE_SWITH_TIMER_HANDLE.Init.Period = DETON_PWM_TIMER_PERIOD; /* 168MHz / 1217 = 138kHz */
     DETON_HIGH_SIDE_SWITH_TIMER_HANDLE.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
     DETON_HIGH_SIDE_SWITH_TIMER_HANDLE.Init.RepetitionCounter = 0;
     DETON_HIGH_SIDE_SWITH_TIMER_HANDLE.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -337,7 +323,7 @@ static HAL_StatusTypeDef HalConfigure_HighSidePwmTimer_Init(void) {
 
     /* Configure PWM channel */
     sConfigOC.OCMode = TIM_OCMODE_PWM1;
-    sConfigOC.Pulse = 608; /* 50% duty cycle (1217/2) */
+    sConfigOC.Pulse = DETON_PWM_PULSE; /* 50% duty cycle (1217/2) */
     sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
     sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
     sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
@@ -399,9 +385,9 @@ static HAL_StatusTypeDef HalConfigure_PumpPwmTimer_Init(void) {
 
     /* ========== Configure timer base ========== */
     PWM_PUMP_TIMER_HANDLE.Instance = PWM_PUMP_TIMER_BASE;
-    PWM_PUMP_TIMER_HANDLE.Init.Prescaler = 0; /* No prescaler */
+    PWM_PUMP_TIMER_HANDLE.Init.Prescaler = PUMP_PWM_TIMER_PRESCALER; /* No prescaler */
     PWM_PUMP_TIMER_HANDLE.Init.CounterMode = TIM_COUNTERMODE_CENTERALIGNED1;
-    PWM_PUMP_TIMER_HANDLE.Init.Period = 2099; /* 168MHz / (1 * 2100 * 2) = 40kHz */
+    PWM_PUMP_TIMER_HANDLE.Init.Period = PUMP_PWM_TIMER_PERIOD; /* 168MHz / (1 * 2100 * 2) = 40kHz */
     PWM_PUMP_TIMER_HANDLE.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
     PWM_PUMP_TIMER_HANDLE.Init.RepetitionCounter = 0;
     PWM_PUMP_TIMER_HANDLE.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -422,7 +408,7 @@ static HAL_StatusTypeDef HalConfigure_PumpPwmTimer_Init(void) {
 
     /* Configure PWM channel */
     sConfigOC.OCMode = TIM_OCMODE_PWM1;
-    sConfigOC.Pulse = 1050; /* 50% duty cycle (2100/2) */
+    sConfigOC.Pulse = PUMP_PWM_PULSE; /* 50% duty cycle (2100/2) */
     sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
     sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
     sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
@@ -528,7 +514,7 @@ static HAL_StatusTypeDef HalConfigure_MainUart_Init(void) {
      * - Flow Control: None
      */
     MAIN_UART_HANDLE.Instance = MAIN_UART_INSTANCE;
-    MAIN_UART_HANDLE.Init.BaudRate = 9600;
+    MAIN_UART_HANDLE.Init.BaudRate = MAIN_UART_BAUD_RATE;
     MAIN_UART_HANDLE.Init.WordLength = UART_WORDLENGTH_8B;
     MAIN_UART_HANDLE.Init.StopBits = UART_STOPBITS_1;
     MAIN_UART_HANDLE.Init.Parity = UART_PARITY_NONE;
@@ -564,6 +550,7 @@ static HAL_StatusTypeDef HalConfigure_MainUart_Init(void) {
     return HAL_OK;
 }
 
+#if (SPI_LOGGER_ENABLE == 0)
 /**
  * @brief  Initialize VUSA UART (USART3) with full configuration
  * @note   This replaces MX_USART3_UART_Init() and HAL_UART_MspInit()
@@ -642,7 +629,7 @@ static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void) {
      * - Flow Control: None
      */
     VUSA_UART_HANDLE.Instance = VUSA_UART_INSTANCE;
-    VUSA_UART_HANDLE.Init.BaudRate = 115200;
+    VUSA_UART_HANDLE.Init.BaudRate = VUSA_UART_BAUD_RATE;
     VUSA_UART_HANDLE.Init.WordLength = UART_WORDLENGTH_8B;
     VUSA_UART_HANDLE.Init.StopBits = UART_STOPBITS_1;
     VUSA_UART_HANDLE.Init.Parity = UART_PARITY_NONE;
@@ -677,6 +664,7 @@ static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void) {
 
     return HAL_OK;
 }
+#endif /* (SPI_LOGGER_ENABLE == 0) */
 
 /**
  * @brief  Initialize Accelerometer SPI (SPI1) with DMA
@@ -705,7 +693,7 @@ static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void) {
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
+    GPIO_InitStruct.Alternate = ACC_SPI_GPIO_AF;
     HAL_GPIO_Init(ACC_SPI_MISO_PORT, &GPIO_InitStruct);
 
     /* SCK pin */
@@ -713,7 +701,7 @@ static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void) {
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
+    GPIO_InitStruct.Alternate = ACC_SPI_GPIO_AF;
     HAL_GPIO_Init(ACC_SPI_SCK_PORT, &GPIO_InitStruct);
 
     /* MOSI pin */
@@ -721,44 +709,44 @@ static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void) {
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
+    GPIO_InitStruct.Alternate = ACC_SPI_GPIO_AF;
     HAL_GPIO_Init(ACC_SPI_MOSI_PORT, &GPIO_InitStruct);
 
     /* ========== DMA Configuration ========== */
-    /* SPI1_RX DMA Init: використовує DMA1_Channel5 замість DMA1_Channel2 */
-    hdma_spi1_rx.Instance = DMA1_Channel5;
-    hdma_spi1_rx.Init.Request = DMA_REQUEST_SPI1_RX;
-    hdma_spi1_rx.Init.Direction = DMA_PERIPH_TO_MEMORY;
-    hdma_spi1_rx.Init.PeriphInc = DMA_PINC_DISABLE;
-    hdma_spi1_rx.Init.MemInc = DMA_MINC_ENABLE;
-    hdma_spi1_rx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
-    hdma_spi1_rx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
-    hdma_spi1_rx.Init.Mode = DMA_NORMAL;
-    hdma_spi1_rx.Init.Priority = DMA_PRIORITY_LOW;
-    status = HAL_DMA_Init(&hdma_spi1_rx);
+    /* SPI1_RX DMA Init */
+    ACC_SPI_DMA_RX_HANDLE.Instance = ACC_SPI_DMA_RX_INSTANCE;
+    ACC_SPI_DMA_RX_HANDLE.Init.Request = ACC_SPI_DMA_RX_REQUEST;
+    ACC_SPI_DMA_RX_HANDLE.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    ACC_SPI_DMA_RX_HANDLE.Init.PeriphInc = DMA_PINC_DISABLE;
+    ACC_SPI_DMA_RX_HANDLE.Init.MemInc = DMA_MINC_ENABLE;
+    ACC_SPI_DMA_RX_HANDLE.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    ACC_SPI_DMA_RX_HANDLE.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+    ACC_SPI_DMA_RX_HANDLE.Init.Mode = DMA_NORMAL;
+    ACC_SPI_DMA_RX_HANDLE.Init.Priority = DMA_PRIORITY_LOW;
+    status = HAL_DMA_Init(&ACC_SPI_DMA_RX_HANDLE);
     if (status != HAL_OK) {
         return status;
     }
 
-    __HAL_LINKDMA(&hspi1, hdmarx, hdma_spi1_rx);
+    __HAL_LINKDMA(&ACC_SPI_HANDLE, hdmarx, ACC_SPI_DMA_RX_HANDLE);
 
     /* SPI1_TX DMA Init */
-    hdma_spi1_tx.Instance = DMA1_Channel3;
-    hdma_spi1_tx.Init.Request = DMA_REQUEST_SPI1_TX;
-    hdma_spi1_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
-    hdma_spi1_tx.Init.PeriphInc = DMA_PINC_DISABLE;
-    hdma_spi1_tx.Init.MemInc = DMA_MINC_ENABLE;
-    hdma_spi1_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
-    hdma_spi1_tx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
-    hdma_spi1_tx.Init.Mode = DMA_NORMAL;
-    hdma_spi1_tx.Init.Priority = DMA_PRIORITY_LOW;
+    ACC_SPI_DMA_TX_HANDLE.Instance = ACC_SPI_DMA_TX_INSTANCE;
+    ACC_SPI_DMA_TX_HANDLE.Init.Request = ACC_SPI_DMA_TX_REQUEST;
+    ACC_SPI_DMA_TX_HANDLE.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    ACC_SPI_DMA_TX_HANDLE.Init.PeriphInc = DMA_PINC_DISABLE;
+    ACC_SPI_DMA_TX_HANDLE.Init.MemInc = DMA_MINC_ENABLE;
+    ACC_SPI_DMA_TX_HANDLE.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    ACC_SPI_DMA_TX_HANDLE.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+    ACC_SPI_DMA_TX_HANDLE.Init.Mode = DMA_NORMAL;
+    ACC_SPI_DMA_TX_HANDLE.Init.Priority = DMA_PRIORITY_LOW;
 
-    status = HAL_DMA_Init(&hdma_spi1_tx);
+    status = HAL_DMA_Init(&ACC_SPI_DMA_TX_HANDLE);
     if (status != HAL_OK) {
         return status;
     }
 
-    __HAL_LINKDMA(&hspi1, hdmatx, hdma_spi1_tx);
+    __HAL_LINKDMA(&ACC_SPI_HANDLE, hdmatx, ACC_SPI_DMA_TX_HANDLE);
 
     /* ========== SPI Configuration ========== */
     /* Configure SPI1 parameters:
@@ -768,25 +756,25 @@ static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void) {
      * - Clock Polarity: HIGH (CPOL=1) for SPI Mode 3
      * - Clock Phase: 2nd Edge (CPHA=1) for SPI Mode 3
      * - NSS: Software control
-     * - Baud Rate Prescaler: 8 (APB2=84MHz / 8 = 10.5 MHz)
+     * - Baud Rate Prescaler: 16 (APB2=84MHz / 16 = 5.25 MHz)
      * - Bit Order: MSB First
      */
-    hspi1.Instance = SPI1;
-    hspi1.Init.Mode = SPI_MODE_MASTER;
-    hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-    hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-    hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH; /* CPOL=1 */
-    hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;      /* CPHA=1 */
-    hspi1.Init.NSS = SPI_NSS_SOFT;
-    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16; /* APB2=84MHz / 16 = 5.25 MHz */
-    hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-    hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-    hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-    hspi1.Init.CRCPolynomial = 7;
-    hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-    hspi1.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
+    ACC_SPI_HANDLE.Instance = ACC_SPI_INSTANCE;
+    ACC_SPI_HANDLE.Init.Mode = SPI_MODE_MASTER;
+    ACC_SPI_HANDLE.Init.Direction = SPI_DIRECTION_2LINES;
+    ACC_SPI_HANDLE.Init.DataSize = SPI_DATASIZE_8BIT;
+    ACC_SPI_HANDLE.Init.CLKPolarity = SPI_POLARITY_HIGH; /* CPOL=1 */
+    ACC_SPI_HANDLE.Init.CLKPhase = SPI_PHASE_2EDGE;      /* CPHA=1 */
+    ACC_SPI_HANDLE.Init.NSS = SPI_NSS_SOFT;
+    ACC_SPI_HANDLE.Init.BaudRatePrescaler = ACC_SPI_BAUD_RATE_PRESCALER; /* APB2=84MHz / 16 = 5.25 MHz */
+    ACC_SPI_HANDLE.Init.FirstBit = SPI_FIRSTBIT_MSB;
+    ACC_SPI_HANDLE.Init.TIMode = SPI_TIMODE_DISABLE;
+    ACC_SPI_HANDLE.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+    ACC_SPI_HANDLE.Init.CRCPolynomial = 7;
+    ACC_SPI_HANDLE.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+    ACC_SPI_HANDLE.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
 
-    status = HAL_SPI_Init(&hspi1);
+    status = HAL_SPI_Init(&ACC_SPI_HANDLE);
     if (status != HAL_OK) {
         return status;
     }
@@ -807,12 +795,11 @@ static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void) {
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
     /* ========== NVIC Configuration ========== */
-    /* Configure DMA1 Channel 5 interrupt for SPI1_RX */
-    HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
-    /* DMA1_Channel3_IRQn interrupt configuration */
-    HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
+    /* Configure DMA interrupts for SPI1 RX/TX */
+    HAL_NVIC_SetPriority(ACC_SPI_DMA_RX_IRQ, 0, 0);
+    HAL_NVIC_EnableIRQ(ACC_SPI_DMA_RX_IRQ);
+    HAL_NVIC_SetPriority(ACC_SPI_DMA_TX_IRQ, 0, 0);
+    HAL_NVIC_EnableIRQ(ACC_SPI_DMA_TX_IRQ);
 
     return HAL_OK;
 }
@@ -825,15 +812,15 @@ static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void) {
  */
 static HAL_StatusTypeDef HalConfigure_Opamp_Init(void) {
     /* Configure OPAMP2 parameters as in CubeMX */
-    hopamp2.Instance = OPAMP_INSTANCE;
-    hopamp2.Init.PowerMode = OPAMP_POWERMODE_NORMALSPEED;
-    hopamp2.Init.Mode = OPAMP_FOLLOWER_MODE;
-    hopamp2.Init.NonInvertingInput = OPAMP_NONINVERTINGINPUT_IO0;
-    hopamp2.Init.InternalOutput = DISABLE;
-    hopamp2.Init.TimerControlledMuxmode = OPAMP_TIMERCONTROLLEDMUXMODE_DISABLE;
-    hopamp2.Init.UserTrimming = OPAMP_TRIMMING_FACTORY;
+    OPAMP_HANDLE.Instance = OPAMP_INSTANCE;
+    OPAMP_HANDLE.Init.PowerMode = OPAMP_POWERMODE_NORMALSPEED;
+    OPAMP_HANDLE.Init.Mode = OPAMP_FOLLOWER_MODE;
+    OPAMP_HANDLE.Init.NonInvertingInput = OPAMP_NONINVERTINGINPUT_IO0;
+    OPAMP_HANDLE.Init.InternalOutput = DISABLE;
+    OPAMP_HANDLE.Init.TimerControlledMuxmode = OPAMP_TIMERCONTROLLEDMUXMODE_DISABLE;
+    OPAMP_HANDLE.Init.UserTrimming = OPAMP_TRIMMING_FACTORY;
 
-    if (HAL_OPAMP_Init(&hopamp2) != HAL_OK) {
+    if (HAL_OPAMP_Init(&OPAMP_HANDLE) != HAL_OK) {
         return HAL_ERROR;
     }
 
@@ -845,8 +832,6 @@ static HAL_StatusTypeDef HalConfigure_Opamp_Init(void) {
 
 static HAL_StatusTypeDef HalConfigure_Adc2_Init(void) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
-    extern DMA_HandleTypeDef hdma_adc2;
-    extern ADC_HandleTypeDef hadc2;
     HAL_StatusTypeDef status;
     ADC_ChannelConfTypeDef sConfig = {0};
 
@@ -855,53 +840,53 @@ static HAL_StatusTypeDef HalConfigure_Adc2_Init(void) {
     __HAL_RCC_GPIOA_CLK_ENABLE();
 
     /* Configure ADC2 GPIO */
-    GPIO_InitStruct.Pin = ADC2_IN_PIN;
+    GPIO_InitStruct.Pin = ADC_PIEZO_IN_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(ADC2_IN_PORT, &GPIO_InitStruct);
+    HAL_GPIO_Init(ADC_PIEZO_IN_PORT, &GPIO_InitStruct);
 
     /* Configure DMA for ADC2 */
-    hdma_adc2.Instance = DMA1_Channel2;
-    hdma_adc2.Init.Request = DMA_REQUEST_ADC2;
-    hdma_adc2.Init.Direction = DMA_PERIPH_TO_MEMORY;
-    hdma_adc2.Init.PeriphInc = DMA_PINC_DISABLE;
-    hdma_adc2.Init.MemInc = DMA_MINC_ENABLE;
-    hdma_adc2.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
-    hdma_adc2.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
-    hdma_adc2.Init.Mode = DMA_CIRCULAR;
-    hdma_adc2.Init.Priority = DMA_PRIORITY_HIGH;
-    status = HAL_DMA_Init(&hdma_adc2);
+    ADC_PIEZO_DMA_HANDLE.Instance = ADC_PIEZO_DMA_INSTANCE;
+    ADC_PIEZO_DMA_HANDLE.Init.Request = ADC_PIEZO_DMA_REQUEST;
+    ADC_PIEZO_DMA_HANDLE.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    ADC_PIEZO_DMA_HANDLE.Init.PeriphInc = DMA_PINC_DISABLE;
+    ADC_PIEZO_DMA_HANDLE.Init.MemInc = DMA_MINC_ENABLE;
+    ADC_PIEZO_DMA_HANDLE.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
+    ADC_PIEZO_DMA_HANDLE.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
+    ADC_PIEZO_DMA_HANDLE.Init.Mode = DMA_CIRCULAR;
+    ADC_PIEZO_DMA_HANDLE.Init.Priority = DMA_PRIORITY_HIGH;
+    status = HAL_DMA_Init(&ADC_PIEZO_DMA_HANDLE);
     if (status != HAL_OK) return status;
 
     /* Link DMA to ADC2 handle */
-    __HAL_LINKDMA(&hadc2, DMA_Handle, hdma_adc2);
+    __HAL_LINKDMA(&ADC_PIEZO_HANDLE, DMA_Handle, ADC_PIEZO_DMA_HANDLE);
 
     /* DMA1_Channel2_IRQn interrupt configuration for ADC2 */
-    HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+    HAL_NVIC_SetPriority(ADC_PIEZO_DMA_IRQ, 0, 0);
+    HAL_NVIC_EnableIRQ(ADC_PIEZO_DMA_IRQ);
 
     /* NVIC configuration for ADC2 (DMA interrupt already configured in MX_DMA_Init) */
-    HAL_NVIC_SetPriority(ADC1_2_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(ADC1_2_IRQn);
+    HAL_NVIC_SetPriority(ADC_PIEZO_IRQ, 0, 0);
+    HAL_NVIC_EnableIRQ(ADC_PIEZO_IRQ);
 
     /* ADC2 configuration */
-    hadc2.Instance = ADC2;
-    hadc2.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
-    hadc2.Init.Resolution = ADC_RESOLUTION_12B;
-    hadc2.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-    hadc2.Init.GainCompensation = 0;
-    hadc2.Init.ScanConvMode = ADC_SCAN_DISABLE;
-    hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
-    hadc2.Init.LowPowerAutoWait = DISABLE;
-    hadc2.Init.ContinuousConvMode = DISABLE;
-    hadc2.Init.NbrOfConversion = 1;
-    hadc2.Init.DiscontinuousConvMode = DISABLE;
-    hadc2.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T6_TRGO;
-    hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
-    hadc2.Init.DMAContinuousRequests = ENABLE;
-    hadc2.Init.Overrun = ADC_OVR_DATA_PRESERVED;
-    hadc2.Init.OversamplingMode = DISABLE;
-    status = HAL_ADC_Init(&hadc2);
+    ADC_PIEZO_HANDLE.Instance = ADC_PIEZO_INSTANCE;
+    ADC_PIEZO_HANDLE.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+    ADC_PIEZO_HANDLE.Init.Resolution = ADC_RESOLUTION_12B;
+    ADC_PIEZO_HANDLE.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+    ADC_PIEZO_HANDLE.Init.GainCompensation = 0;
+    ADC_PIEZO_HANDLE.Init.ScanConvMode = ADC_SCAN_DISABLE;
+    ADC_PIEZO_HANDLE.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+    ADC_PIEZO_HANDLE.Init.LowPowerAutoWait = DISABLE;
+    ADC_PIEZO_HANDLE.Init.ContinuousConvMode = DISABLE;
+    ADC_PIEZO_HANDLE.Init.NbrOfConversion = 1;
+    ADC_PIEZO_HANDLE.Init.DiscontinuousConvMode = DISABLE;
+    ADC_PIEZO_HANDLE.Init.ExternalTrigConv = ADC_PIEZO_TRIGGER;
+    ADC_PIEZO_HANDLE.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
+    ADC_PIEZO_HANDLE.Init.DMAContinuousRequests = ENABLE;
+    ADC_PIEZO_HANDLE.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+    ADC_PIEZO_HANDLE.Init.OversamplingMode = DISABLE;
+    status = HAL_ADC_Init(&ADC_PIEZO_HANDLE);
     if (status != HAL_OK) return status;
 
     /* Configure ADC2 regular channel (match CubeMX) */
@@ -911,44 +896,56 @@ static HAL_StatusTypeDef HalConfigure_Adc2_Init(void) {
     sConfig.SingleDiff = ADC_SINGLE_ENDED;
     sConfig.OffsetNumber = ADC_OFFSET_NONE;
     sConfig.Offset = 0;
-    status = HAL_ADC_ConfigChannel(&hadc2, &sConfig);
+    status = HAL_ADC_ConfigChannel(&ADC_PIEZO_HANDLE, &sConfig);
     if (status != HAL_OK) return status;
 
     return HAL_OK;
 }
 
-static HAL_StatusTypeDef HalConfigure_Tim6_Init(void) {
-    extern TIM_HandleTypeDef htim6;
+/**
+ * @brief  Initialize ADC Tick Timer for ADC sampling clock
+ * @note   This timer provides the trigger signal for ADC2 conversions
+ *         Timer clock: APB1 x2 = 168 MHz (when APB1 prescaler != 1)
+ *         Prescaler: 0 (no division)
+ *         Period calculated based on ADC_SAMPLING_FREQ_KHZ configuration
+ *         For 168MHz clock:
+ *         - 100 kHz: Period = 1680 - 1 = 1679
+ *         - 50 kHz:  Period = 3360 - 1 = 3359
+ *         - 200 kHz: Period = 840 - 1 = 839
+ * @retval HAL status
+ */
+static HAL_StatusTypeDef HalConfigure_AdcTickTimer_Init(void) {
     TIM_MasterConfigTypeDef sMasterConfig = {0};
 
-    /* Enable TIM6 clock */
-    __HAL_RCC_TIM6_CLK_ENABLE();
+    /* ========== Clock Configuration ========== */
+    /* Enable ADC Tick Timer peripheral clock */
+    ADC_TICK_TIMER_RCC_CLK_ENABLE();
 
-    /* Calculate TIM6 period based on ADC sampling frequency
-     * TIM6 is driven by system clock with Prescaler=0
+    /* ========== Timer Period Calculation ========== */
+    /* Calculate timer period based on ADC sampling frequency
      * Period = SystemClockFreq / (ADC_SAMPLING_FREQ_KHZ * 1000) - 1
-     * For SYSCLK=168MHz:
-     * - 100 kHz: (168000000 / 100000) - 1 = 1680 - 1 = 1679
-     * - 50 kHz:  (168000000 / 50000) - 1 = 3360 - 1 = 3359
-     * - 200 kHz: (168000000 / 200000) - 1 = 840 - 1 = 839
      */
     uint32_t sysclk_freq = HAL_RCC_GetSysClockFreq();
-    uint32_t tim6_period = (sysclk_freq / (ADC_SAMPLING_FREQ_KHZ * 1000)) - 1;
+    uint32_t adc_tick_timer_period = (sysclk_freq / (ADC_SAMPLING_FREQ_KHZ * 1000)) - 1;
 
-    htim6.Instance = TIM6;
-    htim6.Init.Prescaler = 0;
-    htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-    htim6.Init.Period = tim6_period;
-    htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-    if (HAL_TIM_Base_Init(&htim6) != HAL_OK) return HAL_ERROR;
+    /* ========== Configure Timer Base ========== */
+    ADC_TICK_TIMER_HANDLE.Instance = ADC_TICK_TIMER_INSTANCE;
+    ADC_TICK_TIMER_HANDLE.Init.Prescaler = 0;
+    ADC_TICK_TIMER_HANDLE.Init.CounterMode = TIM_COUNTERMODE_UP;
+    ADC_TICK_TIMER_HANDLE.Init.Period = adc_tick_timer_period;
+    ADC_TICK_TIMER_HANDLE.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+    if (HAL_TIM_Base_Init(&ADC_TICK_TIMER_HANDLE) != HAL_OK) return HAL_ERROR;
 
+    /* ========== Configure Master Mode ========== */
+    /* Configure as master trigger for ADC */
     sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
     sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-    if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK) return HAL_ERROR;
+    if (HAL_TIMEx_MasterConfigSynchronization(&ADC_TICK_TIMER_HANDLE, &sMasterConfig) != HAL_OK) return HAL_ERROR;
 
-    /* NVIC configuration for TIM6 */
-    // HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 0, 0);
-    // HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
+    /* ========== NVIC Configuration ========== */
+    /* ADC Tick Timer interrupt configuration (optional - currently disabled) */
+    // HAL_NVIC_SetPriority(ADC_TICK_TIMER_IRQ, 0, 0);
+    // HAL_NVIC_EnableIRQ(ADC_TICK_TIMER_IRQ);
 
     return HAL_OK;
 }
@@ -957,39 +954,38 @@ static HAL_StatusTypeDef HalConfigure_Tim6_Init(void) {
 static HAL_StatusTypeDef HalConfigure_Dac1_Init(void) {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
     DAC_ChannelConfTypeDef sConfig = {0};
-    HAL_StatusTypeDef status;
 
     /* Enable DAC1, GPIO, DMA clocks */
     __HAL_RCC_DAC1_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
 
     /* Configure DAC GPIO */
-    GPIO_InitStruct.Pin = GPIO_PIN_4;
+    GPIO_InitStruct.Pin = TEST_DAC_OUT_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    HAL_GPIO_Init(TEST_DAC_OUT_PORT, &GPIO_InitStruct);
 
     /* DAC1 DMA Init */
     /* DAC1_CH1 Init */
-    hdma_dac1_ch1.Instance = DMA1_Channel1;
-    hdma_dac1_ch1.Init.Request = DMA_REQUEST_DAC1_CHANNEL1;
+    TEST_DAC_DMA_HANDLE.Instance = TEST_DAC_DMA_INSTANCE;
+    TEST_DAC_DMA_HANDLE.Init.Request = TEST_DAC_DMA_REQUEST;
     hdma_dac1_ch1.Init.Direction = DMA_MEMORY_TO_PERIPH;
     hdma_dac1_ch1.Init.PeriphInc = DMA_PINC_DISABLE;
     hdma_dac1_ch1.Init.MemInc = DMA_MINC_ENABLE;
     hdma_dac1_ch1.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
-    hdma_dac1_ch1.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
-    hdma_dac1_ch1.Init.Mode = DMA_CIRCULAR;
-    hdma_dac1_ch1.Init.Priority = DMA_PRIORITY_LOW;
-    if (HAL_DMA_Init(&hdma_dac1_ch1) != HAL_OK) {
+    TEST_DAC_DMA_HANDLE.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+    TEST_DAC_DMA_HANDLE.Init.Mode = DMA_CIRCULAR;
+    TEST_DAC_DMA_HANDLE.Init.Priority = DMA_PRIORITY_LOW;
+    if (HAL_DMA_Init(&TEST_DAC_DMA_HANDLE) != HAL_OK) {
         Error_Handler();
     }
 
-    __HAL_LINKDMA(&hdac1, DMA_Handle1, hdma_dac1_ch1);
+    __HAL_LINKDMA(&TEST_DAC_HANDLE, DMA_Handle1, TEST_DAC_DMA_HANDLE);
 
     /** DAC Initialization
      */
-    hdac1.Instance = DAC1;
-    if (HAL_DAC_Init(&hdac1) != HAL_OK) {
+    TEST_DAC_HANDLE.Instance = TEST_DAC_INSTANCE;
+    if (HAL_DAC_Init(&TEST_DAC_HANDLE) != HAL_OK) {
         Error_Handler();
     }
 
@@ -999,52 +995,31 @@ static HAL_StatusTypeDef HalConfigure_Dac1_Init(void) {
     sConfig.DAC_DMADoubleDataMode = DISABLE;
     sConfig.DAC_SignedFormat = DISABLE;
     sConfig.DAC_SampleAndHold = DAC_SAMPLEANDHOLD_DISABLE;
-    sConfig.DAC_Trigger = DAC_TRIGGER_T6_TRGO;
+    sConfig.DAC_Trigger = TEST_DAC_TRIGGER;
     sConfig.DAC_Trigger2 = DAC_TRIGGER_NONE;
     sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
     sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_EXTERNAL;
     sConfig.DAC_UserTrimming = DAC_TRIMMING_FACTORY;
-    if (HAL_DAC_ConfigChannel(&hdac1, &sConfig, DAC_CHANNEL_1) != HAL_OK) {
+    if (HAL_DAC_ConfigChannel(&TEST_DAC_HANDLE, &sConfig, DAC_CHANNEL_1) != HAL_OK) {
         Error_Handler();
     }
 
     /* DMA1_Channel1_IRQn interrupt configuration for DAC DMA */
-    HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
-
-    /* Initialize DAC waveform buffer (ramp pattern) */
-    for (int i = 0; i < DAC_SAMPLES; i++) {
-        dac_test_buffer[i] = ((((uint32_t)i) * DAC_MAX_VALUE) / (DAC_SAMPLES - 1));
-    }
+    HAL_NVIC_SetPriority(TEST_DAC_DMA_IRQ, 0, 0);
+    HAL_NVIC_EnableIRQ(TEST_DAC_DMA_IRQ);
 
     /* Note: DAC DMA start moved to Solution_HalInit() to ensure TIM6 is running first */
     /* DAC1 interrupt Init */
-    // HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 0, 0);
-    // HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
+    // HAL_NVIC_SetPriority(ADC_TICK_TIMER_IRQ, 0, 0);
+    // HAL_NVIC_EnableIRQ(ADC_TICK_TIMER_IRQ);
     /* USER CODE BEGIN DAC1_MspInit 1 */
 
     return HAL_OK;
 }
 
-/**
- * @brief  Start DAC DMA after TIM6 is configured
- * @note   Called from Solution_HalInit() after timer initialization
- * @retval HAL status
- */
-HAL_StatusTypeDef Solution_TestDacStart(void) {
-    /* Start DAC with DMA - must be called after TIM6 is initialized */
-    if (HAL_DAC_Start_DMA(&hdac1, TEST_DAC_CHANNEL, (uint32_t*)dac_test_buffer, DAC_SAMPLES, DAC_ALIGN_12B_R) != HAL_OK) {
-        return HAL_ERROR;
-    }
-
-    return HAL_OK;
-}
 #endif /* TEST_DAC_ENABLE */
 
 #if (COMP_HIT_DETECTION_ENABLE == 1u)
-/* COMP1 Handle with DAC1 threshold */
-COMP_HandleTypeDef hcomp1;
-
 /**
  * @brief  Configure COMP1 with DAC1 threshold for hit detection
  * @note   COMP1 compares PA1 (positive input) vs DAC1 channel 1 (negative input)
@@ -1066,34 +1041,39 @@ static HAL_StatusTypeDef HalConfigure_Comp1_Dac1_Init(void) {
     HAL_GPIO_Init(COMP1_INP_PORT, &GPIO_InitStruct);
 
     /* Initialize DAC1 */
-    hdac1.Instance = DAC1;
-    if (HAL_DAC_Init(&hdac1) != HAL_OK) {
+    TEST_DAC_HANDLE.Instance = TEST_DAC_INSTANCE;
+    if (HAL_DAC_Init(&TEST_DAC_HANDLE) != HAL_OK) {
         return HAL_ERROR;
     }
+
+    __HAL_RCC_DAC1_CLK_ENABLE();
+    /* DAC1 interrupt Init */
+    HAL_NVIC_SetPriority(ADC_TICK_TIMER_IRQ, 0, 0);
+    HAL_NVIC_EnableIRQ(ADC_TICK_TIMER_IRQ);
 
     /* Configure DAC1 Channel 1 for internal connection to COMP1 */
     sConfig.DAC_HighFrequency = DAC_HIGH_FREQUENCY_INTERFACE_MODE_AUTOMATIC;
     sConfig.DAC_DMADoubleDataMode = DISABLE;
     sConfig.DAC_SignedFormat = DISABLE;
     sConfig.DAC_SampleAndHold = DAC_SAMPLEANDHOLD_DISABLE;
-    sConfig.DAC_Trigger = DAC_TRIGGER_NONE;  /* No trigger, static threshold */
+    sConfig.DAC_Trigger = DAC_TRIGGER_NONE; /* No trigger, static threshold */
     sConfig.DAC_Trigger2 = DAC_TRIGGER_NONE;
     sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_DISABLE;
-    sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_INTERNAL;  /* Connect to COMP1 */
+    sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_INTERNAL; /* Connect to COMP1 */
     sConfig.DAC_UserTrimming = DAC_TRIMMING_FACTORY;
-    if (HAL_DAC_ConfigChannel(&hdac1, &sConfig, DAC_CHANNEL_1) != HAL_OK) {
+    if (HAL_DAC_ConfigChannel(&TEST_DAC_HANDLE, &sConfig, DAC_CHANNEL_1) != HAL_OK) {
         return HAL_ERROR;
     }
 
     /* Initialize COMP1 */
-    hcomp1.Instance = COMP1_INSTANCE;
-    hcomp1.Init.InputPlus = COMP_INPUT_PLUS_IO1;           /* PA1 signal input */
-    hcomp1.Init.InputMinus = COMP_INPUT_MINUS_DAC1_CH1;    /* DAC1 threshold */
-    hcomp1.Init.OutputPol = COMP_OUTPUTPOL_NONINVERTED;
-    hcomp1.Init.Hysteresis = COMP_HYSTERESIS_MEDIUM;       /* Medium hysteresis for noise immunity */
-    hcomp1.Init.BlankingSrce = COMP_BLANKINGSRC_NONE;
-    hcomp1.Init.TriggerMode = COMP_TRIGGERMODE_IT_RISING;  /* Interrupt on rising edge (PA1 > threshold) */
-    if (HAL_COMP_Init(&hcomp1) != HAL_OK) {
+    COMP_HIT_HANDLE.Instance = COMP1_INSTANCE;
+    COMP_HIT_HANDLE.Init.InputPlus = COMP_INPUT_PLUS_IO1;        /* PA1 signal input */
+    COMP_HIT_HANDLE.Init.InputMinus = COMP_INPUT_MINUS_DAC1_CH1; /* DAC1 threshold */
+    COMP_HIT_HANDLE.Init.OutputPol = COMP_OUTPUTPOL_NONINVERTED;
+    COMP_HIT_HANDLE.Init.Hysteresis = COMP_HYSTERESIS_MEDIUM; /* Medium hysteresis for noise immunity */
+    COMP_HIT_HANDLE.Init.BlankingSrce = COMP_BLANKINGSRC_NONE;
+    COMP_HIT_HANDLE.Init.TriggerMode = COMP_TRIGGERMODE_IT_RISING; /* Interrupt on rising edge (PA1 > threshold) */
+    if (HAL_COMP_Init(&COMP_HIT_HANDLE) != HAL_OK) {
         return HAL_ERROR;
     }
 
@@ -1104,28 +1084,4 @@ static HAL_StatusTypeDef HalConfigure_Comp1_Dac1_Init(void) {
     return HAL_OK;
 }
 
-/**
- * @brief  Start COMP1 comparator with DAC1 threshold
- * @note   Call this function after Solution_HalConfigure()
- *         Sets DAC1 to threshold voltage and enables COMP1 interrupt
- * @retval HAL_OK if successful, HAL_ERROR otherwise
- */
-HAL_StatusTypeDef Solution_Comp1Dac1Start(void) {
-    /* Set DAC1 threshold voltage */
-    if (HAL_DAC_SetValue(&hdac1, DAC_CHANNEL_1, DAC_ALIGN_12B_R, COMP_DAC_THRESHOLD_VALUE) != HAL_OK) {
-        return HAL_ERROR;
-    }
-
-    /* Start DAC1 channel 1 (provides threshold to COMP1) */
-    if (HAL_DAC_Start(&hdac1, DAC_CHANNEL_1) != HAL_OK) {
-        return HAL_ERROR;
-    }
-
-    /* Start COMP1 with interrupt */
-    if (HAL_COMP_Start(&hcomp1) != HAL_OK) {
-        return HAL_ERROR;
-    }
-
-    return HAL_OK;
-}
 #endif /* COMP_HIT_DETECTION_ENABLE */

@@ -465,6 +465,7 @@ static uint8_t crc8_update_chunk(uint8_t crc, const uint8_t* data, uint32_t len)
     return crc;
 }
 
+#if 0
 /**
  * @brief Fast table-based CRC8 calculation (full buffer)
  *
@@ -570,6 +571,7 @@ static uint32_t crc8_validate_methods(const LogFrame_t* frame) {
 
     return 1;  // Validation PASSED - both methods identical
 }
+#endif
 
 /**
  * @brief Initialize CRC state machine for frame at given offset
@@ -671,6 +673,7 @@ void Logger_Init(void) {
     loggerStat.config.adc_block_size = LOGGER_ADC_BLOCK_SIZE;       // 256 samples per frame
     loggerStat.config.mavlink_logging_enabled = 1;                  // MAVLink logging enabled
 
+#if (SPI_LOGGER_ENABLE == 1u)
     // Initialize SPI2 NVIC for interrupt-driven reception
     Logger_SPI_Init();
 
@@ -680,7 +683,7 @@ void Logger_Init(void) {
 
     // Initialize GPIO to ready=false (no data available initially)
     Logger_GPIO_SetReady(false);
-
+#endif
     // Initialize SPI state machine
     loggerStat.frame_ctx.spi_state = SPI_STATE_IDLE;
 }
@@ -720,10 +723,11 @@ int Logger_DrainQueue(void) {
         return 0;
     }
 
+#if (SPI_LOGGER_ENABLE == 1u)
     // Frame available - signal and transmit
     Logger_SPI_Transmit((uint8_t*)&loggerStat.tx_frame, sizeof(LogFrame_t));
     Logger_GPIO_SetReady(true);
-
+#endif
     return 1;  // Frame sent
 }
 
@@ -989,9 +993,10 @@ int Logger_GetNextFrame(LogFrame_t* out_frame) {
  * @note Called from SPI2 DMA interrupt context; keep execution time minimal
  */
 void Logger_SPI_TxCallback(void) {
-    // Transmission of one full frame/config is complete
+#if (SPI_LOGGER_ENABLE == 1u)
     // Signal ESP32 that DMA transmission finished by lowering GPIO
     Logger_GPIO_SetReady(false);
+#endif
 
     // Clear any SPI error flags to prevent lockup
     __HAL_SPI_CLEAR_OVRFLAG(&LOGGER_SPI_HANDLE);
@@ -1036,6 +1041,7 @@ void Logger_SPI_RxCallback(const uint8_t* rx_buffer) {
         return;
     }
 
+#if (SPI_LOGGER_ENABLE == 1u)
     uint8_t command = rx_buffer[0];  // Extract command byte
 
     if (command == LOGGER_SPI_CMD_CONFIG) {
@@ -1049,11 +1055,9 @@ void Logger_SPI_RxCallback(const uint8_t* rx_buffer) {
         // Next drain cycle will skip, then transition to frame mode
         loggerStat.config_sent = 1;
 
-        Test1Toggle();
-        Test1Toggle();
-
         // Start DMA transmission of config and mark state
         Logger_SPI_Transmit((uint8_t*)&loggerStat.tx_frame, sizeof(logger_config_t));
+
         loggerStat.frame_ctx.spi_state = SPI_STATE_PACKET_SENT;
 
         // Signal master that config data is ready on MISO
@@ -1064,7 +1068,24 @@ void Logger_SPI_RxCallback(const uint8_t* rx_buffer) {
         // Unknown command: clear GPIO and skip DMA
         Logger_GPIO_SetReady(false);
     }
+#endif
 }
+
+#if (COMP_HIT_DETECTION_ENABLE == 1u)
+uint8_t Logger_PiezoCompCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr) {
+    (void)usr_ptr; /* Unused parameter */
+
+    /* Ignore non-ready events */
+    if (evt != SYSTEM_EVT_READY) {
+        return 0u;
+    }
+
+    /* TODO OSAV ADD piezo handling here */
+    /* usr_data contains the threshold value in mV */
+
+    return 0u;
+}
+#endif /* COMP_HIT_DETECTION_ENABLE */
 
 /**
  * @brief MAVLink event callback for logger (replaces App_MavlinkCbk in logging mode)

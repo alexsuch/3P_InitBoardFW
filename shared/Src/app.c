@@ -33,7 +33,9 @@ static bool start_up;
 static void App_SafeTmrStop(void);
 static void App_ClearError(uint32_t err_code);
 static void App_SetError(err_type_t err_type, uint32_t usr_data);
+#if (CONTROL_MODE == PWM_CTRL_SUPP)
 static void App_SafeTmrPause(void);
+#endif /* (CONTROL_MODE == PWM_CTRL_SUPP) */
 static void App_SafeTmrRelease(void);
 static void App_ArmRun(void);
 #if VBAT_MEASURE_FEATURE
@@ -876,7 +878,7 @@ static uint8_t App_MavlinkCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr
 #endif /* !SELF_DESTROY_DISABLE */
                 ) {
                     /* Try to run ignition */
-                    App_IgnitionRun();
+                    App_MavlinkIgnitionTryRun();
                 }
 
                 break;
@@ -1599,12 +1601,14 @@ static void App_SafeTmrStop(void) {
     sysStatus.sys_info.timer_mode = TIMER_MODE_NONE;
 }
 
+#if (CONTROL_MODE == PWM_CTRL_SUPP)
 static void App_SafeTmrPause(void) {
     /* Pause the safe timer */
     sysStatus.safe_tmr_pause = true;
     /* Clear Status */
     Indication_SetStatus(IND_STATUS_NONE, 0u);
 }
+#endif /* (CONTROL_MODE == PWM_CTRL_SUPP) */
 
 static void App_SafeTmrRelease(void) {
     /* Release the safe timer */
@@ -1888,6 +1892,11 @@ void App_InitRun(void) {
 
     /* Init Mavlink processing */
     Mavlink_Init(Logger_MavlinkCbk, &sysStatus.sys_info);
+
+#if (COMP_HIT_DETECTION_ENABLE == 1u)
+    /* Init Piezo comparator processing */
+    PiezoComp_Init(Logger_PiezoCompCbk, COMP_DAC_THRESHOLD_MV);
+#endif /* (COMP_HIT_DETECTION_ENABLE == 1u) */
 #endif /* (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP) */
 #else
 
