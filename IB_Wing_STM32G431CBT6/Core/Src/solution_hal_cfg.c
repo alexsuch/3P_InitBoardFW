@@ -33,12 +33,10 @@ UART_HandleTypeDef huart3; /* VUSA UART handle */
 /* DMA handles */
 DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
 
-// #if (TEST_DAC_ENABLE == 1u)
 /* DAC handles */
 DAC_HandleTypeDef hdac1;               /* Test DAC handle */
 DMA_HandleTypeDef hdma_dac1_ch1;       /* Test DAC DMA handle */
 uint32_t dac_test_buffer[DAC_SAMPLES]; /* Test DAC waveform buffer */
-// #endif
 
 /* SPI handles */
 SPI_HandleTypeDef hspi1;        /* Accelerometer SPI handle */
@@ -107,14 +105,14 @@ void Solution_HalConfigure(void) {
 #endif
 
     /* Initialize ADC2 */
-    if (HalConfigure_Adc2_Init() != HAL_OK) {
-        Error_Handler();
-    }
+    // if (HalConfigure_Adc2_Init() != HAL_OK) {
+    //     Error_Handler();
+    // }
 
     /* Initialize TIM6 */
-    if (HalConfigure_Tim6_Init() != HAL_OK) {
-        Error_Handler();
-    }
+    // if (HalConfigure_Tim6_Init() != HAL_OK) {
+    //     Error_Handler();
+    // }
 
 #if (TEST_DAC_ENABLE == 1u)
     /* Initialize DAC1 (Test Signal Generator) */
@@ -143,8 +141,12 @@ static HAL_StatusTypeDef HalConfigure_DMA_Init(void) {
     __HAL_RCC_DMA1_CLK_ENABLE();
     __HAL_RCC_DMA2_CLK_ENABLE();
 
+    /* DMA1_Channel2_IRQn interrupt configuration for ADC2 */
+    HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+
 #if (TEST_DAC_ENABLE == 1u)
-    /* DMA1_Channel1_IRQn interrupt configuration for DAC DMA */
+    /* DMA1_Channel1_IRQn interrupt configuration for DAC */
     HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 #endif
@@ -934,8 +936,8 @@ static HAL_StatusTypeDef HalConfigure_Tim6_Init(void) {
     if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK) return HAL_ERROR;
 
     /* NVIC configuration for TIM6 */
-    HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
+    // HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 0, 0);
+    // HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
 
     return HAL_OK;
 }
@@ -951,42 +953,53 @@ static HAL_StatusTypeDef HalConfigure_Dac1_Init(void) {
     __HAL_RCC_GPIOA_CLK_ENABLE();
 
     /* Configure DAC GPIO */
-    GPIO_InitStruct.Pin = TEST_DAC_GPIO_PIN;
+    GPIO_InitStruct.Pin = GPIO_PIN_4;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(TEST_DAC_GPIO_PORT, &GPIO_InitStruct);
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-    /* DMA for DAC1_CH1 */
-    hdma_dac1_ch1.Instance = TEST_DAC_DMA_INSTANCE;
-    hdma_dac1_ch1.Init.Request = TEST_DAC_DMA_REQUEST;
+    /* DAC1 DMA Init */
+    /* DAC1_CH1 Init */
+    hdma_dac1_ch1.Instance = DMA1_Channel1;
+    hdma_dac1_ch1.Init.Request = DMA_REQUEST_DAC1_CHANNEL1;
     hdma_dac1_ch1.Init.Direction = DMA_MEMORY_TO_PERIPH;
     hdma_dac1_ch1.Init.PeriphInc = DMA_PINC_DISABLE;
     hdma_dac1_ch1.Init.MemInc = DMA_MINC_ENABLE;
     hdma_dac1_ch1.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
     hdma_dac1_ch1.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
     hdma_dac1_ch1.Init.Mode = DMA_CIRCULAR;
-    hdma_dac1_ch1.Init.Priority = DMA_PRIORITY_HIGH;
-    status = HAL_DMA_Init(&hdma_dac1_ch1);
-    if (status != HAL_OK) return status;
+    hdma_dac1_ch1.Init.Priority = DMA_PRIORITY_LOW;
+    if (HAL_DMA_Init(&hdma_dac1_ch1) != HAL_OK) {
+        Error_Handler();
+    }
 
-    /* Link DMA to DAC handle */
     __HAL_LINKDMA(&hdac1, DMA_Handle1, hdma_dac1_ch1);
 
-    /* DAC configuration */
-    hdac1.Instance = TEST_DAC_INSTANCE;
-    if (HAL_DAC_Init(&hdac1) != HAL_OK) return HAL_ERROR;
+    /** DAC Initialization
+     */
+    hdac1.Instance = DAC1;
+    if (HAL_DAC_Init(&hdac1) != HAL_OK) {
+        Error_Handler();
+    }
 
-    /* DAC channel configuration */
+    /** DAC channel OUT1 config
+     */
     sConfig.DAC_HighFrequency = DAC_HIGH_FREQUENCY_INTERFACE_MODE_AUTOMATIC;
     sConfig.DAC_DMADoubleDataMode = DISABLE;
     sConfig.DAC_SignedFormat = DISABLE;
     sConfig.DAC_SampleAndHold = DAC_SAMPLEANDHOLD_DISABLE;
-    sConfig.DAC_Trigger = TEST_DAC_TRIGGER;
+    sConfig.DAC_Trigger = DAC_TRIGGER_T6_TRGO;
     sConfig.DAC_Trigger2 = DAC_TRIGGER_NONE;
     sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
     sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_EXTERNAL;
     sConfig.DAC_UserTrimming = DAC_TRIMMING_FACTORY;
-    if (HAL_DAC_ConfigChannel(&hdac1, &sConfig, TEST_DAC_CHANNEL) != HAL_OK) return HAL_ERROR;
+    if (HAL_DAC_ConfigChannel(&hdac1, &sConfig, DAC_CHANNEL_1) != HAL_OK) {
+        Error_Handler();
+    }
+
+    /* DMA1_Channel1_IRQn interrupt configuration for DAC DMA */
+    // HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+    // HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
     /* Initialize DAC waveform buffer (ramp pattern) */
     for (int i = 0; i < DAC_SAMPLES; i++) {
@@ -994,6 +1007,10 @@ static HAL_StatusTypeDef HalConfigure_Dac1_Init(void) {
     }
 
     /* Note: DAC DMA start moved to Solution_HalInit() to ensure TIM6 is running first */
+    /* DAC1 interrupt Init */
+    // HAL_NVIC_SetPriority(TIM6_DAC_IRQn, 0, 0);
+    // HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
+    /* USER CODE BEGIN DAC1_MspInit 1 */
 
     return HAL_OK;
 }

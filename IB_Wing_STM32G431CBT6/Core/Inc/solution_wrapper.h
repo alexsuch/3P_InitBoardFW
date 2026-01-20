@@ -50,6 +50,7 @@ extern TIM_HandleTypeDef htim17;
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
 extern SPI_HandleTypeDef hspi1;
+extern DAC_HandleTypeDef hdac1; /* Test DAC handle */
 // extern ADC_HandleTypeDef hadc1;  /* ADC not used in this project */
 
 /* Exported functions prototypes ---------------------------------------------*/

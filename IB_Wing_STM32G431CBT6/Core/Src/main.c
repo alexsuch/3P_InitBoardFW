@@ -54,39 +54,7 @@ DMA_HandleTypeDef hdma_spi2_tx;
 TIM_HandleTypeDef htim6;
 
 /* USER CODE BEGIN PV */
-static void MX_DAC1_Init(void) {
-    /* USER CODE BEGIN DAC1_Init 0 */
 
-    /* USER CODE END DAC1_Init 0 */
-
-    DAC_ChannelConfTypeDef sConfig = {0};
-
-    /* USER CODE BEGIN DAC1_Init 1 */
-
-    /* USER CODE END DAC1_Init 1 */
-
-    /** DAC Initialization
-     */
-    hdac1.Instance = DAC1;
-    if (HAL_DAC_Init(&hdac1) != HAL_OK) {
-        Error_Handler();
-    }
-
-    /** DAC channel OUT1 config
-     */
-    sConfig.DAC_HighFrequency = DAC_HIGH_FREQUENCY_INTERFACE_MODE_AUTOMATIC;
-    sConfig.DAC_DMADoubleDataMode = DISABLE;
-    sConfig.DAC_SignedFormat = DISABLE;
-    sConfig.DAC_SampleAndHold = DAC_SAMPLEANDHOLD_DISABLE;
-    sConfig.DAC_Trigger = DAC_TRIGGER_T6_TRGO;
-    sConfig.DAC_Trigger2 = DAC_TRIGGER_NONE;
-    sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
-    sConfig.DAC_ConnectOnChipPeripheral = DAC_CHIPCONNECT_EXTERNAL;
-    sConfig.DAC_UserTrimming = DAC_TRIMMING_FACTORY;
-    if (HAL_DAC_ConfigChannel(&hdac1, &sConfig, DAC_CHANNEL_1) != HAL_OK) {
-        Error_Handler();
-    }
-}
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -98,7 +66,6 @@ static void MX_ADC2_Init(void);
 static void MX_OPAMP2_Init(void);
 static void MX_SPI2_Init(void);
 static void MX_TIM6_Init(void);
-
 /* USER CODE BEGIN PFP */
 
 #define DAC_MAX_VALUE 4095 /* 12-bit DAC maximum value */
@@ -148,14 +115,13 @@ int main(void) {
     MX_OPAMP2_Init();
     MX_SPI2_Init();
     MX_TIM6_Init();
-    MX_DAC1_Init();
     /* USER CODE BEGIN 2 */
     /* Configure Solution HAL peripherals */
     Solution_HalConfigure();
     /* Init Solution HAL layer */
     Solution_HalInit();
 
-#if 1
+#if 0
     for (int i = 0; i < DAC_SAMPLES; i++) {
         dac_buffer[i] = ((((uint32_t)i) * DAC_MAX_VALUE) / (DAC_SAMPLES - 1));
     }
@@ -163,8 +129,8 @@ int main(void) {
     if (HAL_DAC_Start_DMA(&hdac1, DAC_CHANNEL_1, (uint32_t *)dac_buffer, DAC_SAMPLES, DAC_ALIGN_12B_R) != HAL_OK) {
         Error_Handler();
     }
-#endif /* TEST_DAC_ENABLE */
-    /* Init application layer *
+#endif
+    /* Init application layer */
 
     /* Init application layer */
     App_InitRun();
@@ -445,13 +411,10 @@ static void MX_DMA_Init(void) {
     __HAL_RCC_DMA1_CLK_ENABLE();
     __HAL_RCC_DMA2_CLK_ENABLE();
 
-    /* DMA1_Channel1_IRQn interrupt configuration */
-    HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
     /* DMA interrupt init */
     /* DMA1_Channel2_IRQn interrupt configuration */
-    HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+    // HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
+    // HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
     /* DMA2_Channel2_IRQn interrupt configuration */
     HAL_NVIC_SetPriority(DMA2_Channel2_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(DMA2_Channel2_IRQn);
