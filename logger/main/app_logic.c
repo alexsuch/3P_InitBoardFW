@@ -61,6 +61,46 @@ wifi_t g_wifi_module;
 static QueueHandle_t g_command_queue;
 static app_logic_t *g_app_logic_instance = NULL;
 
+static void app_logic_turn_off_leds_for_reboot(void) {
+#if defined(USE_LED_OUT)
+    gpio_reset_pin(LED_OUT_GPIO);
+    (void)hal_gpio_setup(LED_OUT_GPIO, HAL_GPIO_DIR_OUTPUT, HAL_GPIO_PULL_NONE);
+    (void)hal_gpio_set_level(LED_OUT_GPIO, HAL_GPIO_LOW);
+#endif
+
+#if BOARD_LED_ENABLED
+    if (BOARDLED_PIN >= 0) {
+        gpio_reset_pin(BOARDLED_PIN);
+        (void)hal_gpio_setup(BOARDLED_PIN, HAL_GPIO_DIR_OUTPUT, HAL_GPIO_PULL_NONE);
+        (void)hal_gpio_set_level(BOARDLED_PIN, HAL_GPIO_LOW);
+    }
+#endif
+
+#if defined(USE_RGB_LED)
+    (void)hal_ws2812_open(RGB_LED_GPIO);
+    const hal_ws2812_color_t off = HAL_WS2812_OFF;
+    (void)hal_ws2812_set_colors(RGB_LED_GPIO, (hal_ws2812_color_order_e)LED_COLOR_ORDER, &off, 1);
+#endif
+}
+
+static void app_logic_reboot_with_leds_off(app_logic_t *app) {
+    if (app && app->led_task_handle) {
+        vTaskSuspend(app->led_task_handle);
+    }
+    app_logic_turn_off_leds_for_reboot();
+    vTaskDelay(pdMS_TO_TICKS(50));
+    system_reboot();
+}
+
+static void app_logic_reboot_to_boot_mode_with_leds_off(app_logic_t *app) {
+    if (app && app->led_task_handle) {
+        vTaskSuspend(app->led_task_handle);
+    }
+    app_logic_turn_off_leds_for_reboot();
+    vTaskDelay(pdMS_TO_TICKS(50));
+    system_reboot_to_boot_mode();
+}
+
 static void app_logic_delete_task_handle(TaskHandle_t *handle) {
     if (handle && *handle) {
         // Get task name for logging before deletion
@@ -284,10 +324,10 @@ static app_err_t usb_file_server_stop(void) {
         return APP_OK;
     }
 
-    // 0. Disconnect USB
+    // 0. Disconnect USB (forces host to drop MSC; COM will return after reboot/USB re-init)
     tud_disconnect();
-    // Give it a moment to disconnect
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // Give host time to process disconnect and close handles (Windows can be slow)
+    vTaskDelay(pdMS_TO_TICKS(500));
 
     // 1. Unmount raw SD card
     sdcard_unmount_raw();
@@ -298,6 +338,28 @@ static app_err_t usb_file_server_stop(void) {
         LOG_E(TAG, "Failed to restore SD card VFS mount");
         // This is bad, but we can't do much else
     }
+
+    // 3. Tear down MSC + TinyUSB stack so the USB peripheral is released cleanly.
+    // Without this, the device stays in MSC-only mode and CDC/COM won't come back until reboot.
+    if (s_msc_storage_hdl) {
+        esp_err_t del_err = tinyusb_msc_delete_storage(s_msc_storage_hdl);
+        if (del_err != ESP_OK) {
+            LOG_W(TAG, "tinyusb_msc_delete_storage failed: %s", esp_err_to_name(del_err));
+        }
+        s_msc_storage_hdl = NULL;
+    }
+
+    esp_err_t tusb_uninstall_err = tinyusb_driver_uninstall();
+    if (tusb_uninstall_err != ESP_OK) {
+        LOG_W(TAG, "tinyusb_driver_uninstall failed: %s", esp_err_to_name(tusb_uninstall_err));
+    }
+
+    esp_err_t msc_uninstall_err = tinyusb_msc_uninstall_driver();
+    if (msc_uninstall_err != ESP_OK) {
+        LOG_W(TAG, "tinyusb_msc_uninstall_driver failed: %s", esp_err_to_name(msc_uninstall_err));
+    }
+
+    g_usb_file_server_initialized = false;
 
     // Mark as stopped
     g_usb_file_server_running = false;
@@ -504,14 +566,14 @@ app_err_t app_logic_init_modules(app_logic_t *app) {
     gpio_reset_pin(STM_RESET_GPIO);
     gpio_set_direction(STM_RESET_GPIO, GPIO_MODE_OUTPUT);
     gpio_set_level(STM_RESET_GPIO, 0);
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(100));
     gpio_set_level(STM_RESET_GPIO, 1);
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(500));
     // Set back to Hi-Z (input) so ST-LINK can control STM32 reset for debugging
     gpio_set_direction(STM_RESET_GPIO, GPIO_MODE_INPUT);
     LOG_I(TAG, "STM32 reset complete, GPIO %d set to Hi-Z for ST-LINK access", STM_RESET_GPIO);
 
-    // Accelerometer is now handled by STM32, not ESP32
+    // All sensing and frame generation is handled by STM32.
 
     // Initialize Logger module
     if (logger_module_init_static(app->io_manager->sd_card_ok) != HAL_ERR_NONE) {
@@ -547,9 +609,7 @@ static void app_logic_prepare_download_mode(app_logic_t *app) {
         LOG_I(TAG, "IO Manager shutdown complete");
     }
 
-    // Stop accelerometer task (saves ~2KB stack)
-    // Stop accelerometer task (saves ~2KB stack)
-    // Removed - handled by STM32
+    // Stop sensor tasks (handled by STM32 in this project)
 
     // Stop piezo task (saves ~2KB stack)
     // Removed - handled by STM32
@@ -580,7 +640,7 @@ static void app_logic_prepare_download_mode(app_logic_t *app) {
     LOG_I(TAG, "=== TASK CLEANUP SUMMARY ===");
     LOG_I(TAG, "Free heap AFTER task cleanup: %zu bytes (%.2f KB)", heap_after_tasks, heap_after_tasks / 1024.0f);
     LOG_I(TAG, "Total task memory freed: %zu bytes (%.2f KB)", total_task_memory_freed, total_task_memory_freed / 1024.0f);
-    LOG_I(TAG, "Expected task stack savings: ~7KB (3KB IO + 2KB Accel + 2KB Piezo)");
+    LOG_I(TAG, "Expected task stack savings: ~7KB (3KB IO + 2KB Link + 2KB Piezo)");
     if (total_task_memory_freed >= 5000) {
         LOG_I(TAG, "✅ SUCCESS: Significant task memory freed (%zu KB)", total_task_memory_freed / 1024);
     } else if (total_task_memory_freed >= 2000) {
@@ -910,7 +970,7 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
             // Reboot after exiting download mode to ensure clean state
             LOG_I(TAG, "Exiting download mode - rebooting system for clean state");
             vTaskDelay(pdMS_TO_TICKS(1000));  // Give time for logs to flush
-            esp_restart();
+            app_logic_reboot_with_leds_off(app);
             break;
 #endif
 #if defined(USE_WEB_FILE_SEREVER)
@@ -1083,12 +1143,12 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
         }
         case APP_CMD_REBOOT_TO_BOOT:
             LOG_I(TAG, "Rebooting to boot mode...");
-            system_reboot_to_boot_mode();
+            app_logic_reboot_to_boot_mode_with_leds_off(app);
             break;
         case APP_CMD_REBOOT:
             LOG_I(TAG, "Rebooting device...");
             vTaskDelay(pdMS_TO_TICKS(100));  // Give time for logs to flush
-            esp_restart();
+            app_logic_reboot_with_leds_off(app);
             break;
 #if defined(USE_USB_FILE_SERVER)
         case APP_CMD_START_USB_FILE_SERVER:
@@ -1111,6 +1171,8 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
                 app_state_begin_update();
                 app_state_set_u8(APP_STATE_FIELD_CURRENT_MODE, (uint8_t *)&state->current_mode, APP_MODE_IDLE);
                 app_state_end_update();
+                LOG_I(TAG, "Exiting download mode - rebooting system for clean state");
+                app_logic_reboot_with_leds_off(app);
             }
             break;
 #endif

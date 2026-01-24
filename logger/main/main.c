@@ -24,7 +24,7 @@ _Static_assert((TASK_STACK_SIZE_USB_BOOT_CMD % sizeof(StackType_t)) == 0, "TASK_
 #include "soc/soc.h"
 
 #if defined(CONFIG_IDF_TARGET_ESP32S2)
-// SET BOOT MODE FOR S2 LOLIN MINI
+// Boot mode handling is ESP32-S3 specific in this project.
 static void usb_boot_cmd_task(void *arg) {
     // vTaskDelay(pdMS_TO_TICKS(3000));
 

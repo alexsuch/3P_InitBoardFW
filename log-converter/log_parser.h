@@ -102,7 +102,7 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
   uint16_t magic;         // 0x5A5A - frame marker
   uint16_t n_imu;         // Number of valid IMU samples (0-20)
-  uint32_t adc_timestamp; // Timestamp of first ADC sample
+  uint32_t adc_timestamp; // ADC block reference timestamp (TIM6 tick counter, captured in DMA callback)
 
   int16_t adc[LOG_ADC_BLOCK_SIZE]; // ADC samples (256 x int16 = 512 bytes)
   log_imu_sample_t imu[LOG_IMU_BLOCK_SIZE]; // IMU samples (20 x 16 = 320 bytes)

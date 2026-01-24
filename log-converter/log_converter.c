@@ -264,7 +264,7 @@ static int convert_file(const char *input_path, const char *output_dir) {
   // imu_data.csv
   snprintf(filepath, sizeof(filepath), "%s%cimu_data.csv", output_path,
            PATH_SEPARATOR);
-  csv_result = write_imu_csv(filepath, frames, frames_read);
+  csv_result = write_imu_csv(filepath, frames, frames_read, config.adc_sample_rate_khz);
   if (csv_result != CSV_OK) {
     fprintf(stderr, "Error: Failed to write imu_data.csv\n");
   } else {
@@ -279,7 +279,7 @@ static int convert_file(const char *input_path, const char *output_dir) {
   // mavlink_events.csv
   snprintf(filepath, sizeof(filepath), "%s%cmavlink_events.csv", output_path,
            PATH_SEPARATOR);
-  csv_result = write_mavlink_csv(filepath, frames, frames_read);
+  csv_result = write_mavlink_csv(filepath, frames, frames_read, config.adc_sample_rate_khz);
   if (csv_result != CSV_OK) {
     fprintf(stderr, "Error: Failed to write mavlink_events.csv\n");
   } else {

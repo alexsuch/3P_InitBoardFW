@@ -179,6 +179,8 @@ static void IRAM_ATTR logger_sd_write_task(void *arg) {
                     size_t free_heap = esp_get_free_heap_size();
                     LOG_I(TAG, "Sync done in %llu us, %u kB/s (total %u bytes, free_heap=%u bytes)", (unsigned long long)sync_dt_us, sync_kb_per_sec,
                           (unsigned)bytes_since_sync, (unsigned)free_heap);
+#else
+                    //TODO
 #endif
                     chunks_since_sync = 0;
                     bytes_since_sync = 0;

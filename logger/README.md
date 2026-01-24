@@ -1,32 +1,23 @@
+# Logger (ESP32) — STM32 Frame Receiver
 
-## Update repo and update submodules
+This firmware runs on ESP32-S3 and records binary `logger_frame_t` frames produced by the STM32 firmware over an SPI link.
+It does **not** talk to the IMU directly and does not perform any sensor processing.
 
-### S3
-Zadig
-Обрати USB JTAG/serial debug unit (Interface 0) → залишити драйвер USB Serial (CDC) (це Serial порт).
-Обрати USB JTAG/serial debug unit (Interface 2) → поставити драйвер WinUSB або libusbK.
+## Key Settings
 
-### S2
-#### Upload and monitor by USB
-- press boot button
-- then connect USB cable to board
-- release boot button
-- download Zadig https://zadig.akeo.ie/
-- oped Zadig and select "Options->List all devices", select ESP32-S2 (Interface 0),  select "USB Serial (CDC)" install
-- select select ESP32-S2 (Interface 2) "WinUSB"  driver,  Install
-- reboot
-- do the same for regular boar mode
-- switch board mode to boot
-- build project
-- select COM port in platform io
-- upload
-- reset
-- next Uploads and monitor should automatically upload and listen serial monitor
+- STM32 link SPI clock: `logger/include/target.h` → `LINK_SPI_FREQ_HZ`
+- Link pins / board mapping: `logger/include/target.h` (`LINK_SPI_*`, `LINK_INT_GPIO`, `STM_RESET_GPIO`)
 
-## Configuation
+## Windows USB Drivers (Zadig)
 
-There is ```doc/configuration.example.ini```  example  write it to SD card with name ```configuration.ini```
+Some boards expose multiple USB interfaces. On Windows you may need Zadig to install the correct driver per interface.
 
-## Board setup
+### ESP32-S3
+- For "USB JTAG/serial debug unit (Interface 0)": keep `USB Serial (CDC)` (COM port).
+- For "USB JTAG/serial debug unit (Interface 2)": install `WinUSB` (or `libusbK`).
 
-read esp-hints.md file
+## Build / Flash (PlatformIO)
+
+- Build: `pio run -e esp32s3_logger` (or your target environment)
+- Flash: `pio run -e esp32s3_logger -t upload`
+- Monitor: `pio device monitor`

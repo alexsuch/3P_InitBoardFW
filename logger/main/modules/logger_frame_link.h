@@ -5,12 +5,12 @@
  * @brief Phase 5 SPI Communication - LogFrame_t structure for STM32→ESP32 transmission
  *
  * Defines the 640-byte LogFrame_t structure with ADC+IMU merged data.
- * This replaces the previous 50-byte accel_link_frame_t for enhanced logging capability.
+ * This replaces the previous 50-byte legacy link frame for enhanced logging capability.
  *
  * Frame Layout (852 bytes):
  *   - magic (2B):          0x5A5A
  *   - n_imu (2B):          Number of valid IMU samples (0-20)
- *   - adc_timestamp (4B):  Timestamp of first ADC sample (TIM6 @ 100 kHz)
+ *   - adc_timestamp (4B):  ADC block reference timestamp (TIM6 ticks @ 100 kHz, captured in DMA callback)
  *   - adc[256] (512B):     ADC samples at 100 kHz (256 × int16_t)
  *   - imu[20] (320B):      IMU raw samples with per-sample timestamps (20 × 16B, only first n_imu valid)
  *   - mavlink_log (10B):   MAVLink event flags and telemetry (event_flags, speed, altitude)
@@ -28,7 +28,7 @@
 
 /**
  * @brief IMU raw sample structure (16 bytes)
- * Contains raw gyro and accelerometer readings from LSM6DS3 with timestamp
+ * Contains raw IMU readings as provided by STM32 (12 bytes + timestamp)
  */
 typedef struct __attribute__((packed)) {
     uint8_t data[12];    // Raw 12 bytes from SPI (gx, gy, gz, ax, ay, az as int16_t each)
@@ -91,7 +91,7 @@ _Static_assert(sizeof(mavlink_log_data_t) == 10, "mavlink_log_data_t must be 10 
  * Size: 852 bytes
  *   - magic (2B): 0x5A5A
  *   - n_imu (2B): number of valid IMU samples (0-20)
- *   - adc_timestamp (4B): timestamp of first ADC sample
+ *   - adc_timestamp (4B): ADC block reference timestamp (captured in DMA callback)
  *   - adc[256] (512B): ADC data block (256 × int16_t)
  *   - imu[20] (320B): IMU data block with per-sample timestamps (20 × 16B)
  *   - mavlink_log (10B): MAVLink event flags + telemetry
@@ -100,7 +100,7 @@ _Static_assert(sizeof(mavlink_log_data_t) == 10, "mavlink_log_data_t must be 10 
 typedef struct __attribute__((packed)) {
     uint16_t magic;                                      // 0x5A5A (2B)
     uint16_t n_imu;                                      // Valid IMU sample count (0-20) (2B)
-    uint32_t adc_timestamp;                              // Timestamp of first ADC sample (4B)
+    uint32_t adc_timestamp;                              // ADC block reference timestamp (TIM6 tick counter) (4B)
     int16_t adc[LOGGER_ADC_BLOCK_SIZE];                  // ADC buffer (512B)
     logger_imu_raw_sample_t imu[LOGGER_IMU_BLOCK_SIZE];  // IMU buffer (320B)
     mavlink_log_data_t mavlink_log;                      // MAVLink event flags + telemetry (10B)
@@ -125,7 +125,7 @@ _Static_assert(sizeof(logger_frame_t) == LOGGER_FRAME_SIZE_BYTES, "logger_frame_
  */
 typedef struct __attribute__((packed)) {
     // Offset 0-3: Presence and identification (4 bytes)
-    uint8_t accel_present;  // 1 if accelerometer enabled (ODR > 0), 0 otherwise
+    uint8_t accel_present;  // 1 if IMU accel is enabled (ODR > 0), 0 otherwise
     uint8_t gyro_present;   // 1 if gyroscope enabled (ODR > 0), 0 otherwise
     uint8_t chip_id;        // WHO_AM_I register value (0x69 for LSM6DS3)
     uint8_t reserved_pad;   // Padding for alignment

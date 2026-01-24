@@ -54,20 +54,22 @@ csv_result_t write_adc_csv(const char *filepath, const log_frame_t *frames,
  * @param filepath Output file path
  * @param frames Array of frames containing IMU data
  * @param frame_count Number of frames
+ * @param adc_sample_rate_khz Logger TIM6 tick rate in kHz (from config)
  * @return CSV_OK on success
  */
 csv_result_t write_imu_csv(const char *filepath, const log_frame_t *frames,
-                           size_t frame_count);
+                           size_t frame_count, uint16_t adc_sample_rate_khz);
 
 /**
  * @brief Write MAVLink events to CSV file
  * @param filepath Output file path
  * @param frames Array of frames containing MAVLink data
  * @param frame_count Number of frames
+ * @param adc_sample_rate_khz Logger TIM6 tick rate in kHz (from config)
  * @return CSV_OK on success
  */
 csv_result_t write_mavlink_csv(const char *filepath, const log_frame_t *frames,
-                               size_t frame_count);
+                               size_t frame_count, uint16_t adc_sample_rate_khz);
 
 /**
  * @brief Create output directory if it doesn't exist

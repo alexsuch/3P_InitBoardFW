@@ -8,11 +8,10 @@
 - Additional docs and board notes are under `doc/` (e.g., `doc/esp-hints.md`, `configuration.example.ini`, pinouts).
 
 ## Build, Test & Run
-- Build for LOLIN S2 Mini: `pio run -e lolin_s2_mini`
 - Build for generic ESP32 dev board: `pio run -e esp32`
-- Flash firmware: `pio run -e lolin_s2_mini -t upload`
+- Flash firmware: `pio run -e esp32 -t upload`
 - Open serial monitor: `pio device monitor`
-- Run unit tests for a given environment: `pio test -e lolin_s2_mini` or `pio test -e esp32`
+- Run unit tests for a given environment: `pio test -e esp32`
 
 ## Coding Style & Naming
 - C/C++ code is formatted with `.clang-format` (Google style, 4-space indent, 160-column limit, no tabs). Run `clang-format` before committing.
@@ -35,4 +34,3 @@
 ## Agent-Specific Instructions
 - Do not run build or test commands (`pio run`, `pio test`, `cmake`, etc.); builds and tests are executed manually by maintainers.
 - When external library documentation is needed, use the MCP Context7 tools (`mcp__context7__resolve-library-id` and `mcp__context7__get-library-docs`) instead of external web search.
-

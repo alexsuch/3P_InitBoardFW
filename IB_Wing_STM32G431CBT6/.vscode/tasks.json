@@ -10,7 +10,7 @@
         "kind": "build",
         "isDefault": true
       },
-      "problemMatcher": ["$gcc"],
+      "problemMatcher": [],
       "presentation": {
         "reveal": "always",
         "panel": "shared"
