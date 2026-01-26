@@ -75,7 +75,7 @@ typedef struct __attribute__((packed)) {
 
   uint8_t mavlink_logging_enabled; // 1 = MAVLink logging enabled
 
-  uint8_t reserved[32]; // Reserved for future use (ensures 64-byte total)
+  uint8_t reserved[32]; // reserved[0]=checksum algorithm id; remaining reserved for future use
 } log_config_t;
 
 /**
@@ -102,13 +102,14 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
   uint16_t magic;         // 0x5A5A - frame marker
   uint16_t n_imu;         // Number of valid IMU samples (0-20)
-  uint32_t adc_timestamp; // ADC block reference timestamp (TIM6 tick counter, captured in DMA callback)
+  uint32_t adc_timestamp; // Timestamp of the first ADC sample in this block (100 kHz tick counter)
 
   int16_t adc[LOG_ADC_BLOCK_SIZE]; // ADC samples (256 x int16 = 512 bytes)
   log_imu_sample_t imu[LOG_IMU_BLOCK_SIZE]; // IMU samples (20 x 16 = 320 bytes)
   log_mavlink_data_t mavlink;               // MAVLink data (10 bytes)
 
-  uint16_t crc16; // CRC checksum (actually CRC8 stored in uint16)
+  uint8_t checksum8;     // Checksum (CRC8 or SUM8, depends on firmware build)
+  uint8_t checksum_pad;  // Reserved/padding (0)
 } log_frame_t;
 
 /* ============================================================================

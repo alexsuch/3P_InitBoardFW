@@ -27,6 +27,57 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#define CHECKSUM_ALGO_CRC8_SW_ID 1u
+#define CHECKSUM_ALGO_SUM8_ID 2u
+#define CHECKSUM_ALGO_CRC8_HW_ID 3u
+
+#define LOG_FRAME_PAYLOAD_BYTES (sizeof(log_frame_t) - 2u) // excluding checksum8+pad
+
+static uint8_t crc8_table[256];
+static int crc8_table_inited = 0;
+
+static void crc8_init_table(void) {
+  if (crc8_table_inited) {
+    return;
+  }
+  crc8_table_inited = 1;
+
+  for (int i = 0; i < 256; i++) {
+    uint8_t crc = (uint8_t)i;
+    for (int b = 0; b < 8; b++) {
+      if (crc & 0x80) {
+        crc = (uint8_t)((crc << 1) ^ 0x07);
+      } else {
+        crc = (uint8_t)(crc << 1);
+      }
+    }
+    crc8_table[i] = crc;
+  }
+}
+
+static uint8_t checksum8_calc(uint8_t algo_id, const uint8_t *data,
+                              size_t len) {
+  if (!data || len == 0) {
+    return 0;
+  }
+
+  if (algo_id == CHECKSUM_ALGO_SUM8_ID) {
+    uint8_t sum = 0;
+    for (size_t i = 0; i < len; i++) {
+      sum = (uint8_t)(sum + data[i]);
+    }
+    return sum;
+  }
+
+  // CRC8 (SW or HW on firmware side produce the same 8-bit result)
+  crc8_init_table();
+  uint8_t crc = 0;
+  for (size_t i = 0; i < len; i++) {
+    crc = crc8_table[crc ^ data[i]];
+  }
+  return crc;
+}
+
 #ifdef _WIN32
 #include <direct.h>
 #include <windows.h>
@@ -195,19 +246,56 @@ static int convert_file(const char *input_path, const char *output_dir) {
     return -1;
   }
 
-  // Read all frames
+  uint8_t *frame_magic_ok = (uint8_t *)calloc(frame_count, sizeof(uint8_t));
+  uint8_t *frame_checksum_ok = (uint8_t *)calloc(frame_count, sizeof(uint8_t));
+  uint8_t *frame_checksum_calc = (uint8_t *)calloc(frame_count, sizeof(uint8_t));
+  uint8_t *frame_ok = (uint8_t *)calloc(frame_count, sizeof(uint8_t));
+  if (!frame_magic_ok || !frame_checksum_ok || !frame_checksum_calc ||
+      !frame_ok) {
+    fprintf(stderr, "Error: Out of memory (status arrays)\n");
+    free(frame_magic_ok);
+    free(frame_checksum_ok);
+    free(frame_checksum_calc);
+    free(frame_ok);
+    free(frames);
+    fclose(fp);
+    return -1;
+  }
+
+  // Read all frames (do not drop invalid ones)
   size_t frames_read = 0;
   size_t frames_invalid = 0;
+  const uint8_t algo_id = config.reserved[0];
   for (size_t i = 0; i < frame_count; i++) {
-    result = parse_frame(fp, &frames[frames_read]);
-    if (result == PARSE_ERROR_EOF) {
+    size_t read = fread(&frames[i], 1, sizeof(log_frame_t), fp);
+    if (read == 0) {
       break;
     }
-    if (result != PARSE_OK) {
+    if (read != sizeof(log_frame_t)) {
       frames_invalid++;
-      continue;
+      frames_read++;
+      break;
     }
+
     frames_read++;
+
+    const uint8_t magic_ok = (frames[i].magic == LOG_FRAME_MAGIC) ? 1u : 0u;
+    frame_magic_ok[i] = magic_ok;
+
+    const uint8_t calc = checksum8_calc(
+        algo_id, (const uint8_t *)&frames[i], LOG_FRAME_PAYLOAD_BYTES);
+    frame_checksum_calc[i] = calc;
+
+    const uint8_t checksum_ok =
+        ((calc == frames[i].checksum8) && (frames[i].checksum_pad == 0)) ? 1u
+                                                                         : 0u;
+    frame_checksum_ok[i] = checksum_ok;
+
+    const uint8_t ok = (magic_ok && checksum_ok) ? 1u : 0u;
+    frame_ok[i] = ok;
+    if (!ok) {
+      frames_invalid++;
+    }
   }
 
   fclose(fp);
@@ -249,11 +337,25 @@ static int convert_file(const char *input_path, const char *output_dir) {
     printf("  Written: config.csv\n");
   }
 
+  // frame_status.csv
+  snprintf(filepath, sizeof(filepath), "%s%cframe_status.csv", output_path,
+           PATH_SEPARATOR);
+  csv_result = write_frame_status_csv(filepath, frames, frame_magic_ok,
+                                      frame_checksum_ok, frame_checksum_calc,
+                                      frames_read, config.adc_sample_rate_khz,
+                                      config.reserved[0]);
+  if (csv_result != CSV_OK) {
+    fprintf(stderr, "Error: Failed to write frame_status.csv\n");
+  } else {
+    printf("  Written: frame_status.csv\n");
+  }
+
   // adc_data.csv
   snprintf(filepath, sizeof(filepath), "%s%cadc_data.csv", output_path,
            PATH_SEPARATOR);
   csv_result =
-      write_adc_csv(filepath, frames, frames_read, config.adc_sample_rate_khz);
+      write_adc_csv(filepath, frames, frames_read, config.adc_sample_rate_khz,
+                    frame_ok);
   if (csv_result != CSV_OK) {
     fprintf(stderr, "Error: Failed to write adc_data.csv\n");
   } else {
@@ -264,7 +366,8 @@ static int convert_file(const char *input_path, const char *output_dir) {
   // imu_data.csv
   snprintf(filepath, sizeof(filepath), "%s%cimu_data.csv", output_path,
            PATH_SEPARATOR);
-  csv_result = write_imu_csv(filepath, frames, frames_read, config.adc_sample_rate_khz);
+  csv_result = write_imu_csv(filepath, frames, frames_read,
+                             config.adc_sample_rate_khz, frame_ok);
   if (csv_result != CSV_OK) {
     fprintf(stderr, "Error: Failed to write imu_data.csv\n");
   } else {
@@ -279,13 +382,18 @@ static int convert_file(const char *input_path, const char *output_dir) {
   // mavlink_events.csv
   snprintf(filepath, sizeof(filepath), "%s%cmavlink_events.csv", output_path,
            PATH_SEPARATOR);
-  csv_result = write_mavlink_csv(filepath, frames, frames_read, config.adc_sample_rate_khz);
+  csv_result = write_mavlink_csv(filepath, frames, frames_read,
+                                 config.adc_sample_rate_khz, frame_ok);
   if (csv_result != CSV_OK) {
     fprintf(stderr, "Error: Failed to write mavlink_events.csv\n");
   } else {
     printf("  Written: mavlink_events.csv\n");
   }
 
+  free(frame_magic_ok);
+  free(frame_checksum_ok);
+  free(frame_checksum_calc);
+  free(frame_ok);
   free(frames);
   printf("  Conversion complete: %s\n\n", output_path);
 

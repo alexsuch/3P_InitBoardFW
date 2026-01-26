@@ -47,29 +47,51 @@ csv_result_t write_config_csv(const char *filepath, const log_config_t *config);
  * @return CSV_OK on success
  */
 csv_result_t write_adc_csv(const char *filepath, const log_frame_t *frames,
-                           size_t frame_count, uint16_t adc_sample_rate_khz);
+                           size_t frame_count, uint16_t adc_sample_rate_khz,
+                           const uint8_t *frame_ok);
 
 /**
  * @brief Write IMU data to CSV file
  * @param filepath Output file path
  * @param frames Array of frames containing IMU data
  * @param frame_count Number of frames
- * @param adc_sample_rate_khz Logger TIM6 tick rate in kHz (from config)
+ * @param adc_sample_rate_khz Logger tick rate in kHz (from config)
  * @return CSV_OK on success
  */
 csv_result_t write_imu_csv(const char *filepath, const log_frame_t *frames,
-                           size_t frame_count, uint16_t adc_sample_rate_khz);
+                           size_t frame_count, uint16_t adc_sample_rate_khz,
+                           const uint8_t *frame_ok);
 
 /**
  * @brief Write MAVLink events to CSV file
  * @param filepath Output file path
  * @param frames Array of frames containing MAVLink data
  * @param frame_count Number of frames
- * @param adc_sample_rate_khz Logger TIM6 tick rate in kHz (from config)
+ * @param adc_sample_rate_khz Logger tick rate in kHz (from config)
  * @return CSV_OK on success
  */
 csv_result_t write_mavlink_csv(const char *filepath, const log_frame_t *frames,
-                               size_t frame_count, uint16_t adc_sample_rate_khz);
+                               size_t frame_count, uint16_t adc_sample_rate_khz,
+                               const uint8_t *frame_ok);
+
+/**
+ * @brief Write per-frame status (magic/checksum) to CSV file
+ * @param filepath Output file path
+ * @param frames Array of frames
+ * @param frame_magic_ok Per-frame magic validity flags (0/1), may be NULL
+ * @param frame_checksum_ok Per-frame checksum validity flags (0/1), may be NULL
+ * @param frame_checksum_calc Per-frame calculated checksum (8-bit), may be NULL
+ * @param frame_count Number of frames
+ * @param adc_sample_rate_khz Logger tick rate in kHz (from config)
+ * @param checksum_algo_id Algorithm id from config.reserved[0]
+ * @return CSV_OK on success
+ */
+csv_result_t write_frame_status_csv(const char *filepath, const log_frame_t *frames,
+                                    const uint8_t *frame_magic_ok,
+                                    const uint8_t *frame_checksum_ok,
+                                    const uint8_t *frame_checksum_calc,
+                                    size_t frame_count, uint16_t adc_sample_rate_khz,
+                                    uint8_t checksum_algo_id);
 
 /**
  * @brief Create output directory if it doesn't exist

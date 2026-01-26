@@ -21,10 +21,23 @@ static uint64_t ticks_to_us_u64(uint64_t ticks, uint16_t tick_rate_khz) {
         return 0;
     }
 
-    // Firmware timestamps are TIM6 "ticks" at (tick_rate_khz * 1000) Hz.
+    // Firmware timestamps are "ticks" at (tick_rate_khz * 1000) Hz.
     // Convert ticks -> microseconds:
     //   1 tick = 1e6 / (tick_rate_khz * 1000) us = 1000 / tick_rate_khz us
     return (ticks * 1000ULL) / (uint64_t)tick_rate_khz;
+}
+
+static const char* checksum_algo_name(uint8_t algo_id) {
+    switch (algo_id) {
+        case 1:
+            return "CRC8_SW";
+        case 2:
+            return "SUM8";
+        case 3:
+            return "CRC8_HW";
+        default:
+            return "UNKNOWN";
+    }
 }
 
 csv_result_t write_config_csv(const char* filepath, const log_config_t* config) {
@@ -58,11 +71,16 @@ csv_result_t write_config_csv(const char* filepath, const log_config_t* config) 
     // MAVLink
     fprintf(fp, "mavlink_logging_enabled,%u\n", config->mavlink_logging_enabled);
 
+    // Checksum algorithm id (exported by firmware in reserved[0])
+    fprintf(fp, "checksum_algo_id,%u\n", config->reserved[0]);
+    fprintf(fp, "checksum_algo_name,%s\n", checksum_algo_name(config->reserved[0]));
+
     fclose(fp);
     return CSV_OK;
 }
 
-csv_result_t write_adc_csv(const char* filepath, const log_frame_t* frames, size_t frame_count, uint16_t adc_sample_rate_khz) {
+csv_result_t write_adc_csv(const char* filepath, const log_frame_t* frames, size_t frame_count, uint16_t adc_sample_rate_khz,
+                           const uint8_t* frame_ok) {
     if (!filepath || !frames || frame_count == 0) {
         return CSV_ERROR_PARAM;
     }
@@ -84,19 +102,17 @@ csv_result_t write_adc_csv(const char* filepath, const log_frame_t* frames, size
     uint64_t prev_block_start_ticks = 0;
     for (size_t f = 0; f < frame_count; f++) {
         const log_frame_t* frame = &frames[f];
+        const bool ok = frame_ok ? (frame_ok[f] != 0) : true;
 
-        // Firmware captures adc_timestamp from a 100 kHz TIM6 tick in the ADC DMA callback.
-        // In practice this is closer to the *end* of the 256-sample block, not the first sample.
-        // Convert it to an estimated "first sample" timestamp by subtracting (block_size - 1).
-        uint64_t block_end_ticks = (uint64_t)frame->adc_timestamp;
-        uint64_t block_start_ticks = (block_end_ticks >= (LOG_ADC_BLOCK_SIZE - 1))
-                                         ? (block_end_ticks - (LOG_ADC_BLOCK_SIZE - 1))
-                                         : 0;
+        // Firmware provides adc_timestamp as the timestamp of the first ADC sample in the block.
+        uint64_t block_start_ticks = (uint64_t)frame->adc_timestamp;
 
         // Enforce non-decreasing block starts even if the captured end-timestamp jitters by ±1 tick.
         if (have_prev_start) {
             uint64_t expected_start = prev_block_start_ticks + (uint64_t)LOG_ADC_BLOCK_SIZE;
-            if (block_start_ticks < expected_start) {
+            if (!ok) {
+                block_start_ticks = expected_start;
+            } else if (block_start_ticks < expected_start) {
                 block_start_ticks = expected_start;
             }
         }
@@ -107,7 +123,8 @@ csv_result_t write_adc_csv(const char* filepath, const log_frame_t* frames, size
             // Keep arithmetic in firmware ticks, then scale to microseconds for output.
             uint64_t ticks = block_start_ticks + (uint64_t)s;
             uint64_t timestamp_us = ticks_to_us_u64(ticks, adc_sample_rate_khz);
-            fprintf(fp, "%" PRIu64 ",%d\n", timestamp_us, frame->adc[s]);
+            const int16_t adc_val = ok ? frame->adc[s] : 0;
+            fprintf(fp, "%" PRIu64 ",%d\n", timestamp_us, adc_val);
         }
     }
 
@@ -115,7 +132,8 @@ csv_result_t write_adc_csv(const char* filepath, const log_frame_t* frames, size
     return CSV_OK;
 }
 
-csv_result_t write_imu_csv(const char* filepath, const log_frame_t* frames, size_t frame_count, uint16_t adc_sample_rate_khz) {
+csv_result_t write_imu_csv(const char* filepath, const log_frame_t* frames, size_t frame_count, uint16_t adc_sample_rate_khz,
+                           const uint8_t* frame_ok) {
     if (!filepath || !frames || frame_count == 0) {
         return CSV_ERROR_PARAM;
     }
@@ -133,6 +151,10 @@ csv_result_t write_imu_csv(const char* filepath, const log_frame_t* frames, size
     // Write IMU samples from all frames
     for (size_t f = 0; f < frame_count; f++) {
         const log_frame_t* frame = &frames[f];
+        const bool ok = frame_ok ? (frame_ok[f] != 0) : true;
+        if (!ok) {
+            continue;
+        }
 
         // Only process valid IMU samples
         uint16_t imu_count = frame->n_imu;
@@ -155,7 +177,8 @@ csv_result_t write_imu_csv(const char* filepath, const log_frame_t* frames, size
     return CSV_OK;
 }
 
-csv_result_t write_mavlink_csv(const char* filepath, const log_frame_t* frames, size_t frame_count, uint16_t adc_sample_rate_khz) {
+csv_result_t write_mavlink_csv(const char* filepath, const log_frame_t* frames, size_t frame_count, uint16_t adc_sample_rate_khz,
+                               const uint8_t* frame_ok) {
     if (!filepath || !frames || frame_count == 0) {
         return CSV_ERROR_PARAM;
     }
@@ -173,6 +196,10 @@ csv_result_t write_mavlink_csv(const char* filepath, const log_frame_t* frames, 
     // Write MAVLink data from each frame
     for (size_t f = 0; f < frame_count; f++) {
         const log_frame_t* frame = &frames[f];
+        const bool ok = frame_ok ? (frame_ok[f] != 0) : true;
+        if (!ok) {
+            continue;
+        }
         const log_mavlink_data_t* mav = &frame->mavlink;
 
         // Only write if there are events
@@ -180,6 +207,38 @@ csv_result_t write_mavlink_csv(const char* filepath, const log_frame_t* frames, 
             uint64_t frame_timestamp_us = ticks_to_us_u64((uint64_t)frame->adc_timestamp, adc_sample_rate_khz);
             fprintf(fp, "%" PRIu64 ",0x%08X,%u,%d\n", frame_timestamp_us, mav->event_flags, mav->speed_ms, mav->altitude_m);
         }
+    }
+
+    fclose(fp);
+    return CSV_OK;
+}
+
+csv_result_t write_frame_status_csv(const char* filepath, const log_frame_t* frames, const uint8_t* frame_magic_ok,
+                                    const uint8_t* frame_checksum_ok, const uint8_t* frame_checksum_calc, size_t frame_count,
+                                    uint16_t adc_sample_rate_khz, uint8_t checksum_algo_id) {
+    if (!filepath || !frames || frame_count == 0) {
+        return CSV_ERROR_PARAM;
+    }
+
+    FILE* fp = fopen(filepath, "w");
+    if (!fp) {
+        return CSV_ERROR_FILE;
+    }
+
+    fprintf(fp, "frame_index,adc_timestamp_ticks,frame_timestamp_us,delta_ticks,delta_us,magic,magic_ok,checksum_stored,checksum_calc,checksum_ok,checksum_algo_id,checksum_algo\n");
+
+    for (size_t f = 0; f < frame_count; f++) {
+        const log_frame_t* frame = &frames[f];
+        const uint8_t magic_ok_v = frame_magic_ok ? frame_magic_ok[f] : (frame->magic == LOG_FRAME_MAGIC);
+        const uint8_t checksum_ok_v = frame_checksum_ok ? frame_checksum_ok[f] : 0;
+        const uint8_t checksum_calc_v = frame_checksum_calc ? frame_checksum_calc[f] : 0;
+        const uint64_t frame_ts_us = ticks_to_us_u64((uint64_t)frame->adc_timestamp, adc_sample_rate_khz);
+        const uint32_t delta_ticks = (f == 0) ? 0u : (uint32_t)(frame->adc_timestamp - frames[f - 1].adc_timestamp);
+        const uint64_t delta_us = ticks_to_us_u64((uint64_t)delta_ticks, adc_sample_rate_khz);
+
+        fprintf(fp, "%zu,%u,%" PRIu64 ",%u,%" PRIu64 ",0x%04X,%u,0x%02X,0x%02X,%u,%u,%s\n", f, (unsigned)frame->adc_timestamp, frame_ts_us,
+                (unsigned)delta_ticks, delta_us, (unsigned)frame->magic, (unsigned)magic_ok_v, (unsigned)frame->checksum8,
+                (unsigned)checksum_calc_v, (unsigned)checksum_ok_v, (unsigned)checksum_algo_id, checksum_algo_name(checksum_algo_id));
     }
 
     fclose(fp);

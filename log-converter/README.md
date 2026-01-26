@@ -68,9 +68,9 @@ For each input file, creates a subfolder with 4 CSV files:
 
 ## Timestamps
 
-- Firmware stores timestamps as a 32-bit TIM6 tick counter at `config.adc_sample_rate_khz` (e.g. 100 kHz → 10 µs per tick).
+- Firmware stores timestamps as a 32-bit tick counter at `config.adc_sample_rate_khz` (e.g. 100 kHz → 10 µs per tick).
 - CSV outputs use `timestamp_us` / `frame_timestamp_us` in **microseconds** (printed as 64-bit integers).
-- `adc_timestamp` is captured in the ADC DMA callback, so it is closer to the end of a 256-sample block; the converter reconstructs per-sample timestamps from this value and enforces non-decreasing timestamps across blocks.
+- `adc_timestamp` is the timestamp of the first sample in a 256-sample ADC block; the converter reconstructs per-sample timestamps from this value and enforces non-decreasing timestamps across blocks.
 
 ## Binary Format
 
@@ -79,4 +79,4 @@ For each input file, creates a subfolder with 4 CSV files:
   - 256 ADC samples (512 bytes)
   - 0-20 IMU samples (320 bytes)
   - MAVLink data (10 bytes)
-  - CRC (2 bytes)
+  - checksum8 + pad (2 bytes, CRC8 or SUM8 depending on firmware build; see `config.reserved[0]`)
