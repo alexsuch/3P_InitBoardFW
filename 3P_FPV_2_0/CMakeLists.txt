@@ -49,11 +49,14 @@ set(SHARED_INC_DIR "${SHARED_ROOT_DIR}/Inc")
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 
-# Collect all shared source files from Src folder
+# Collect all shared source files from Src folder (excluding logger files)
 file(GLOB_RECURSE SHARED_SOURCES 
     "${SHARED_SRC_DIR}/*.c"
     "${SHARED_SRC_DIR}/*.cpp"
 )
+
+# Exclude logger files from compilation (not used in current build)
+list(FILTER SHARED_SOURCES EXCLUDE REGEX "logger_.*\\.c$")
 
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE

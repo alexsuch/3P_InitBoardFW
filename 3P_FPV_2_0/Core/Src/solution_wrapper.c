@@ -450,7 +450,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 // ---------------------- SPI COMMUNICATION --------------------------------
 
 // SPI Communication Variables
-uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {LIS2DH12_ACC_DATA_ZERO_BYTE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+#if LIS2DH12_ACC_ENABLE
+uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+#elif LSM6DS3_ACC_ENABLE
+uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+#else
+uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00};
+#endif
 uint8_t readCommand = 0xF2;
 app_cbk_fn acc_cbk = NULL;
 app_cbk_fn ext_pwr_cbk = NULL;
@@ -484,11 +490,20 @@ void HAL_SPI_DMAErrorCallback(SPI_HandleTypeDef *hspi)
 bool SpiGetAccData (uint8_t *rd_data_ptr, app_cbk_fn cbk)
 {
 	acc_cbk = cbk;
+
+#if LIS2DH12_ACC_ENABLE
 	spi_wr_buff[0] = LIS2DH12_ACC_DATA_ZERO_BYTE;
+	uint8_t read_size = LIS2DH12_ACC_DATA_READ_SIZE;
+#elif LSM6DS3_ACC_ENABLE
+	spi_wr_buff[0] = LSM6DS3_ACC_DATA_ZERO_BYTE;
+	uint8_t read_size = LSM6DS3_ACC_DATA_READ_SIZE;
+#else
+	#error "No accelerometer type defined!"
+#endif
 
 	HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_RESET);
 
-	if (HAL_SPI_TransmitReceive_DMA(&ACC_SPI_HANDLE, spi_wr_buff, rd_data_ptr, LIS2DH12_ACC_DATA_READ_SIZE) != HAL_OK)
+	if (HAL_SPI_TransmitReceive_DMA(&ACC_SPI_HANDLE, spi_wr_buff, rd_data_ptr, read_size) != HAL_OK)
 	{
 		HAL_GPIO_WritePin(SPI_CS_PORT, SPI_CS_PIN, GPIO_PIN_SET);
 		return false;

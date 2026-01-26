@@ -23,7 +23,6 @@ build.ninja
 *.obj
 
 # VS Code
-.vscode/settings.json
 .vscode/c_cpp_properties.json
 .vscode/extensions.json
 

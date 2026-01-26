@@ -1,0 +1,906 @@
+/**
+ * @file logger.h
+ * @brief Consolidated logger public API for impact data acquisition and SPI transmission
+ *
+ * Architecture:
+ *   - Phase 1 (Timing):     Global timestamp synchronization via TIM3 slave
+ *   - Phase 2 (ADC Ring):   Ring buffer capture for ADC2 100 kHz data
+ *   - Phase 3 (IMU Time):   Timestamp correlation with LSM6DS3 samples
+ *   - Phase 4 (Framing):    Frame builder with ADC + IMU payload
+ *   - Phase 5 (SPI DMA):    DMA-driven SPI slave transmission pipeline
+ *
+ * Integration:
+ *   1. Call Logger_Timing_Init() in Solution_HalInit() after TIM6 starts
+ *   2. In LSM6DS3.c Lsm6ds3_GetDataCbk() callback (protected by SPI_LOGGER_ENABLE macro):
+ *      Logger_ImuOnNewSample() with gyro/accel data and timestamp
+ *   3. In main loop or timer callback: Logger_Task() processes queued samples
+ *
+ * Timing Model:
+ *   TIM6 @ 100 kHz (ITR5) → TIM5 External Clock Mode 1
+ *   Logger_GetTimestamp() returns TIM5->CNT (0..0xFFFFFFFF, increments every 10 µs)
+ *   Rollover at ~42s (2^32 / 100kHz)
+ */
+
+#ifndef SHARED_INC_LOGGER_H_
+#define SHARED_INC_LOGGER_H_
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "init_brd.h"
+#include "prj_config.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define LOGGER_FRAME_MAGIC 0x5A5A
+#define LOGGER_FRAME_QUEUE_SIZE 10
+#define LOGGER_IMU_BLOCK_SIZE 20
+/* LOGGER_ADC_BLOCK_SIZE defined in prj_config.h - typically 256 samples */
+
+/* CRC16 - Simple polynomial */
+#define CRC16_POLY 0xA001  // Reversed CRC16-CCITT
+#define CRC16_INIT 0xFFFF
+
+/* SPI Protocol - Command definitions */
+#define LOGGER_SPI_CMD_CONFIG 42      // Config command (0x2A) - retrieve logger_config_t
+#define LOGGER_SPI_RX_COMMAND_SIZE 5  // RX buffer size: command byte + 4 padding bytes
+
+#define LOGGER_CONFIG_MAGIC 0xCAFE
+#define LOGGER_CONFIG_VERSION_MAJOR 0
+#define LOGGER_CONFIG_VERSION_MINOR 1
+
+/* Logger Configuration Version History:
+ * v0.1 (2026-01-15): Initial MAVLink integration
+ *   - Added mavlink_log_data_t (10 bytes) to LogFrame_t
+ *   - Frame size: 852 bytes (was 842 bytes)
+ *   - Added mavlink_logging_enabled flag to logger_config_t
+ *   - imu_config_t reduced to 23 bytes (was 24 bytes)
+ *   - MAVLink event logging: event_flags (32-bit), speed_ms, altitude_m
+ */
+
+/* CRC8 Polynomial and table constants */
+#define CRC8_POLYNOMIAL 0x07
+#define CRC8_INIT 0x00
+#define CRC8_TABLE_SIZE 256
+
+/* CRC Frame partitioning offsets (for low-latency frame assembly) */
+#define CRC_PART1_OFFSET 0
+#define CRC_PART1_SIZE 134
+#define CRC_PART2_OFFSET 134
+#define CRC_PART2_SIZE 128
+#define CRC_PART3_OFFSET 262
+#define CRC_PART3_SIZE 128
+#define CRC_PART4_OFFSET 400
+
+/* IMU buffer constants */
+#define IMU_BUFFER_MAX_SAMPLES 50
+#define IMU_RAW_DATA_SIZE 12
+
+/* ADC buffer constants */
+#define ADC_BUFFER_SIZE 256
+#define ADC_FRAME_READY_FLAG 1
+#define ADC_FRAME_EMPTY_FLAG 0
+
+/* ============================================================================
+ * INTERNAL DATA STRUCTURES (moved from logger_adc_buffer.c and logger_imu_time.c)
+ * ============================================================================
+ */
+
+/**
+ * @brief ADC linear buffer (from logger_adc_buffer.c)
+ */
+#define ADC_BUFFER_MAX_SAMPLES 256
+
+typedef struct {
+    int16_t samples[ADC_BUFFER_MAX_SAMPLES];  // ADC samples array (int16_t), max 256
+    volatile uint32_t ready;                  // 1 = buffer ready, 0 = processed
+    volatile uint32_t block_timestamp;        // Reference timestamp of first sample
+} AdcBuffer_t;
+
+/* ============================================================================
+ * PHASE 1: TIMING FOUNDATION
+ * ============================================================================
+ */
+
+/**
+ * @brief Initialize timestamp system (deprecated, now a no-op)
+ *
+ * Timestamp initialization is now handled automatically in Solution_HalInit()
+ * when TIM6 interrupt is set up. This function is retained for API compatibility.
+ *
+ * Returns: void
+ */
+void Logger_Timing_Init(void);
+
+/**
+ * @brief Get current global timestamp counter value
+ *
+ * Returns: uint32_t - Current 32-bit software counter
+ *          Increments by 1 every 10 µs (100 kHz rate)
+ *
+ * Implementation: Software 32-bit counter incremented by TIM6 @ 100 kHz
+ * Usage: uint32_t ts = Logger_GetTimestamp();  // Returns 32-bit counter
+ */
+uint32_t Logger_GetTimestamp(void);
+
+/**
+ * @brief Called from TIM6 interrupt handler to update timestamp counter
+ *
+ * Prerequisites:
+ *   - Must be called from TIM6_DAC_IRQHandler in stm32g4xx_it.c
+ *   - Increments g_timestamp by 1 (every 10 µs @ 100 kHz)
+ *   - Maintains synchronization with ADC2 100 kHz sampling
+ *
+ * Returns: void
+ */
+void Logger_TIM6_UpdateCallback(void);
+
+/**
+ * @brief ADC sample structure (Phase 2)
+ *
+ * Represents a single ADC2 sample with synchronized timestamp.
+ * Size: 6 bytes (uint16_t adc_value + uint32_t timestamp)
+ */
+typedef struct {
+    uint16_t adc_value;  // 12-bit ADC reading (0-4095)
+    uint32_t timestamp;  // TIM3->CNT @ 100 kHz (every 10 µs)
+} AdcSample_t;
+
+/* ============================================================================
+ * PHASE 2: ADC LINEAR BUFFER (256-sample buffer + ready flag)
+ * ============================================================================
+ */
+
+/**
+ * @brief Initialize ADC2 linear buffer (256 samples, ready flag)
+ *
+ * Prerequisites:
+ *   - TIM6 running @ 100 kHz
+ *   - ADC2 DMA configured and running
+ *
+ * Effects: Buffer is initialized automatically on first use
+ *
+ * Note: Direct access via g_adc_buffer.samples and g_adc_buffer.ready
+ */
+
+/**
+ * @brief Check if new ADC buffer is ready (256 samples accumulated)
+ *
+ * Returns: bool - true if ready flag set, false otherwise
+ */
+bool Logger_AdcBuffer_IsReady(void);
+
+/**
+ * @brief Get pointer to ready ADC buffer (256 samples, raw int16_t values)
+ *
+ * @param out_count: Pointer to uint32_t to receive sample count (always 256)
+ *
+ * Returns: Pointer to int16_t array (256 samples), or NULL if not ready
+ *
+ * Note: Buffer remains valid until next ADC_COMPLETE interrupt.
+ *       Call after checking Logger_AdcBuffer_IsReady() == 1.
+ */
+const int16_t* Logger_AdcBuffer_GetBuffer(uint32_t* out_count);
+
+/**
+ * @brief Clear ready flag after processing current ADC buffer
+ *
+ * Call from main loop after Logger_Task() processes the buffer.
+ * Next ADC_COMPLETE will set ready flag again.
+ *
+ * Returns: void
+ */
+void Logger_AdcBuffer_ClearReady(void);
+
+/**
+ * @brief DMA complete callback (called from HAL_ADC_ConvCpltCallback)
+ *
+ * Called when 256 samples accumulated in DMA circular buffer.
+ * Sets ready flag and stores timestamp of first sample.
+ *
+ * Integration:
+ *   In solution_wrapper.c HAL_ADC_ConvCpltCallback():
+ *   if (hadc == &ADC_PIEZO_HANDLE) {
+ *       extern uint16_t adc_dma_buffer[];
+ *       Logger_AdcBuffer_OnComplete(adc_dma_buffer, 256);
+ *   }
+ *
+ * @param dma_buffer: Pointer to DMA result buffer (256 samples)
+ * @param count: Number of samples (256 expected)
+ */
+void Logger_AdcBuffer_OnComplete(const uint16_t* dma_buffer, uint32_t count);
+
+/**
+ * @brief Get reference timestamp for current ADC block (first sample)
+ *
+ * Returns: uint32_t - Timestamp of first sample in current buffer
+ *          (100 kHz = 10 µs per tick)
+ */
+uint32_t Logger_AdcBuffer_GetFirstTimestamp(void);
+
+/* ============================================================================
+ * PHASE 3: IMU TIMESTAMPING (Placeholder - Phase 3 implementation)
+ * ============================================================================
+ */
+
+/**
+ * @brief Raw IMU sample with timestamp (16 bytes)
+ *
+ * Data format from LSM6DS3 register read:
+ *   Bytes 0-11:  Raw 12 bytes from SPI (gx, gy, gz, ax, ay, az as int16_t each)
+ *   Bytes 12-15: timestamp (uint32_t) - TIM6 @ 100 kHz, captured when sample received
+ */
+typedef struct __attribute__((packed)) {
+    uint8_t data[12];    // Raw 12 bytes from SPI (gx, gy, gz, ax, ay, az as int16_t each)
+    uint32_t timestamp;  // Timestamp of this IMU sample (TIM6 @ 100 kHz, 10 µs resolution, 4 bytes)
+} ImuRawSample_t;
+
+_Static_assert(sizeof(ImuRawSample_t) == 16, "ImuRawSample_t must be 16 bytes");
+
+/**
+ * @brief IMU raw buffer (from logger_imu_time.c)
+ *
+ * Contains up to 50 ImuRawSample_t structures collected from LSM6DS3 at ~104 Hz.
+ * Each sample includes 12 raw bytes (gyro + accel) plus 4-byte timestamp.
+ */
+typedef struct {
+    ImuRawSample_t samples[50];  // Raw sample buffer (50 samples max)
+    volatile uint32_t count;     // Current sample count (0..50)
+} ImuBuffer_t;
+
+/**
+ * Prerequisites:
+ *   - Logger_Timing_Init() completed (TIM6 running @ 100 kHz)
+ *   - Logger_RingBuffer_Init() completed
+ *   - LSM6DS3 running and polling for data
+ *
+ * Effects:
+ *   - Clears 50-sample IMU buffer
+ *   - Resets sample counter
+ *   - Resets statistics
+ *
+ * Returns: void
+ */
+void Logger_ImuRing_Init(void);
+
+/**
+ * @brief Callback invoked when LSM6DS3 sample is ready (from Lsm6ds3_GetDataCbk)
+ *
+ * @param raw_data: Pointer to 12 raw bytes from SPI read [gx_lo, gx_hi, gy_lo, gy_hi, gz_lo, gz_hi,
+ *                                                           ax_lo, ax_hi, ay_lo, ay_hi, az_lo, az_hi]
+ *
+ * Effects:
+ *   - Copies 12 bytes directly into IMU buffer (zero parsing overhead in ISR)
+ *   - If buffer full (50 samples), discards oldest and keeps newest
+ *   - Increments sample counter
+ *
+ * Returns: void
+ *
+ * Note: This is a weak function - boards that don't use logger disable it
+ *       via SPI_LOGGER_ENABLE macro gate in LSM6DS3.c
+ *
+ * Usage in LSM6DS3.c Lsm6ds3_GetDataCbk():
+ *   #if (SPI_LOGGER_ENABLE == 1u)
+ *       Logger_ImuOnNewSample(&lsm6ds3_Stat.rd_buff[1]);  // Skip dummy byte, pass 12 raw bytes
+ *   #endif
+ */
+void Logger_ImuOnNewSample(const uint8_t* raw_data);
+
+/**
+ * @brief Get current IMU buffer fill level
+ *
+ * Returns: uint32_t - Number of IMU samples currently in buffer (0..50)
+ */
+uint32_t Logger_ImuRing_GetCount(void);
+
+/**
+ * @brief Get pointer to IMU buffer data
+ *
+ * @param out_count: Pointer to uint32_t to receive actual sample count
+ *
+ * Returns: Pointer to ImuRawSample_t array (up to 50 samples),
+ *          or NULL if buffer empty
+ *
+ * Note: Buffer ownership remains in logger; caller should copy if keeping data.
+ */
+const ImuRawSample_t* Logger_ImuRing_GetBuffer(uint32_t* out_count);
+
+/**
+ * @brief Clear IMU buffer after frame assembly
+ *
+ * Direct access: Set g_imu_buffer.count = 0 after processing current IMU buffer.
+ * Resets sample counter to 0 for next batch of samples.
+ */
+
+/* ============================================================================
+ * PHASE 4: FRAME BUILDING (Implemented - logger_frame.c)
+ * ============================================================================
+ */
+
+/**
+ * @brief MAVLink event log data structure (embedded in LogFrame_t)
+ *
+ * Contains MAVLink event flags (32-bit bitmask) and telemetry data (speed/altitude).
+ * Event flags accumulate during frame window, then reset after frame assembly.
+ * Speed and altitude are only updated when corresponding events occur, otherwise remain zero.
+ *
+ * Layout (10 bytes total):
+ *   Offset 0-3:  event_flags (uint32_t bitmask, bit N = event N from mavlink_event_t)
+ *   Offset 4-5:  speed_ms (uint16_t groundspeed in m/s, 0 if no MAVLINK_EVT_SPEED_RECEIVED)
+ *   Offset 6-9:  altitude_m (int32_t altitude in meters, 0 if no MAVLINK_EVT_ALTITUDE_RECEIVED)
+ */
+typedef struct __attribute__((packed)) {
+    uint32_t event_flags;  // Bitmask of mavlink_event_t events (bit N = event 0x0N)
+    uint16_t speed_ms;     // Groundspeed in m/s (0 = no data this frame)
+    int32_t altitude_m;    // Altitude in meters (0 = no data this frame)
+} mavlink_log_data_t;
+
+_Static_assert(sizeof(mavlink_log_data_t) == 10, "mavlink_log_data_t must be 10 bytes");
+
+/**
+ * @brief Frame format structure (fixed-size frame for efficient SPI transfer)
+ *
+ * Layout (little-endian, fixed 842 bytes):
+ *   Bytes 0-1:       MAGIC_FRAME (0x5A5A)
+ *   Bytes 2-3:       n_imu (uint16_t, number of IMU samples actually filled, 0-20)
+ *   Bytes 4-7:       adc_timestamp (uint32_t, TIM6 counter @ 100 kHz of first ADC sample)
+ *   Bytes 8-519:     adc[256] (256 × int16_t = 512 bytes)
+ *   Bytes 520-839:   imu[LOGGER_IMU_BLOCK_SIZE] (20 × ImuRawSample_t = 20 × 16 = 320 bytes)
+ *   Bytes 840-841:   crc16 (CRC16 checksum)
+ *
+ * Size: Fixed 842 bytes
+ *   - Magic (2) + n_imu (2) + adc_timestamp (4) = 8 bytes header
+ *   - ADC block (256 × 2) = 512 bytes
+ *   - IMU block (20 × 16) = 320 bytes (each sample includes 4B timestamp)
+ *   - CRC16 (2 bytes) = 2 bytes
+ *   - Total = 842 bytes (fixed, DMA-friendly SPI transfer)
+ *
+ * Note: n_imu field indicates how many of the LOGGER_IMU_BLOCK_SIZE (20) slots are filled.
+ *       Unused IMU slots are zeroed. Each IMU sample has its own timestamp.
+ *
+ * CRC Computation (Incremental):
+ *       The CRC16 is computed in 4 stages to reduce interrupt latency:
+ *       Part 1: bytes 0-133 (header + 1st quarter ADC)
+ *       Part 2: bytes 134-261 (2nd quarter ADC)
+ *       Part 3: bytes 262-389 (3rd quarter ADC)
+ *       Part 4: bytes 390-840 (4th quarter ADC + all IMU with timestamps, excl. crc field)
+ *       Each stage takes ~3µs @ 168MHz, enabling fast interrupt response.
+ *
+ * Queue: 10 frames max (~8.42 KB total)
+ */
+typedef struct __attribute__((packed)) {
+    uint16_t magic;                             // 0x5A5A
+    uint16_t n_imu;                             // Number of valid IMU samples (0-20)
+    uint32_t adc_timestamp;                     // Timestamp of first ADC sample (TIM6 @ 100 kHz, every 10 µs)
+    int16_t adc[256];                           // Fixed 256 ADC samples
+    ImuRawSample_t imu[LOGGER_IMU_BLOCK_SIZE];  // Fixed 20 IMU raw samples with timestamps (only first n_imu are valid)
+    mavlink_log_data_t mavlink_log;             // MAVLink event flags + telemetry (10 bytes)
+    uint16_t crc16;                             // CRC16 checksum
+} LogFrame_t;
+
+_Static_assert(sizeof(LogFrame_t) == 852, "LogFrame_t must be 852 bytes");
+
+/* ============================================================================
+ * IMU CONFIGURATION STRUCTURE (Phase 5 SPI - Embedded in logger_config_t)
+ * ============================================================================
+ *
+ * Extended IMU configuration with actual hardware register snapshots.
+ * Embedded as nested structure within logger_config_t (offset 8-30).
+ *
+ * Layout (23 bytes total):
+ *   Offset 0-3:   Sensor presence and identification (accel_present, gyro_present, chip_id, pad)
+ *   Offset 4-7:   Output Data Rates (accel_odr_hz, gyro_odr_hz)
+ *   Offset 8-11:  Full-scale ranges (accel_range_g, alignment byte, gyro_range_dps as uint16_t)
+ *   Offset 12-16: Control register snapshots (CTRL1_XL, CTRL2_G, CTRL3_C, CTRL7_G, CTRL4_C)
+ *   Offset 17-22: Reserved for future expansion (6 bytes)
+ */
+typedef struct __attribute__((packed)) {
+    // Offset 0-3: Presence and identification (4 bytes)
+    uint8_t accel_present;  // 1 if accelerometer enabled (ODR > 0), 0 otherwise
+    uint8_t gyro_present;   // 1 if gyroscope enabled (ODR > 0), 0 otherwise
+    uint8_t chip_id;        // WHO_AM_I register value (0x69 for LSM6DS3)
+    uint8_t reserved_pad;   // Padding for alignment
+
+    // Offset 4-7: Output Data Rates (4 bytes)
+    uint16_t accel_odr_hz;  // Decoded from CTRL1_XL[7:4] (0-6664 Hz)
+    uint16_t gyro_odr_hz;   // Decoded from CTRL2_G[7:4] (0-6664 Hz)
+
+    // Offset 8-11: Full-scale ranges (4 bytes)
+    uint8_t accel_range_g;    // Decoded from CTRL1_XL[3:2]: 2, 4, 8, or 16 G
+    uint8_t reserved_align;   // Alignment byte for uint16_t gyro_range_dps
+    uint16_t gyro_range_dps;  // Decoded from CTRL2_G[3:2]: 245, 500, 1000, or 2000 DPS
+
+    // Offset 12-16: Control register snapshots (5 bytes)
+    uint8_t reserved0;  // CTRL1_XL (0x10) snapshot - Accel ODR + FS
+    uint8_t reserved1;  // CTRL2_G (0x11) snapshot - Gyro ODR + FS
+    uint8_t reserved2;  // CTRL3_C (0x12) snapshot - Common control (BDU, IF_INC)
+    uint8_t reserved3;  // CTRL7_G (0x16) snapshot - Gyro HP mode
+    uint8_t reserved4;  // CTRL4_C (0x13) snapshot - DRDY control
+
+    // Offset 17-22: Reserved for future expansion (6 bytes)
+    uint8_t reserved5;   // Future: Additional sensor parameters
+    uint8_t reserved6;   // Future: LIS2DH12 or other IMU support
+    uint8_t reserved7;   // Future: Expansion slot
+    uint8_t reserved8;   // Future: Expansion slot
+    uint8_t reserved9;   // Future: Expansion slot
+    uint8_t reserved10;  // Future: Expansion slot
+} imu_config_t;
+
+_Static_assert(sizeof(imu_config_t) == 23, "imu_config_t must be exactly 23 bytes");
+
+/* ============================================================================
+ * LOGGER CONFIGURATION (Phase 5 SPI Protocol - Command 0x2A)
+ * ============================================================================
+ *
+ * Device configuration structure sent to ESP32 master via command 42 (0x2A).
+ * Defines ADC and IMU parameters for proper frame interpretation.
+ *
+ * Size: Fixed 32 bytes (padded to 640-byte DMA frame with zeros)
+ * Magic: 0xCAFE (for validation)
+ * Version: Split into major.minor (1B each, extensible for future protocol versions)
+ * Layout: 2B magic + 1B major + 1B minor + 4B ADC params + 23B IMU config + 1B MAVLink flag = 32 bytes
+ */
+
+typedef struct __attribute__((packed)) {
+    uint16_t magic;         // 0xCAFE — validity check (2B)
+    uint8_t version_major;  // Major version (1B)
+    uint8_t version_minor;  // Minor version (1B)
+
+    // --- Core ADC parameters (4B) ---
+    uint16_t adc_sample_rate_khz;  // Sampling frequency kHz (2B)
+    uint16_t adc_block_size;       // Samples per frame (2B)
+
+    // --- Extended IMU configuration (23B) ---
+    imu_config_t imu_config;  // Nested IMU config structure
+
+    // --- MAVLink logging control (1B) ---
+    uint8_t mavlink_logging_enabled;  // 1 = MAVLink event logging enabled, 0 = disabled
+} logger_config_t;
+
+_Static_assert(sizeof(logger_config_t) == 32, "logger_config_t must be exactly 32 bytes");
+
+/* ============================================================================
+ * FRAME BUILDER STATE MACHINE (Phase 4 internal types)
+ * ============================================================================
+ */
+
+/**
+ * @brief Frame builder state machine for incremental CRC8 computation
+ *
+ * Reduces maximum atomic operation latency from ~32 µs (monolithic CRC)
+ * to ~5 µs (per-step), enabling fast interrupt response while maintaining
+ * frame throughput. CRC8 computation is split into 4 independent steps.
+ *
+ * State Flow:
+ *   IDLE → BUILD → CRC_PART1 → CRC_PART2 → CRC_PART3 → CRC_PART4 → IDLE
+ *
+ * Timeline (typical, assuming 5ms Logger_Task() interval):
+ *   - t=0ms:   ADC ready, enter BUILD
+ *   - t=5ms:   Compute CRC part 1 (header + 134 bytes)
+ *   - t=10ms:  Compute CRC part 2 (128 bytes ADC)
+ *   - t=15ms:  Compute CRC part 3 (128 bytes ADC)
+ *   - t=20ms:  Compute CRC part 4 (128 bytes ADC + 120 bytes IMU), queue frame
+ *   - t=25ms:  SPI DMA transmission begins
+ *
+ * Each CRC step processes ~270 bytes @ ~2 cycles/byte = ~3 µs @ 168 MHz.
+ *
+ * @see crc_state_init_step(), crc_state_process_step() for implementation
+ * @see CRC_INCREMENTAL_DESIGN.md for detailed design document
+ */
+typedef enum {
+    FRAME_STATE_IDLE,       // Waiting for ADC buffer to fill (256 samples ready)
+    FRAME_STATE_BUILD,      // Assemble frame: copy ADC/IMU, init CRC state (~5 µs)
+    FRAME_STATE_CRC_PART1,  // CRC computation: bytes 0-133 (header + 1st quarter ADC)
+    FRAME_STATE_CRC_PART2,  // CRC computation: bytes 134-261 (2nd quarter ADC)
+    FRAME_STATE_CRC_PART3,  // CRC computation: bytes 262-389 (3rd quarter ADC)
+    FRAME_STATE_CRC_PART4,  // CRC computation: bytes 390-517 (4th quarter ADC + IMU), finalize & queue
+} FrameState_t;
+
+/**
+ * @brief SPI transmission state machine for queue draining
+ *
+ * IDLE:                  No transmission in progress, can start new transfers
+ * PACKET_SENT:           DMA transmission initiated, waiting for TxCallback
+ * PACKET_SENT_COMPLETE:  TxCallback completed, Logger_Task() should drain queue
+ */
+typedef enum {
+    SPI_STATE_IDLE,                  // Initial state, ready for new transfers
+    SPI_STATE_PACKET_SENT,           // Transmission started, waiting for DMA complete
+    SPI_STATE_PACKET_SENT_COMPLETE,  // TxCallback fired, ready to drain queue
+} SpiState_t;
+
+/**
+ * @brief CRC computation state for incremental frame CRC calculation
+ *
+ * Splits CRC8 calculation into 4 parts to reduce interrupt latency.
+ * Each part processes ~270 bytes of the ~1118 byte frame (~25 µs per part).
+ *
+ * Part boundaries (crc8 compute divides frame into 4 segments):
+ *   Part 1: header + 1st quarter ADC (6 + 128 bytes = 134 bytes)
+ *   Part 2: 2nd quarter ADC (128 bytes)
+ *   Part 3: 3rd quarter ADC + 1st quarter IMU (128 + 30 bytes = 158 bytes)
+ *   Part 4: 2nd-4th quarter IMU (90 bytes) + finalize
+ */
+typedef struct {
+    uint8_t crc_current;      // Running CRC value
+    uint32_t crc_offset;      // Current position in frame for next chunk
+    uint32_t crc_chunk_size;  // Bytes to process in current step
+} CrcState_t;
+
+typedef struct {
+    int16_t adc[LOGGER_ADC_BLOCK_SIZE];         // Dequeued ADC samples
+    ImuRawSample_t imu[LOGGER_IMU_BLOCK_SIZE];  // Dequeued IMU samples
+    uint16_t adc_count;
+    uint16_t imu_count;
+    uint32_t adc_ts_first;     // Timestamp of first ADC sample
+    uint32_t mavlink_events;   // Accumulated MAVLink event flags (bitmask)
+    uint16_t mavlink_speed;    // Last received groundspeed (m/s)
+    int32_t mavlink_altitude;  // Last received altitude (m)
+    FrameState_t state;
+    CrcState_t crc_state;       // CRC incremental computation state
+    LogFrame_t* current_frame;  // Pointer to frame being built (for CRC)
+} FrameBuilder_t;
+
+/* ============================================================================
+ * FRAME CONTEXT (Phase 4+5 unified queue and state)
+ * ============================================================================
+ */
+
+typedef struct {
+    FrameBuilder_t builder;                           // Active frame builder
+    LogFrame_t frame_queue[LOGGER_FRAME_QUEUE_SIZE];  // 10 complete frames (Phase 4+5 unified queue)
+    volatile uint32_t queue_write_idx;
+    volatile uint32_t queue_read_idx;
+    uint16_t frame_counter;
+    uint32_t stats_frames_built;
+    uint32_t stats_frames_dropped;
+    volatile uint32_t spi_pending_count;  // Track frames pending SPI transmission
+    volatile SpiState_t spi_state;        // SPI transmission state machine
+} FrameContext_t;
+
+/* ============================================================================
+ * LOGGER STATUS STRUCTURE
+ * ============================================================================
+ */
+
+/**
+ * @brief Logger module status and state container
+ *
+ * Aggregates all logger internal state into a single structure.
+ * Declared as static in logger_frame.c to keep module-private.
+ *
+ * Members:
+ *   - frame_ctx: Frame builder queue, state machine, statistics
+ *   - config: Configuration sent to master (magic, version, ADC params, IMU params)
+ *   - tx_frame: SPI TX buffer for DMA transmission (frame or config data)
+ *   - rx_cmd: Extracted command byte for backward compatibility
+ *   - config_sent: Flag indicating config was just sent (one-time transition marker)
+ *
+ * Note: RX command buffer is now in solution_wrapper.c (static logger_spi_rx_cmd_buffer)
+ *       for direct SPI reception without unnecessary indirection.
+ */
+typedef struct {
+    FrameContext_t frame_ctx;      // Frame builder state + queue
+    logger_config_t config;        // Configuration structure
+    LogFrame_t tx_frame;           // TX buffer for SPI DMA
+    uint8_t rx_cmd;                // Extracted command byte
+    volatile uint8_t config_sent;  // 1 = config just sent, skip one drain cycle
+} logger_status_t;
+
+/* ============================================================================
+ * LOGGER STATUS ACCESS (module-private in logger_frame.c)
+ * ============================================================================
+ */
+
+/* Direct access to loggerStat via getter function is no longer available */
+/* All functionality provided through specific API functions */
+
+/* ============================================================================
+ * LEGACY EXTERN DECLARATIONS (for backward compatibility)
+ * ============================================================================
+ */
+
+/* Global frame context – accessible via frame builder API */
+// extern FrameContext_t g_frame_ctx;
+
+/* Global logger configuration – accessible via logger config API */
+// extern logger_config_t g_logger_config;
+
+/* Global SPI TX buffer – for use by Logger_SPI_RxCallback in logger_frame.c */
+// extern LogFrame_t g_logger_tx_frame;
+
+/* Global SPI RX command buffer (5 bytes) – now static in solution_wrapper.c */
+// static uint8_t logger_spi_rx_cmd_buffer[5];  // In: solution_wrapper.c (direct SPI reception)
+
+/* Global SPI RX command byte extracted from buffer[0] – for backward compatibility */
+// extern uint8_t g_logger_spi_rx_cmd;
+
+/**
+ * @brief Initialize frame builder (call once at startup)
+ *
+ * Prerequisites:
+ *   - Logger_Timing_Init() completed
+ *   - Logger_RingBuffer_Init() completed
+ *   - Logger_ImuRing_Init() completed
+ *
+ * Effects:
+ *   - Clears frame builder state machine
+ *   - Initializes frame queue
+ *   - Resets frame counter and statistics
+ */
+void Logger_FrameBuilder_Init(void);
+
+/**
+ * @brief Initialize frame builder and start logging pipeline
+ *
+ * Initializes all logging subsystems:
+ *   - ADC linear buffer (256-sample, ready flag)
+ *   - IMU ring buffer (0-50 samples)
+ *   - Frame builder state machine
+ *   - Starts ADC2 DMA acquisition and sampling timer
+ *
+ * Must be called after Logger_Timing_Init() and Solution_HalInit().
+ * Triggers Solution_LoggingStart() to calibrate ADC and start DMA.
+ *
+ * Returns: void
+ */
+void Logger_FrameBuilder_Init(void);
+
+/**
+ * @brief Start ADC data acquisition and logging
+ *
+ * Calibrates ADC2 and starts DMA-driven 100 kHz sampling.
+ * Called from Logger_FrameBuilder_Init().
+ * Integration point: solution_wrapper.c (hardware abstraction)
+ *
+ * Returns: void (calls Error_Handler on failure)
+ */
+void Solution_LoggingStart(void);
+
+/**
+ * @brief Main logger task: Poll buffers and assemble frames
+ *
+ * Call from main loop periodically (every 2.56 ms optimal):
+ *   1. IDLE: Wait for ADC buffer ready
+ *      - Get 256 ADC samples
+ *      - Get 0..50 IMU samples
+ *      - Assemble frame with both datasets
+ *      - Compute CRC16, queue frame
+ *   2. IMU_COLLECT: Queue the assembled frame, reset builder
+ *
+ * Single-pass design: All data collection happens in IDLE state,
+ * no waiting between sub-states. Frame is queued immediately after assembly.
+ *
+ * Returns: uint32_t - Number of frames queued (0 or 1 per call)
+ *
+ * Frame Queue: 4 frames max
+ *              If queue full, frame is dropped (stats tracked)
+ */
+uint32_t Logger_Task(void);
+
+/**
+ * @brief Get next complete frame from queue (for Phase 5 SPI DMA)
+ *
+ * Args: out_frame - Pointer to LogFrame_t to receive frame data
+ *
+ * Returns: int - 1 if frame available (copied to out_frame), 0 if queue empty
+ *
+ * Behavior:
+ *   - Copies frame from internal queue to out_frame
+ *   - Advances read pointer (frame removed from queue)
+ *   - Called from Phase 5 SPI DMA transmission handler
+ */
+int Logger_GetNextFrame(LogFrame_t* out_frame);
+
+/* ============================================================================
+ * UTILITY: Compiler guard for SPI_LOGGER_ENABLE
+ * ============================================================================
+ */
+
+/**
+ * Integration checklist:
+ *
+ * [ ] 1. In hal_cfg.h: Add #define LOGGER_TIMESTAMP_TIMER_BASE TIM3
+ * [ ] 2. In hal_cfg.h: Add extern TIM_HandleTypeDef htim3;
+ * [ ] 3. In solution_wrapper.c: #include "logger.h"
+ * [ ] 4. In solution_wrapper.c Solution_HalInit(): Add Logger_Timing_Init() call
+ * [ ] 5. In LSM6DS3.c Lsm6ds3_GetDataCbk(): Add SPI_LOGGER_ENABLE gate before Logger_ImuOnNewSample()
+ * [ ] 6. Compile and verify no errors
+ * [ ] 7. Debug: Set breakpoint in Logger_Timing_Init(), verify TIM5->CNT increments @ 100 kHz
+ * [ ] 8. Validate: Use Saleae to verify TIM6 TRGO matches TIM5 counter increments
+ */
+
+/* ============================================================================
+ * PHASE 5: SPI SLAVE TRANSMISSION
+ * ============================================================================
+ *
+ * Provides queue and transmission interface for Phase 4 LogFrame_t structures.
+ * Queues complete frames (640 bytes) from logger_frame.c for DMA transmission.
+ *
+ * Architecture:
+ *   - Phase 4 (logger_frame.c): Builds frames in g_frame_ctx.frame_queue via write_idx
+ *   - Phase 5 (logger_spi.c): Reads frames via Logger_GetNextFrame(), transmits via DMA
+ *   - Unified queue: Single 10-frame buffer eliminates duplication (6.4 KB, was 12.8 KB)
+ *   - SPI interrupt: Logger_SPI_RxCallback() dequeues and transmits via DMA
+ *
+ * Integration:
+ *   1. Call Logger_Init() once from App_InitRun
+ *   2. Phase 4 automatically queues complete frames to g_frame_ctx.frame_queue
+ *   3. Phase 5 reads frames via Logger_GetNextFrame() in Logger_SPI_RxCallback()
+ *   3. Weak overrides in solution_wrapper.c:
+ *      - Logger_GPIO_SetReady(bool): Drive LOGGER_SPI_DATA_RDY_PIN
+ *      - Logger_SPI_TransmitFrame(LogFrame_t*): DMA transmission via HAL_SPI_Transmit_DMA
+ *      - Logger_SPI_Init(): Enable SPI2 NVIC interrupt
+ */
+
+/**
+ * @brief Get next complete frame from unified queue (Phase 4 → Phase 5)
+ *
+ * Retrieves frame from g_frame_ctx.frame_queue built by Phase 4 frame builder.
+ * Copies entire LogFrame_t (640 bytes) to provided buffer and increments queue read index.
+ *
+ * @param out_frame: Pointer to LogFrame_t to receive frame data
+ *
+ * Returns: 1 if frame available (copied to out_frame), 0 if queue empty
+ *
+ * Usage in Phase 5 SPI callback:
+ *   LogFrame_t frame;
+ *   if (Logger_GetNextFrame(&frame)) {
+ *       Logger_SPI_TransmitFrame(&frame);  // Transmit via DMA
+ *       Logger_FrameTransmitComplete();    // Update state
+ *   }
+ *
+ * @note Thread-safe when called from single SPI interrupt context
+ */
+/**
+ * @brief Get number of frames pending SPI transmission
+ * @return Count via direct access: (queue_write_idx - queue_read_idx) % LOGGER_FRAME_QUEUE_SIZE
+ */
+
+#if (SPI_LOGGER_ENABLE == 1u)
+
+/**
+ * @brief MAVLink event callback for logger (replaces App_MavlinkCbk in logging mode)
+ *
+ * Captures all MAVLink events and telemetry data for inclusion in log frames:
+ *   - Sets event bit in frame builder's event_flags bitmask (bit N for event 0x0N)
+ *   - Copies speed data when MAVLINK_EVT_SPEED_RECEIVED (0x0A) occurs
+ *   - Copies altitude data when MAVLINK_EVT_ALTITUDE_RECEIVED (0x0B) occurs
+ *   - All other events only set their corresponding flag bit
+ *
+ * Called from MAVLink UART handler when events occur (e.g., VFR_HUD, heartbeat, arming).
+ * Event flags and data accumulate during frame window, then reset after Logger_Task() assembly.
+ *
+ * @param evt: System event type (SYSTEM_EVT_READY, SYSTEM_EVT_ERROR, etc.)
+ * @param usr_data: MAVLink event type (mavlink_event_t enum cast to uint32_t)
+ * @param usr_ptr: Pointer to event-specific data (uint16_t* for speed, int32_t* for altitude)
+ *
+ * Returns: 0 (standard callback return)
+ *
+ * Integration: Register via Mavlink_Init(Logger_MavlinkCbk, ...) in App_InitRun
+ */
+uint8_t Logger_MavlinkCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr);
+
+/**
+ * @brief Piezo comparator trigger callback for logger
+ *
+ * Called when comparator detects a piezo hit event above threshold.
+ * Handles threshold event notification and logging.
+ *
+ * @param evt: System event type (SYSTEM_EVT_READY for trigger events)
+ * @param usr_data: Comparator threshold value in mV
+ * @param usr_ptr: Reserved (NULL)
+ *
+ * Returns: 0 (standard callback return)
+ *
+ * Integration: Register via PiezoComp_Init(Logger_PiezoCompCbk, threshold_mV) in App_InitRun
+ */
+#if (COMP_HIT_DETECTION_ENABLE == 1u)
+uint8_t Logger_PiezoCompCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr);
+#endif /* COMP_HIT_DETECTION_ENABLE */
+
+/**
+ * @brief Initialize SPI slave transmission pipeline
+ *
+ * Called once from App_InitRun. Sets up GPIO ready signal and enables SPI2 interrupt.
+ * Must be called before Logger_SPI_RxCallback() can be used.
+ */
+void Logger_Init(void);
+
+/**
+ * @brief SPI Slave RX callback - dequeue and transmit frame when master reads
+ *
+ * Called from HAL_SPI_RxCpltCallback in solution_wrapper.c when ESP32 master
+ * asserts CS and initiates SPI transaction.
+ *
+ * Dequeues next frame and initiates DMA transmission via Logger_SPI_TransmitFrame().
+ * @param rx_buffer: Pointer to 5-byte command buffer received from master
+ *
+ * Automatically manages GPIO ready signal.
+ *
+ * @note Called from SPI2 interrupt context; keep execution time minimal
+ */
+void Logger_SPI_RxCallback(const uint8_t* rx_buffer);
+
+/**
+ * @brief SPI Slave TX Complete callback – handle transmission completion
+ *
+ * Called when DMA transmission of frame/config data to master is complete.
+ * Clears GPIO ready signal and re-arms RX for next command.
+ *
+ * @note Called from SPI2 interrupt context; keep execution time minimal
+ */
+void Logger_SPI_TxCallback(void);
+
+/**
+ * @brief Control SPI_DATA_RDY GPIO pin (ready signal to master)
+ *
+ * Override this in solution_wrapper.c to drive LOGGER_SPI_DATA_RDY_PIN.
+ * Called automatically by Logger_PublishFrame() and Logger_FrameTransmitComplete().
+ *
+ * @param ready: true to set GPIO high (data available), false to set low (queue empty)
+ */
+void Logger_GPIO_SetReady(bool ready);
+
+/**
+ * @brief Transmit LogFrame_t via SPI2 slave DMA
+ *
+ * Override this in solution_wrapper.c to call HAL_SPI_Transmit() with blocking transfer.
+ * Called automatically by Logger_SPI_RxCallback() when master initiates read.
+ *
+ * @param buffer: Pointer to data buffer to transmit
+ * @param size: Number of bytes to transmit (e.g., 32 for config, 640 for frame)
+ *
+ * @note Blocking transfer; function returns when transmission completes
+ * @note Automatically manages GPIO ready signal and re-arms RX
+ */
+void Logger_SPI_Transmit(const uint8_t* buffer, uint16_t size);
+
+/**
+ * @brief Initialize SPI2 slave and NVIC interrupt
+ *
+ * Override this in solution_wrapper.c to enable SPI2 interrupt handling.
+ * Called once from Logger_Init().
+ */
+void Logger_SPI_Init(void);
+
+/**
+ * @brief Start listening for SPI master read transactions
+ *
+ * Called after Logger_Init() to arm SPI slave interrupt.
+ * When ESP32 master initiates read, HAL_SPI_RxCpltCallback fires and calls Logger_SPI_RxCallback().
+ */
+void Logger_SPI_StartListening(void);
+
+/**
+ * @brief Notify logger that accelerometer has been successfully initialized
+ *
+ * Called from LSM6DS3.c::Lsm6ds3_SetHitParams() when sensor configuration is complete.
+ * Decodes register values and populates g_logger_config.imu_config structure.
+ * Automatically determines readiness: accel_present and gyro_present flags are set to 1
+ * if their respective ODR values are > 0.
+ *
+ * @param imu_cfg: Pointer to imu_config_t structure with register values from hardware.
+ *                 If NULL, initialization is skipped (returns early, readiness = 0).
+ *                 If non-NULL, register bits are decoded and imu_config is populated.
+ *
+ * Register decoding (performed internally):
+ *   - ODR extracted from bits [7:4] using switch statement
+ *   - Accel range extracted from CTRL1_XL[3:2]: 0x0→2G, 0x1→16G, 0x2→4G, 0x3→8G
+ *   - Gyro range extracted from CTRL2_G[3:2]: 0x0→245DPS, 0x1→500DPS, 0x2→1000DPS, 0x3→2000DPS
+ *
+ * Integration point:
+ *   Called from LSM6DS3.c::Lsm6ds3_SetHitParams() (~line 338) after register writes verified
+ */
+void Logger_OnAccelerometerReady(const imu_config_t* imu_cfg);
+
+#endif  // (SPI_LOGGER_ENABLE == 1u)
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif  // SHARED_INC_LOGGER_H_
