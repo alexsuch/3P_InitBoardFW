@@ -14,7 +14,7 @@
       // "svdFile": "${workspaceFolder}/svd/STM32G431.svd",
       // Все через PATH:
       "gdbPath": "arm-none-eabi-gdb.exe",
-      "serverpath": "C:/ST/STM32CubeIDE_1.15.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.win32_2.1.300.202403291623/tools/bin/ST-LINK_gdbserver.exe",
+      "serverpath": "ST-LINK_gdbserver.exe",
       "preLaunchTask": "Build Debug + Generate HEX",
       "serverArgs": [],
       "showDevDebugOutput": "raw",
