@@ -341,13 +341,32 @@ static int convert_file(const char *input_path, const char *output_dir) {
   snprintf(filepath, sizeof(filepath), "%s%cframe_status.csv", output_path,
            PATH_SEPARATOR);
   csv_result = write_frame_status_csv(filepath, frames, frame_magic_ok,
-                                      frame_checksum_ok, frame_checksum_calc,
-                                      frames_read, config.adc_sample_rate_khz,
-                                      config.reserved[0]);
+                                       frame_checksum_ok, frame_checksum_calc,
+                                       frames_read, config.adc_sample_rate_khz,
+                                       config.reserved[0]);
   if (csv_result != CSV_OK) {
     fprintf(stderr, "Error: Failed to write frame_status.csv\n");
   } else {
-    printf("  Written: frame_status.csv\n");
+    if (is_file(filepath)) {
+      printf("  Written: frame_status.csv\n");
+    } else {
+      printf("  Skipped: frame_status.csv (no bad frames)\n");
+    }
+  }
+
+  // timestamp_anomalies.csv
+  snprintf(filepath, sizeof(filepath), "%s%ctimestamp_anomalies.csv",
+           output_path, PATH_SEPARATOR);
+  size_t anomaly_count = 0;
+  csv_result = write_timestamp_anomalies_csv(
+      filepath, frames, frames_read, config.adc_sample_rate_khz,
+      config.adc_block_size, frame_magic_ok, frame_checksum_ok,
+      &anomaly_count);
+  if (csv_result != CSV_OK) {
+    fprintf(stderr, "Error: Failed to write timestamp_anomalies.csv\n");
+  } else {
+    printf("  Written: timestamp_anomalies.csv (%zu anomalies)\n",
+           anomaly_count);
   }
 
   // adc_data.csv
@@ -377,6 +396,24 @@ static int convert_file(const char *input_path, const char *output_dir) {
       imu_count += frames[i].n_imu;
     }
     printf("  Written: imu_data.csv (%zu samples)\n", imu_count);
+  }
+
+  // imu_anomalies.csv
+  snprintf(filepath, sizeof(filepath), "%s%cimu_anomalies.csv", output_path,
+           PATH_SEPARATOR);
+  size_t imu_anomaly_count = 0;
+  // Prefer accel ODR for expected period estimation; fall back to gyro ODR.
+  uint16_t imu_odr_hz = config.imu_config.accel_odr_hz;
+  if (imu_odr_hz == 0) {
+    imu_odr_hz = config.imu_config.gyro_odr_hz;
+  }
+  csv_result = write_imu_anomalies_csv(filepath, frames, frames_read,
+                                       config.adc_sample_rate_khz, imu_odr_hz,
+                                       frame_ok, &imu_anomaly_count);
+  if (csv_result != CSV_OK) {
+    fprintf(stderr, "Error: Failed to write imu_anomalies.csv\n");
+  } else {
+    printf("  Written: imu_anomalies.csv (%zu anomalies)\n", imu_anomaly_count);
   }
 
   // mavlink_events.csv

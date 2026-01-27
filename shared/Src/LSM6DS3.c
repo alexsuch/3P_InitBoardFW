@@ -19,6 +19,7 @@
 static lsm6ds3_Status_t lsm6ds3_Stat;
 static app_cbk_fn lsm6ds3_sys_cbk = NULL;
 static volatile uint16_t timeoutCnt = 0u;
+static bool s_lsm6ds3_drdy_armed = true;
 
 /* ============================================================================
  * REGISTER DECODING HELPER FUNCTIONS (for SPI_LOGGER_ENABLE)
@@ -26,6 +27,27 @@ static volatile uint16_t timeoutCnt = 0u;
  */
 
 #if SPI_LOGGER_ENABLE
+
+// When IMU ODR is high (e.g. 6.6 kHz), sampling a DRDY pin as a level in a main-loop
+// state machine can miss the low phase and "stick" in a non-armed state forever.
+// Add a time-based re-arm guard to prevent IMU reads from stopping completely.
+static uint32_t s_lsm6ds3_last_drdy_start_ts = 0u;
+static uint16_t s_lsm6ds3_min_rearm_ticks = 0u;
+
+static uint16_t lsm6ds3_calc_min_rearm_ticks(void) {
+    const uint32_t tick_hz = (uint32_t)ADC_SAMPLING_FREQ_KHZ * 1000u;
+    const uint32_t odr_hz = (uint32_t)LSM6DS3_SAMPLING_FREQ_HZ;
+    if (tick_hz == 0u || odr_hz == 0u) {
+        return 1u;
+    }
+    // Expected tick delta between IMU samples (rounded, min 2).
+    uint32_t expected = (tick_hz + (odr_hz / 2u)) / odr_hz;
+    if (expected < 2u) {
+        expected = 2u;
+    }
+    // Allow one re-arm slightly before the expected period to avoid getting stuck.
+    return (uint16_t)(expected - 1u);
+}
 
 /**
  * @brief Start reading accelerometer and gyroscope data
@@ -36,9 +58,27 @@ static volatile uint16_t timeoutCnt = 0u;
  * Returns: void
  */
 void Lsm6ds3_StartReadData(void) {
-    lsm6ds3_Stat.state = LSM6DS3_STATE_GET_DATA;
+    /*
+     * Do not forcibly override the current init state machine (CHECK_ID / SET_*_PARAMS).
+     * If we switch to GET_DATA too early (before the sensor is configured), INT may never
+     * assert and we end up with 0 IMU samples in the logger frames.
+     *
+     * Instead, mark the request and let the init flow transition to GET_DATA once
+     * configuration is completed.
+     */
+    lsm6ds3_Stat.read_flag = true;
     lsm6ds3_Stat.wait_flag = false;
     lsm6ds3_Stat.retry_cnt = 0u;
+    s_lsm6ds3_drdy_armed = true;
+    s_lsm6ds3_last_drdy_start_ts = Logger_GetTimestamp();
+    s_lsm6ds3_min_rearm_ticks = lsm6ds3_calc_min_rearm_ticks();
+
+    if (lsm6ds3_Stat.state == LSM6DS3_STATE_IDLE) {
+        lsm6ds3_Stat.state = LSM6DS3_STATE_GET_DATA;
+        lsm6ds3_Stat.read_flag = false;
+    } else if (lsm6ds3_Stat.state == LSM6DS3_STATE_GET_DATA) {
+        lsm6ds3_Stat.read_flag = false;
+    }
 }
 
 /**
@@ -143,6 +183,7 @@ static void Lsm6ds3_ResetTimeout(void) { timeoutCnt = 0; }
 
 void Lsm6ds3_Reset(app_cbk_fn sys_cbk, int16_t** x_axis, int16_t** y_axis, int16_t** z_axis) {
     memset(&lsm6ds3_Stat, 0u, sizeof(lsm6ds3_Stat));
+    s_lsm6ds3_drdy_armed = true;
 
     lsm6ds3_sys_cbk = sys_cbk;
 
@@ -186,6 +227,7 @@ void Lsm6ds3_GotoShakeMode(void) {
 void Lsm6ds3_Deinit(void) {
     memset(&lsm6ds3_Stat, 0u, sizeof(lsm6ds3_Status_t));
     Timer_Stop(ACC_TIMEOUT_TMR);
+    s_lsm6ds3_drdy_armed = true;
 }
 
 static void Lsm6ds3_PauseCbk(uint8_t timer_id) {
@@ -437,7 +479,15 @@ static void Lsm6ds3_SetHitParams(void) {
     }
 
     lsm6ds3_Stat.retry_cnt = 0u;
-#if (SPI_LOGGER_ENABLE == 0u)
+#if (SPI_LOGGER_ENABLE == 1u)
+    if (lsm6ds3_Stat.read_flag) {
+        lsm6ds3_Stat.read_flag = false;
+        lsm6ds3_Stat.state = LSM6DS3_STATE_GET_DATA;
+    } else {
+        // Stay idle until Solution_LoggingStart() requests data reads.
+        lsm6ds3_Stat.state = LSM6DS3_STATE_IDLE;
+    }
+#else
     lsm6ds3_Stat.state = LSM6DS3_STATE_GET_DATA;
 #endif /* SPI_LOGGER_ENABLE */
 }
@@ -478,7 +528,7 @@ static void Lsm6ds3_GetDataCbk(system_evt_t evt, uint32_t usr_data) {
     }
 }
 
-static void Lsm6ds3_GetData(void) {
+static bool Lsm6ds3_GetData(void) {
     /* Read accelerometer and gyroscope data in one burst read
      * LSM6DS3 supports auto-increment, so we can read all data at once
      * Starting from OUTX_L_XL (0x28) to OUTZ_H_G (0x27)
@@ -489,10 +539,12 @@ static void Lsm6ds3_GetData(void) {
         lsm6ds3_Stat.retry_cnt = 0u;
         /* Start timeout counter */
         Lsm6ds3_ResetTimeout();
+        return true;
     } else if (read_status == ACC_READ_FAIL) {
         /* handle the error (both ACC_READ_BUSY and ACC_READ_FAIL) */
         Lsm6ds3_ErrHandler();
     }
+    return false;
 }
 
 void Lsm6ds3_Task(void) {
@@ -515,7 +567,30 @@ void Lsm6ds3_Task(void) {
                 break;
             case LSM6DS3_STATE_GET_DATA:
                 if (ReadAccIntGpio() != false) {
-                    Lsm6ds3_GetData();
+                    // INT is a level signal; if it stays high after a read, polling can re-read the same output
+                    // registers multiple times before the next ODR update. Require a low->high re-arm.
+                    //
+                    // At high ODR, the low phase can be missed by polling, so also allow a time-based re-arm
+                    // to prevent reads from stopping forever.
+#if SPI_LOGGER_ENABLE
+                    if (!s_lsm6ds3_drdy_armed) {
+                        const uint32_t now = Logger_GetTimestamp();
+                        const uint16_t min_ticks = (s_lsm6ds3_min_rearm_ticks != 0u) ? s_lsm6ds3_min_rearm_ticks : 1u;
+                        if ((uint32_t)(now - s_lsm6ds3_last_drdy_start_ts) >= (uint32_t)min_ticks) {
+                            s_lsm6ds3_drdy_armed = true;
+                        }
+                    }
+#endif /* SPI_LOGGER_ENABLE */
+                    if (s_lsm6ds3_drdy_armed) {
+                        if (Lsm6ds3_GetData()) {
+                            s_lsm6ds3_drdy_armed = false;
+#if SPI_LOGGER_ENABLE
+                            s_lsm6ds3_last_drdy_start_ts = Logger_GetTimestamp();
+#endif /* SPI_LOGGER_ENABLE */
+                        }
+                    }
+                } else {
+                    s_lsm6ds3_drdy_armed = true;
                 }
                 break;
             default:

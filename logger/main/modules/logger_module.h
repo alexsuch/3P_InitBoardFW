@@ -60,6 +60,9 @@ esp_err_t logger_module_create_task(logger_module_t *module);
 
 void logger_log_drop_statistics(logger_module_t *module);
 
+// Reset runtime statistics counters (drop counts, SD failure counters, etc.).
+void logger_module_reset_stats(logger_module_t *module);
+
 // Force-flush active buffer to the writer queue, wait until it's drained, then fsync()
 // max_wait – максимальний час очікування спорожнення черги запису.
 void logger_module_flush_and_sync(logger_module_t *module, TickType_t max_wait);

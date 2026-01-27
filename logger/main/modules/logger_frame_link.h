@@ -2,19 +2,20 @@
 
 /**
  * @file logger_frame_link.h
- * @brief Phase 5 SPI Communication - LogFrame_t structure for STM32→ESP32 transmission
+ * @brief Phase 5 SPI Communication - LogFrame_t structure for STM32->ESP32 transmission
  *
- * Defines the 640-byte LogFrame_t structure with ADC+IMU merged data.
+ * Defines the 852-byte LogFrame_t structure with ADC+IMU merged data.
  * This replaces the previous 50-byte legacy link frame for enhanced logging capability.
  *
  * Frame Layout (852 bytes):
  *   - magic (2B):          0x5A5A
  *   - n_imu (2B):          Number of valid IMU samples (0-20)
- *   - adc_timestamp (4B):  ADC block reference timestamp (TIM6 ticks @ 100 kHz, captured in DMA callback)
- *   - adc[256] (512B):     ADC samples at 100 kHz (256 × int16_t)
- *   - imu[20] (320B):      IMU raw samples with per-sample timestamps (20 × 16B, only first n_imu valid)
+ *   - adc_timestamp (4B):  ADC block reference timestamp (100 kHz ticks, captured on STM32 in DMA callback)
+ *   - adc[256] (512B):     ADC samples at 100 kHz (256 x int16_t)
+ *   - imu[20] (320B):      IMU raw samples with per-sample timestamps (20 x 16B, only first n_imu valid)
  *   - mavlink_log (10B):   MAVLink event flags and telemetry (event_flags, speed, altitude)
- *   - crc16 (2B):          CRC16 over entire frame (polynomial 0xA001)
+ *   - checksum8 (1B):      Frame checksum (CRC8 or SUM8, selected on STM32 build)
+ *   - checksum_pad (1B):   Reserved (0)
  *   Total: 852 bytes
  */
 
@@ -32,7 +33,7 @@
  */
 typedef struct __attribute__((packed)) {
     uint8_t data[12];    // Raw 12 bytes from SPI (gx, gy, gz, ax, ay, az as int16_t each)
-    uint32_t timestamp;  // Timestamp of this IMU sample (TIM6 @ 100 kHz, 10 µs resolution, 4 bytes)
+    uint32_t timestamp;  // Timestamp of this IMU sample (100 kHz ticks, captured on STM32 when sample is received)
 } logger_imu_raw_sample_t;
 
 _Static_assert(sizeof(logger_imu_raw_sample_t) == 16, "IMU sample must be 16 bytes");
@@ -83,7 +84,7 @@ typedef struct __attribute__((packed)) {
 _Static_assert(sizeof(mavlink_log_data_t) == 10, "mavlink_log_data_t must be 10 bytes");
 
 /**
- * @brief Complete logger frame (Phase 4 ADC+IMU merged with CRC16)
+ * @brief Complete logger frame (Phase 4 ADC+IMU merged with checksum)
  *
  * Transmitted from STM32 SPI2 slave to ESP32 SPI master via DMA.
  * Frame rate: ~390 Hz (one per 2.56 ms ADC block)
@@ -92,19 +93,21 @@ _Static_assert(sizeof(mavlink_log_data_t) == 10, "mavlink_log_data_t must be 10 
  *   - magic (2B): 0x5A5A
  *   - n_imu (2B): number of valid IMU samples (0-20)
  *   - adc_timestamp (4B): ADC block reference timestamp (captured in DMA callback)
- *   - adc[256] (512B): ADC data block (256 × int16_t)
- *   - imu[20] (320B): IMU data block with per-sample timestamps (20 × 16B)
+ *   - adc[256] (512B): ADC data block (256 x int16_t)
+ *   - imu[20] (320B): IMU data block with per-sample timestamps (20 x 16B)
  *   - mavlink_log (10B): MAVLink event flags + telemetry
- *   - crc16 (2B): CRC checksum
+ *   - checksum8 (1B): checksum (CRC8 or SUM8)
+ *   - checksum_pad (1B): reserved (0)
  */
 typedef struct __attribute__((packed)) {
     uint16_t magic;                                      // 0x5A5A (2B)
     uint16_t n_imu;                                      // Valid IMU sample count (0-20) (2B)
-    uint32_t adc_timestamp;                              // ADC block reference timestamp (TIM6 tick counter) (4B)
+    uint32_t adc_timestamp;                              // ADC block reference timestamp (100 kHz tick counter) (4B)
     int16_t adc[LOGGER_ADC_BLOCK_SIZE];                  // ADC buffer (512B)
     logger_imu_raw_sample_t imu[LOGGER_IMU_BLOCK_SIZE];  // IMU buffer (320B)
     mavlink_log_data_t mavlink_log;                      // MAVLink event flags + telemetry (10B)
-    uint16_t crc16;                                      // CRC over entire frame (2B)
+    uint8_t checksum8;                                   // Checksum over payload (1B)
+    uint8_t checksum_pad;                                // Reserved/padding (1B)
 } logger_frame_t;
 
 _Static_assert(sizeof(logger_frame_t) == LOGGER_FRAME_SIZE_BYTES, "logger_frame_t must be 852 bytes");
@@ -117,9 +120,9 @@ _Static_assert(sizeof(logger_frame_t) == LOGGER_FRAME_SIZE_BYTES, "logger_frame_
  * Embedded as nested structure within logger_config_t (offset 8-30).
  *
  * Layout (23 bytes total):
- *   Offset 0-3:   Sensor presence and identification (accel_present, gyro_present, chip_id, pad)
- *   Offset 4-7:   Output Data Rates (accel_odr_hz, gyro_odr_hz)
- *   Offset 8-11:  Full-scale ranges (accel_range_g, alignment byte, gyro_range_dps as uint16_t)
+ *   Offset 0-3:   IMU presence and identification
+ *   Offset 4-7:   Output Data Rates
+ *   Offset 8-11:  Full-scale ranges
  *   Offset 12-16: Control register snapshots (CTRL1_XL, CTRL2_G, CTRL3_C, CTRL7_G, CTRL4_C)
  *   Offset 17-22: Reserved for future expansion (6 bytes)
  */
@@ -186,7 +189,7 @@ _Static_assert(sizeof(imu_config_t) == 23, "imu_config_t must be exactly 23 byte
  */
 
 typedef struct __attribute__((packed)) {
-    uint16_t magic;           // 0xCAFE — validity check (2B)
+    uint16_t magic;           // 0xCAFE - validity check (2B)
     uint8_t version_major;    // Major version (1B)
     uint8_t version_minor;    // Minor version (1B)
 
@@ -201,7 +204,7 @@ typedef struct __attribute__((packed)) {
     uint8_t mavlink_logging_enabled;  // 1 = MAVLink event logging enabled, 0 = disabled
 
     // --- Reserved bytes for future expansion (32B) ---
-    uint8_t reserved[32];  // Reserved for future use, ensures 64-byte total size
+    uint8_t reserved[32];  // reserved[0]=checksum algorithm id; remaining reserved for future use
 } logger_config_t;
 
 

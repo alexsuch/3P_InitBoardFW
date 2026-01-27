@@ -147,7 +147,8 @@ typedef struct {
     volatile bool wait_flag;
     bool read_flag;
     uint8_t retry_cnt;
-    uint8_t rd_buff[LSM6DS3_MAX_BUF_SIZE];
+    uint8_t _reserved; /* Padding for 4-byte / DMA alignment */
+    uint8_t rd_buff[LSM6DS3_MAX_BUF_SIZE] __attribute__((aligned(4)));
     bool reset_done; /* Track software reset completion */
 
     /* Accelerometer values in format -16g->0g->16g -> -32768->0->32767 */

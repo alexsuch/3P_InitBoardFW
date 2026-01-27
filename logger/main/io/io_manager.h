@@ -5,7 +5,6 @@
 #include "hal_spi.h"
 
 typedef struct io_manager_s {
-    hal_spi_bus_t accel_spi_bus;
     hal_spi_bus_t sdcard_spi_bus;
     bool initialized;
     bool sd_card_ok;

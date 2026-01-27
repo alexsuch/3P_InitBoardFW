@@ -559,9 +559,7 @@ app_err_t app_logic_init_modules(app_logic_t *app) {
     LOG_I(TAG, "Initializing application modules...");
     app_state_t *state = app_state_get_instance();
 
-    // Initialize Piezo
-
-    // reset STM
+    // Reset STM32
     LOG_I(TAG, "Resetting STM32 on GPIO %d", STM_RESET_GPIO);
     gpio_reset_pin(STM_RESET_GPIO);
     gpio_set_direction(STM_RESET_GPIO, GPIO_MODE_OUTPUT);
@@ -609,10 +607,7 @@ static void app_logic_prepare_download_mode(app_logic_t *app) {
         LOG_I(TAG, "IO Manager shutdown complete");
     }
 
-    // Stop sensor tasks (handled by STM32 in this project)
-
-    // Stop piezo task (saves ~2KB stack)
-    // Removed - handled by STM32
+    // No ESP-side sensor tasks to stop; acquisition is handled by STM32.
 
     // OPTIONAL: Stop LED task during download mode to save additional ~1.5KB
     // LED provides visual feedback but isn't essential for file downloads
@@ -640,13 +635,13 @@ static void app_logic_prepare_download_mode(app_logic_t *app) {
     LOG_I(TAG, "=== TASK CLEANUP SUMMARY ===");
     LOG_I(TAG, "Free heap AFTER task cleanup: %zu bytes (%.2f KB)", heap_after_tasks, heap_after_tasks / 1024.0f);
     LOG_I(TAG, "Total task memory freed: %zu bytes (%.2f KB)", total_task_memory_freed, total_task_memory_freed / 1024.0f);
-    LOG_I(TAG, "Expected task stack savings: ~7KB (3KB IO + 2KB Link + 2KB Piezo)");
+    LOG_I(TAG, "Expected task stack savings depend on the active feature set.");
     if (total_task_memory_freed >= 5000) {
-        LOG_I(TAG, "✅ SUCCESS: Significant task memory freed (%zu KB)", total_task_memory_freed / 1024);
+        LOG_I(TAG, "SUCCESS: Significant task memory freed (%zu KB)", total_task_memory_freed / 1024);
     } else if (total_task_memory_freed >= 2000) {
-        LOG_W(TAG, "⚠️  PARTIAL: Some task memory freed (%zu KB) but less than expected", total_task_memory_freed / 1024);
+        LOG_W(TAG, "PARTIAL: Some task memory freed (%zu KB) but less than expected", total_task_memory_freed / 1024);
     } else {
-        LOG_E(TAG, "❌ FAILED: Minimal task memory freed (%zu KB) - tasks may not have been running", total_task_memory_freed / 1024);
+        LOG_E(TAG, "FAILED: Minimal task memory freed (%zu KB) - tasks may not have been running", total_task_memory_freed / 1024);
     }
     LOG_I(TAG, "============================");
 }
@@ -813,16 +808,16 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
     app_state_t *state = app_state_get_instance();
     switch (cmd->id) {
         case APP_CMD_SET_MODE_IDLE:
-            // 1) стопимо логування на рівні стану (логер перестане приймати snapshot-и)
+            // 1) Switch app state to IDLE (logger stops accepting new snapshots)
             app_state_begin_update();
             app_state_set_u8(APP_STATE_FIELD_CURRENT_MODE, (uint8_t *)&state->current_mode, APP_MODE_IDLE);
             app_state_end_update();
             LOG_I(TAG, "Mode changed to IDLE - quiescing tasks");
-            // 2) форсовано дописуємо буфер логера на SD і fsync
+            // 2) Flush logger buffers to SD and fsync
             if (app->logger_module && app->logger_module->initialized && app->logger_module->sd_card_ok) {
                 logger_module_flush_and_sync(app->logger_module, pdMS_TO_TICKS(2000));
             }
-            // 3) підвісимо робочі таски (як просили "зупинити все інше")
+            // 3) Suspend worker tasks
             // logger task - can suspend after queue drain
             if (app->logger_module) {
                 if (app->logger_module->writer_task_handle) vTaskSuspend(app->logger_module->writer_task_handle);
@@ -835,6 +830,13 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
                 result = restore_err;
                 break;
             }
+
+            if (app->logger_module) {
+                logger_module_reset_stats(app->logger_module);
+            }
+
+            // Start a new logging session by restarting STM32 and re-reading the logger config.
+            remote_accel_reader_restart_session();
 
 #if defined(USE_WEB_FILE_SEREVER)
             web_server_set_download_chunk_size(web_server_get_default_download_chunk_size());
@@ -1125,13 +1127,13 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
                 LOG_I(TAG, "Expected total recovery: ~60KB (52KB logger + 7KB tasks)");
 
                 if (total_memory_recovered >= 50000) {
-                    LOG_I(TAG, "🎉 EXCELLENT: Major memory recovery (%zu KB) - system ready for WiFi/download", total_memory_recovered / 1024);
+                    LOG_I(TAG, "EXCELLENT: Major memory recovery (%zu KB) - system ready for WiFi/download", total_memory_recovered / 1024);
                 } else if (total_memory_recovered >= 30000) {
-                    LOG_I(TAG, "✅ GOOD: Significant memory recovery (%zu KB) - should work for WiFi/download", total_memory_recovered / 1024);
+                    LOG_I(TAG, "GOOD: Significant memory recovery (%zu KB) - should work for WiFi/download", total_memory_recovered / 1024);
                 } else if (total_memory_recovered >= 10000) {
-                    LOG_W(TAG, "⚠️  PARTIAL: Some memory recovery (%zu KB) - might be tight for WiFi/download", total_memory_recovered / 1024);
+                    LOG_W(TAG, "PARTIAL: Some memory recovery (%zu KB) - might be tight for WiFi/download", total_memory_recovered / 1024);
                 } else {
-                    LOG_E(TAG, "❌ FAILED: Minimal memory recovery (%zu KB) - likely insufficient for WiFi/download", total_memory_recovered / 1024);
+                    LOG_E(TAG, "FAILED: Minimal memory recovery (%zu KB) - likely insufficient for WiFi/download", total_memory_recovered / 1024);
                 }
                 LOG_I(TAG, "====================================");
 

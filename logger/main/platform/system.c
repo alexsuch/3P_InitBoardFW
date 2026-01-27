@@ -72,8 +72,6 @@ const char *system_get_esp32_model() {
     switch (chip_info.model) {
         case CHIP_ESP32:
             return "ESP32";
-        case CHIP_ESP32S2:
-            return "ESP32-S2";
         case CHIP_ESP32S3:
             return "ESP32-S3";
         case CHIP_ESP32C3:
@@ -135,19 +133,9 @@ void system_clear_force_download_boot_bit(void) {
      * If it is not cleared, the device will get stuck in bootloader mode.
      * This action must be the first in app_main to guarantee breaking the cycle.
      *
-     * Note: ESP32 uses RTC_CNTL_OPTIONS0_REG, while ESP32-S2/S3 use RTC_CNTL_OPTION1_REG
+     * Note: This project targets ESP32-S3 and uses RTC_CNTL_OPTION1_REG.
      */
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)
-    // ESP32-S2 and ESP32-S3 use OPTION1_REG
     REG_CLR_BIT(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-#elif defined(CONFIG_IDF_TARGET_ESP32)
-// ESP32: RTC_CNTL_FORCE_DOWNLOAD_BOOT may not be available in all ESP-IDF versions
-// For ESP32, the force download boot functionality may be handled differently
-// or may not be needed. If the bit is available, clear it.
-#if defined(RTC_CNTL_FORCE_DOWNLOAD_BOOT)
-    REG_CLR_BIT(RTC_CNTL_OPTIONS0_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-#endif
-#endif
 }
 
 IRAM_ATTR void system_reboot_to_boot_mode(void) {
@@ -156,21 +144,12 @@ IRAM_ATTR void system_reboot_to_boot_mode(void) {
     vTaskDelay(pdMS_TO_TICKS(100));
 
     // 1) Add the bit (don't overwrite the entire register!)
-    // Use chip-specific register: OPTION1_REG for S2/S3, OPTIONS0_REG for ESP32
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)
     REG_SET_BIT(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-#elif defined(CONFIG_IDF_TARGET_ESP32)
-// ESP32: RTC_CNTL_FORCE_DOWNLOAD_BOOT may not be available in all ESP-IDF versions
-// For ESP32, the force download boot functionality may be handled differently
-#if defined(RTC_CNTL_FORCE_DOWNLOAD_BOOT)
-    REG_SET_BIT(RTC_CNTL_OPTIONS0_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-#endif
-#endif
 
     // 2) Short pause to ensure the bit is guaranteed to set
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // 3) Clean ROM reset → ROM sees FORCE_DOWNLOAD_BOOT
+    // 3) Clean ROM reset -> ROM sees FORCE_DOWNLOAD_BOOT
     esp_rom_software_reset_system();
 
     while (true) {
@@ -186,28 +165,11 @@ void system_shutdown(void) {
     // TODO: This might increase sleep current consumption
     // by a lot, measure it.
 
-#if defined(CONFIG_IDF_TARGET_ESP32C3)
-    // ESP32-C3 specific sleep configuration
-    ESP_ERROR_CHECK(esp_sleep_pd_config(ESP_PD_DOMAIN_RC_FAST, ESP_PD_OPTION_ON));
-    ESP_ERROR_CHECK(gpio_pulldown_dis(BUTTON_SYSTEM_GPIO));
-    ESP_ERROR_CHECK(gpio_pullup_en(BUTTON_SYSTEM_GPIO));
-    // Configure wakeup pin/level via Kconfig or esp_sleep_config_gpio_wakeup_source() if needed
-    ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
-#elif defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)
-    // ESP32-S2/S3 sleep configuration
+    // ESP32-S3 sleep configuration
     ESP_ERROR_CHECK(esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON));
     ESP_ERROR_CHECK(gpio_pulldown_dis(BUTTON_SYSTEM_GPIO));
     ESP_ERROR_CHECK(gpio_pullup_en(BUTTON_SYSTEM_GPIO));
-    // ESP32-S2/S3 use ESP_EXT1_WAKEUP_ANY_LOW
-    ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup(1 << BUTTON_SYSTEM_GPIO, ESP_EXT1_WAKEUP_ANY_LOW));
-#elif defined(CONFIG_IDF_TARGET_ESP32)
-    // ESP32 sleep configuration
-    ESP_ERROR_CHECK(esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON));
-    ESP_ERROR_CHECK(gpio_pulldown_dis(BUTTON_SYSTEM_GPIO));
-    ESP_ERROR_CHECK(gpio_pullup_en(BUTTON_SYSTEM_GPIO));
-    // ESP32 uses ESP_EXT1_WAKEUP_ALL_LOW (not ESP_EXT1_WAKEUP_ANY_LOW)
-    ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup(1 << BUTTON_SYSTEM_GPIO, ESP_EXT1_WAKEUP_ALL_LOW));
-#endif
+    ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup(1ULL << BUTTON_SYSTEM_GPIO, ESP_EXT1_WAKEUP_ANY_LOW));
 
     // TODO: Wake up if the 5V power is connected.
     // If battery power doesn't enable the 5V line

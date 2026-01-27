@@ -20,7 +20,6 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     targets:
-    - esp32s2
     - esp32s3
     - esp32p4
     - esp32h4
@@ -35,7 +34,6 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     targets:
-    - esp32s2
     - esp32s3
     - esp32p4
     - esp32h4

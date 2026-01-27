@@ -245,7 +245,7 @@ Key metric:
   - This mismatch exists because IMU sampling and frame building are **decoupled**: IMU samples arrive continuously (via `Logger_ImuOnNewSample()`), but IMU samples are only consumed/cleared when `Logger_Task()` reaches the “ADC block ready” path and copies IMU data into the frame builder.
   - At 100 kHz ADC with 256-sample blocks, the frame cadence is ~390 Hz (one frame every ~2.56 ms). At 6.6 kHz IMU ODR that is ~17 IMU samples per “ideal” frame window, which fits into 20 **only if** `Logger_Task()` runs frequently and keeps up.
   - If `Logger_Task()` is delayed (interrupt load, SPI traffic, multi-call state machine progress, etc.), IMU samples continue accumulating. At 6.6 kHz, a 50-sample buffer represents only ~7.5 ms of backlog; exceeding that pushes the code into its “buffer full” behavior (currently `memmove()`), and `imu_count` can exceed the 20-sample frame capacity unless explicitly clamped.
-- CRC naming mismatch exists (CRC-8 computed, stored into `crc16` field). This is not the primary performance issue, but it matters for protocol correctness.
+- Frame uses 8-bit checksum (`checksum8` + `checksum_pad`), computed on STM32 and stored in the frame. The algorithm is selected at build time (CRC8 or SUM8 via `LOGGER_CHECKSUM_ALGO`). Performance impact is small compared to copies/queueing, but correctness matters for link integrity.
 
 ---
 

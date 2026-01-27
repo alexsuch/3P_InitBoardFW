@@ -5,7 +5,12 @@
 hal_err_t hal_spi_bus_init(hal_spi_bus_t bus, hal_gpio_t miso, hal_gpio_t mosi, hal_gpio_t sck) {
     spi_bus_config_t cfg = {
         .miso_io_num = miso, .mosi_io_num = mosi, .sclk_io_num = sck, .quadwp_io_num = -1, .quadhd_io_num = -1, .max_transfer_sz = 16 * 1024};
-    return spi_bus_initialize(bus, &cfg, SPI_DMA_CH_AUTO);
+    esp_err_t err = spi_bus_initialize(bus, &cfg, SPI_DMA_CH_AUTO);
+    if (err == ESP_ERR_INVALID_STATE) {
+        // Treat already-initialized SPI bus as success to keep init idempotent.
+        return ESP_OK;
+    }
+    return err;
 }
 
 hal_err_t hal_spi_bus_add_device(hal_spi_bus_t bus, const hal_spi_device_config_t *cfg, hal_spi_device_handle_t *dev) {
@@ -34,9 +39,8 @@ hal_err_t hal_spi_bus_add_device(hal_spi_bus_t bus, const hal_spi_device_config_
 }
 
 hal_err_t hal_spi_device_transmit(const hal_spi_device_handle_t *dev, uint16_t cmd, uint32_t addr, const void *tx, size_t tx_size, void *rx, size_t rx_size) {
-    // We don't use DMA enabled memory here because allocating DMA enabled
-    // memory actually makes things a bit slower for the smallish payloads
-    // we send (16 bytes at most right now).
+    // NOTE: For large payloads, callers should prefer DMA-capable buffers (e.g. `DMA_ATTR` or `heap_caps_malloc(..., MALLOC_CAP_DMA)`),
+    // otherwise ESP-IDF may need to bounce/copy buffers internally which adds overhead.
     spi_transaction_t t = {
         .cmd = cmd,
         .addr = addr,

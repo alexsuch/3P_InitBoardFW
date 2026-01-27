@@ -34,13 +34,8 @@ set(COMPONENT_REQUIRES
     bblanchon__arduinojson
 )
 
-# Only include esp_tinyusb for targets that support it
-# ESP32S2, ESP32S3, ESP32P4, and ESP32H4 support TinyUSB
-# ESP32 and ESP32-C3 do NOT support TinyUSB
-if(IDF_TARGET STREQUAL "esp32s2" OR 
-   IDF_TARGET STREQUAL "esp32s3" OR 
-   IDF_TARGET STREQUAL "esp32p4" OR 
-   IDF_TARGET STREQUAL "esp32h4")
+# Only include esp_tinyusb for ESP32-S3 builds in this project.
+if(IDF_TARGET STREQUAL "esp32s3")
     list(APPEND COMPONENT_REQUIRES esp_tinyusb)
 endif()
 

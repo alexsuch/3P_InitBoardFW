@@ -57,7 +57,7 @@ Convert all `.dat` files in a folder:
 
 ## Output Files
 
-For each input file, creates a subfolder with 4 CSV files:
+For each input file, creates a subfolder with CSV files:
 
 | File                 | Description                         |
 | -------------------- | ----------------------------------- |
@@ -65,12 +65,14 @@ For each input file, creates a subfolder with 4 CSV files:
 | `adc_data.csv`       | ADC piezo sensor data (100 kHz)     |
 | `imu_data.csv`       | IMU gyro/accel data with timestamps |
 | `mavlink_events.csv` | MAVLink telemetry events            |
+| `timestamp_anomalies.csv` | Timestamp anomaly report (non-monotonic / delta mismatch) |
+| `imu_anomalies.csv` | IMU anomaly report (duplicates / gaps) |
 
 ## Timestamps
 
 - Firmware stores timestamps as a 32-bit tick counter at `config.adc_sample_rate_khz` (e.g. 100 kHz → 10 µs per tick).
 - CSV outputs use `timestamp_us` / `frame_timestamp_us` in **microseconds** (printed as 64-bit integers).
-- `adc_timestamp` is the timestamp of the first sample in a 256-sample ADC block; the converter reconstructs per-sample timestamps from this value and enforces non-decreasing timestamps across blocks.
+- `adc_timestamp` is the timestamp of the first sample in a 256-sample ADC block; the converter reconstructs per-sample timestamps from this value.
 
 ## Binary Format
 

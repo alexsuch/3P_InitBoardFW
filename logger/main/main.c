@@ -23,7 +23,7 @@
 _Static_assert((TASK_STACK_SIZE_USB_BOOT_CMD % sizeof(StackType_t)) == 0, "TASK_STACK_SIZE_USB_BOOT_CMD must be expressed in bytes and aligned to StackType_t");
 #include "soc/soc.h"
 
-#if defined(CONFIG_IDF_TARGET_ESP32S2)
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
 // Boot mode handling is ESP32-S3 specific in this project.
 static void usb_boot_cmd_task(void *arg) {
     // vTaskDelay(pdMS_TO_TICKS(3000));
@@ -56,7 +56,7 @@ void usb_boot_cmd_start(void) {
     xTaskCreatePinnedToCore(usb_boot_cmd_task, "usb_boot_cmd", TASK_STACK_SIZE_USB_BOOT_CMD / sizeof(StackType_t), NULL, TASK_PRIORITY_USB_BOOT_CMD, NULL,
                             tskNO_AFFINITY);
 }
-#endif  // CONFIG_IDF_TARGET_ESP32S2
+#endif  // CONFIG_IDF_TARGET_ESP32S3
 
 static const char *TAG = "Main";
 
@@ -80,9 +80,9 @@ void app_main() {
     vTaskDelay(pdMS_TO_TICKS(3000));
 
     // usb_cdc_hooks_init();
-#if defined(CONFIG_IDF_TARGET_ESP32S2)
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
     usb_boot_cmd_start();
-#endif  // CONFIG_IDF_TARGET_ESP32S2
+#endif  // CONFIG_IDF_TARGET_ESP32S3
 
     // vTaskDelay(2000 / portTICK_PERIOD_MS);
     // hal_platform_init();

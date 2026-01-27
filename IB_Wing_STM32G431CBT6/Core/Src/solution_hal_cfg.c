@@ -24,6 +24,7 @@
 /* Timer handles */
 TIM_HandleTypeDef htim1;  /* Pump PWM timer handle */
 TIM_HandleTypeDef htim2;  /* System tick timer handle */
+TIM_HandleTypeDef htim7;  /* Logger timestamp timer handle (free-running) */
 TIM_HandleTypeDef htim15; /* Detonation high-side switch PWM timer handle */
 
 /* UART handles */
@@ -52,6 +53,7 @@ static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void);
 static HAL_StatusTypeDef HalConfigure_Opamp_Init(void);
 static HAL_StatusTypeDef HalConfigure_Adc2_Init(void);
 static HAL_StatusTypeDef HalConfigure_Tim6_Init(void);
+static HAL_StatusTypeDef HalConfigure_TimestampTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_Dac1_Init(void);
 static HAL_StatusTypeDef HalConfigure_DMA_Init(void);
 
@@ -106,6 +108,11 @@ void Solution_HalConfigure(void) {
 
     /* Initialize TIM6 */
     if (HalConfigure_Tim6_Init() != HAL_OK) {
+        Error_Handler();
+    }
+
+    /* Initialize hardware timestamp timer */
+    if (HalConfigure_TimestampTimer_Init() != HAL_OK) {
         Error_Handler();
     }
 
@@ -926,6 +933,37 @@ static HAL_StatusTypeDef HalConfigure_Tim6_Init(void) {
     HAL_NVIC_EnableIRQ(TIM6_DAC_IRQn);
 
     return HAL_OK;
+}
+
+static HAL_StatusTypeDef HalConfigure_TimestampTimer_Init(void) {
+#if (SPI_LOGGER_ENABLE == 1u)
+    /* Enable TIM7 clock */
+    __HAL_RCC_TIM7_CLK_ENABLE();
+
+    /* Configure TIM7 as a free-running 16-bit counter ticking at ADC sampling rate (e.g. 100 kHz). */
+    uint32_t pclk1 = HAL_RCC_GetPCLK1Freq();
+    const bool apb1_div1 = ((RCC->CFGR & RCC_CFGR_PPRE1) == RCC_CFGR_PPRE1_DIV1);
+    uint32_t timclk = apb1_div1 ? pclk1 : (pclk1 * 2u);
+    uint32_t tick_hz = (uint32_t)ADC_SAMPLING_FREQ_KHZ * 1000u;
+    if (tick_hz == 0) {
+        return HAL_ERROR;
+    }
+    uint32_t prescaler = (timclk / tick_hz);
+    if (prescaler == 0) {
+        return HAL_ERROR;
+    }
+
+    htim7.Instance = TIM7;
+    htim7.Init.Prescaler = (uint16_t)(prescaler - 1u);
+    htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
+    htim7.Init.Period = 0xFFFFu;
+    htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+    if (HAL_TIM_Base_Init(&htim7) != HAL_OK) return HAL_ERROR;
+
+    return HAL_OK;
+#else
+    return HAL_OK;
+#endif
 }
 
 static HAL_StatusTypeDef HalConfigure_Dac1_Init(void) {

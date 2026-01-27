@@ -111,6 +111,18 @@ static void logger_log_drop_statistics_internal(logger_module_t *module) {
 
 void logger_log_drop_statistics(logger_module_t *module) { logger_log_drop_statistics_internal(module); }
 
+void logger_module_reset_stats(logger_module_t *module) {
+    if (!module) {
+        return;
+    }
+
+    module->dropped_chunks = 0;
+    module->dropped_queue_full = 0;
+    module->sd_write_failures = 0;
+    module->sd_recoveries = 0;
+    module->last_drop_stats_time_us = esp_timer_get_time();
+}
+
 // -------------------- Task for writing to SD --------------------
 
 static void IRAM_ATTR logger_sd_write_task(void *arg) {
@@ -150,9 +162,9 @@ static void IRAM_ATTR logger_sd_write_task(void *arg) {
                     uint64_t bytes_per_sec = ((uint64_t)written * 1000000ULL) / write_dt_us;
                     write_kb_per_sec = (uint32_t)(bytes_per_sec / 1024ULL);
                 }
-                LOG_I(TAG, "Write %d (%llu us, %u kB/s), dropped chunks %llu, dropped queue full %llu, sd_failures %llu", written,
-                      (unsigned long long)write_dt_us, write_kb_per_sec, (unsigned long long)module->dropped_chunks,
-                      (unsigned long long)module->dropped_queue_full, (unsigned long long)module->sd_write_failures);
+                // LOG_I(TAG, "Write %d (%llu us, %u kB/s), dropped chunks %llu, dropped queue full %llu, sd_failures %llu", written,
+                //       (unsigned long long)write_dt_us, write_kb_per_sec, (unsigned long long)module->dropped_chunks,
+                //       (unsigned long long)module->dropped_queue_full, (unsigned long long)module->sd_write_failures);
 #endif
                 if (++chunks_since_sync >= 8) {
 #ifdef DEBUG_LOGGER_WRITES
@@ -179,6 +191,8 @@ static void IRAM_ATTR logger_sd_write_task(void *arg) {
                     size_t free_heap = esp_get_free_heap_size();
                     LOG_I(TAG, "Sync done in %llu us, %u kB/s (total %u bytes, free_heap=%u bytes)", (unsigned long long)sync_dt_us, sync_kb_per_sec,
                           (unsigned)bytes_since_sync, (unsigned)free_heap);
+                    LOG_I(TAG, "Dropped chunks %llu, dropped queue full %llu, sd_failures %llu", (unsigned long long)module->dropped_chunks,
+                      (unsigned long long)module->dropped_queue_full, (unsigned long long)module->sd_write_failures);
 #else
                     //TODO
 #endif

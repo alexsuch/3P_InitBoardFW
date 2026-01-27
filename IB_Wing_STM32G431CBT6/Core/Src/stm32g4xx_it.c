@@ -97,15 +97,70 @@ void NMI_Handler(void)
 /**
   * @brief This function handles Hard fault interrupt.
   */
-void HardFault_Handler(void)
+typedef struct {
+  uint32_t r0;
+  uint32_t r1;
+  uint32_t r2;
+  uint32_t r3;
+  uint32_t r12;
+  uint32_t lr;
+  uint32_t pc;
+  uint32_t psr;
+
+  uint32_t exc_return;
+
+  uint32_t cfsr;
+  uint32_t hfsr;
+  uint32_t dfsr;
+  uint32_t afsr;
+  uint32_t mmfar;
+  uint32_t bfar;
+} hardfault_context_t;
+
+volatile hardfault_context_t g_hardfault_context;
+
+void HardFault_HandlerC(uint32_t *stacked_regs, uint32_t exc_return);
+
+static void HardFault_Capture(uint32_t *stacked_regs, uint32_t exc_return)
+{
+  g_hardfault_context.r0 = stacked_regs[0];
+  g_hardfault_context.r1 = stacked_regs[1];
+  g_hardfault_context.r2 = stacked_regs[2];
+  g_hardfault_context.r3 = stacked_regs[3];
+  g_hardfault_context.r12 = stacked_regs[4];
+  g_hardfault_context.lr = stacked_regs[5];
+  g_hardfault_context.pc = stacked_regs[6];
+  g_hardfault_context.psr = stacked_regs[7];
+
+  g_hardfault_context.exc_return = exc_return;
+
+  g_hardfault_context.cfsr = SCB->CFSR;
+  g_hardfault_context.hfsr = SCB->HFSR;
+  g_hardfault_context.dfsr = SCB->DFSR;
+  g_hardfault_context.afsr = SCB->AFSR;
+  g_hardfault_context.mmfar = SCB->MMFAR;
+  g_hardfault_context.bfar = SCB->BFAR;
+}
+
+__attribute__((naked)) void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
 
   /* USER CODE END HardFault_IRQn 0 */
-  while (1)
-  {
-    /* USER CODE BEGIN W1_HardFault_IRQn 0 */
-    /* USER CODE END W1_HardFault_IRQn 0 */
+  __asm volatile(
+      "tst lr, #4                        \n"
+      "ite eq                            \n"
+      "mrseq r0, msp                     \n"
+      "mrsne r0, psp                     \n"
+      "mov r1, lr                        \n"
+      "b HardFault_HandlerC              \n");
+}
+
+void HardFault_HandlerC(uint32_t *stacked_regs, uint32_t exc_return)
+{
+  HardFault_Capture(stacked_regs, exc_return);
+  __disable_irq();
+  while (1) {
   }
 }
 

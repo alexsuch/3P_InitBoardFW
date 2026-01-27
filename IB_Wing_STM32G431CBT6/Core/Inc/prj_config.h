@@ -13,8 +13,9 @@ extern "C" {
 #include <stdlib.h>
 
 /*-------------------------- LOGGER MACROS -----------------------------------------*/
-#define SPI_LOGGER_ENABLE (1u)  // RELEASE VALUE - 0u
-#define TEST_DAC_ENABLE (1u)    // RELEASE VALUE - 0u
+#define SPI_LOGGER_ENABLE (1u)        // RELEASE VALUE - 0u
+#define TEST_DAC_ENABLE (1u)          // RELEASE VALUE - 0u
+#define LOGGER_PROFILING_ENABLE (0u)  // RELEASE VALUE - 0u
 
 /*-------------------------- APP VERSION & DEVICE TYPE-----------------------------------------*/
 #define APP_MINOR_VERSION (0u)
@@ -35,7 +36,15 @@ extern "C" {
  * Note: These frequencies are used for both accelerometer and gyroscope
  * ODR bits [7:4] in CTRL1_XL and CTRL2_G registers
  */
-#define LSM6DS3_SAMPLING_FREQ_HZ (3332)  // Valid: 26, 52, 104, 208, 416, 833, 1666, 3332, 6664
+#define LSM6DS3_SAMPLING_FREQ_HZ (6664)  // Valid: 26, 52, 104, 208, 416, 833, 1666, 3332, 6664
+
+// Logger checksum algorithm used for LogFrame_t payload integrity.
+// CRC8 is stronger; SUM8 is faster but weaker (good for profiling/perf experiments).
+#define LOGGER_CHECKSUM_ALGO_CRC8 1u
+#define LOGGER_CHECKSUM_ALGO_SUM8 2u
+#define LOGGER_CHECKSUM_ALGO_CRC8_HW 3u
+// Set to LOGGER_CHECKSUM_ALGO_SUM8 to benchmark checksum overhead.
+#define LOGGER_CHECKSUM_ALGO LOGGER_CHECKSUM_ALGO_SUM8  // LOGGER_CHECKSUM_ALGO_CRC8
 
 /* LSM6DS3 ODR Register Values (from datasheet CTRL1_XL[7:4] and CTRL2_G[7:4])
  * 0000 = Off

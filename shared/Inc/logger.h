@@ -3,7 +3,7 @@
  * @brief Consolidated logger public API for impact data acquisition and SPI transmission
  *
  * Architecture:
- *   - Phase 1 (Timing):     Global timestamp synchronization via TIM3 slave
+ *   - Phase 1 (Timing):     Global timestamp via TIM7 tick counter
  *   - Phase 2 (ADC Ring):   Ring buffer capture for ADC2 100 kHz data
  *   - Phase 3 (IMU Time):   Timestamp correlation with LSM6DS3 samples
  *   - Phase 4 (Framing):    Frame builder with ADC + IMU payload
@@ -16,9 +16,10 @@
  *   3. In main loop or timer callback: Logger_Task() processes queued samples
  *
  * Timing Model:
- *   TIM6 @ 100 kHz (ITR5) → TIM5 External Clock Mode 1
- *   Logger_GetTimestamp() returns TIM5->CNT (0..0xFFFFFFFF, increments every 10 µs)
- *   Rollover at ~42s (2^32 / 100kHz)
+ *   TIM7 runs as a free-running timer ticking at ADC_SAMPLING_FREQ_KHZ (e.g. 100 kHz).
+ *   Logger_GetTimestamp() returns a 32-bit tick counter derived from TIM7->CNT.
+ *   Units: 1 tick = 1 / (ADC_SAMPLING_FREQ_KHZ * 1000) seconds (e.g. 10 µs @ 100 kHz).
+ *   Rollover at ~42.9 s for 32-bit ticks @ 100 kHz.
  */
 
 #ifndef SHARED_INC_LOGGER_H_
@@ -40,9 +41,7 @@ extern "C" {
 #define LOGGER_IMU_BLOCK_SIZE 20
 /* LOGGER_ADC_BLOCK_SIZE defined in prj_config.h - typically 256 samples */
 
-/* CRC16 - Simple polynomial */
-#define CRC16_POLY 0xA001  // Reversed CRC16-CCITT
-#define CRC16_INIT 0xFFFF
+/* CRC8 - Table-based polynomial */
 
 /* SPI Protocol - Command definitions */
 #define LOGGER_SPI_CMD_CONFIG 42      // Config command (0x2A) - retrieve logger_config_t
@@ -51,6 +50,46 @@ extern "C" {
 #define LOGGER_CONFIG_MAGIC 0xCAFE
 #define LOGGER_CONFIG_VERSION_MAJOR 0
 #define LOGGER_CONFIG_VERSION_MINOR 1
+
+typedef struct {
+    uint32_t count;
+    uint32_t last_cycles;
+    uint32_t max_cycles;
+    uint64_t sum_cycles;
+} logger_prof_counter_t;
+
+typedef struct {
+    uint32_t enabled;
+    uint32_t cpu_hz;
+
+    logger_prof_counter_t task_total;
+
+    logger_prof_counter_t adc_builder_copy;
+    logger_prof_counter_t imu_pop;
+
+    logger_prof_counter_t adc_frame_copy;
+    logger_prof_counter_t imu_frame_copy;
+    logger_prof_counter_t imu_frame_zero;
+
+    logger_prof_counter_t crc_part1;
+    logger_prof_counter_t crc_part2;
+    logger_prof_counter_t crc_part3;
+    logger_prof_counter_t crc_part4;
+
+    logger_prof_counter_t builder_reset;
+    logger_prof_counter_t frame_dequeue_copy;
+} logger_profile_t;
+
+extern volatile logger_profile_t g_logger_profile;
+
+void Logger_Profile_Reset(void);
+
+// ADC block overrun counter (increments when ADC blocks are dropped due to queue full)
+extern volatile uint32_t g_logger_adc_overruns;
+
+// Frame drop statistics (STM32-side). Useful for debugging link throughput issues.
+extern volatile uint32_t g_logger_frames_built;
+extern volatile uint32_t g_logger_frames_dropped;
 
 /* Logger Configuration Version History:
  * v0.1 (2026-01-15): Initial MAVLink integration
@@ -66,6 +105,21 @@ extern "C" {
 #define CRC8_INIT 0x00
 #define CRC8_TABLE_SIZE 256
 
+// Checksum algorithm selection (compile-time).
+// Default is CRC8 unless overridden in prj_config.h.
+#ifndef LOGGER_CHECKSUM_ALGO_CRC8
+#define LOGGER_CHECKSUM_ALGO_CRC8 1u
+#endif
+#ifndef LOGGER_CHECKSUM_ALGO_SUM8
+#define LOGGER_CHECKSUM_ALGO_SUM8 2u
+#endif
+#ifndef LOGGER_CHECKSUM_ALGO_CRC8_HW
+#define LOGGER_CHECKSUM_ALGO_CRC8_HW 3u
+#endif
+#ifndef LOGGER_CHECKSUM_ALGO
+#define LOGGER_CHECKSUM_ALGO LOGGER_CHECKSUM_ALGO_CRC8
+#endif
+
 /* CRC Frame partitioning offsets (for low-latency frame assembly) */
 #define CRC_PART1_OFFSET 0
 #define CRC_PART1_SIZE 134
@@ -73,7 +127,9 @@ extern "C" {
 #define CRC_PART2_SIZE 128
 #define CRC_PART3_OFFSET 262
 #define CRC_PART3_SIZE 128
-#define CRC_PART4_OFFSET 400
+// Part 4 starts immediately after Part 3 (262 + 128 = 390).
+// It covers the remainder of the frame payload up to (but excluding) the checksum8+pad field.
+#define CRC_PART4_OFFSET 390
 
 /* IMU buffer constants */
 #define IMU_BUFFER_MAX_SAMPLES 50
@@ -83,6 +139,7 @@ extern "C" {
 #define ADC_BUFFER_SIZE 256
 #define ADC_FRAME_READY_FLAG 1
 #define ADC_FRAME_EMPTY_FLAG 0
+#define ADC_BLOCK_QUEUE_DEPTH 4u
 
 /* ============================================================================
  * INTERNAL DATA STRUCTURES (moved from logger_adc_buffer.c and logger_imu_time.c)
@@ -95,9 +152,16 @@ extern "C" {
 #define ADC_BUFFER_MAX_SAMPLES 256
 
 typedef struct {
-    int16_t samples[ADC_BUFFER_MAX_SAMPLES];  // ADC samples array (int16_t), max 256
-    volatile uint32_t ready;                  // 1 = buffer ready, 0 = processed
-    volatile uint32_t block_timestamp;        // Reference timestamp of first sample
+    int16_t samples[ADC_BLOCK_QUEUE_DEPTH][ADC_BUFFER_MAX_SAMPLES];  // ADC blocks (FIFO)
+    volatile uint32_t block_timestamps[ADC_BLOCK_QUEUE_DEPTH];        // Timestamp of first sample for each block
+    volatile uint32_t write_idx;                                      // Producer write index
+    volatile uint32_t read_idx;                                       // Consumer read index (oldest block)
+    volatile uint32_t count;                                          // Number of queued blocks (0..DEPTH)
+    volatile uint32_t overruns;                                       // Number of dropped blocks due to full queue
+
+    // Compatibility fields (kept to minimize changes in frame builder logic)
+    volatile uint32_t ready;            // 1 if count > 0
+    volatile uint32_t block_timestamp;  // Timestamp of oldest queued block
 } AdcBuffer_t;
 
 /* ============================================================================
@@ -108,8 +172,8 @@ typedef struct {
 /**
  * @brief Initialize timestamp system (deprecated, now a no-op)
  *
- * Timestamp initialization is now handled automatically in Solution_HalInit()
- * when TIM6 interrupt is set up. This function is retained for API compatibility.
+ * Timestamp initialization is handled in HAL configuration and started/reset in
+ * Solution_LoggingStart(). This function is retained for API compatibility.
  *
  * Returns: void
  */
@@ -118,10 +182,11 @@ void Logger_Timing_Init(void);
 /**
  * @brief Get current global timestamp counter value
  *
- * Returns: uint32_t - Current 32-bit software counter
- *          Increments by 1 every 10 µs (100 kHz rate)
+ * Returns: uint32_t - Current 32-bit tick counter derived from TIM7.
+ *          Increments by 1 at ADC_SAMPLING_FREQ_KHZ (e.g. 100 kHz => 10 µs ticks).
  *
- * Implementation: Software 32-bit counter incremented by TIM6 @ 100 kHz
+ * Implementation: TIM7 free-running counter (16-bit) extended to 32-bit by
+ * tracking overflows via UIF polling inside Logger_GetTimestamp().
  * Usage: uint32_t ts = Logger_GetTimestamp();  // Returns 32-bit counter
  */
 uint32_t Logger_GetTimestamp(void);
@@ -129,10 +194,8 @@ uint32_t Logger_GetTimestamp(void);
 /**
  * @brief Called from TIM6 interrupt handler to update timestamp counter
  *
- * Prerequisites:
- *   - Must be called from TIM6_DAC_IRQHandler in stm32g4xx_it.c
- *   - Increments g_timestamp by 1 (every 10 µs @ 100 kHz)
- *   - Maintains synchronization with ADC2 100 kHz sampling
+ * Deprecated: legacy hook kept for API compatibility.
+ * Do not enable TIM6 IRQ for logger timestamps.
  *
  * Returns: void
  */
@@ -146,7 +209,7 @@ void Logger_TIM6_UpdateCallback(void);
  */
 typedef struct {
     uint16_t adc_value;  // 12-bit ADC reading (0-4095)
-    uint32_t timestamp;  // TIM3->CNT @ 100 kHz (every 10 µs)
+    uint32_t timestamp;  // 100 kHz tick counter (10 µs @ 100 kHz)
 } AdcSample_t;
 
 /* ============================================================================
@@ -158,7 +221,8 @@ typedef struct {
  * @brief Initialize ADC2 linear buffer (256 samples, ready flag)
  *
  * Prerequisites:
- *   - TIM6 running @ 100 kHz
+ *   - TIM6 running @ 100 kHz (ADC trigger)
+ *   - TIM7 running @ 100 kHz (timestamp timebase)
  *   - ADC2 DMA configured and running
  *
  * Effects: Buffer is initialized automatically on first use
@@ -199,7 +263,8 @@ void Logger_AdcBuffer_ClearReady(void);
  * @brief DMA complete callback (called from HAL_ADC_ConvCpltCallback)
  *
  * Called when 256 samples accumulated in DMA circular buffer.
- * Sets ready flag and stores timestamp of first sample.
+ * Sets ready flag and stores a reference timestamp for the ADC block.
+ * The stored timestamp corresponds to the first sample in the 256-sample block.
  *
  * Integration:
  *   In solution_wrapper.c HAL_ADC_ConvCpltCallback():
@@ -214,10 +279,10 @@ void Logger_AdcBuffer_ClearReady(void);
 void Logger_AdcBuffer_OnComplete(const uint16_t* dma_buffer, uint32_t count);
 
 /**
- * @brief Get reference timestamp for current ADC block (first sample)
+ * @brief Get reference timestamp for current ADC block
  *
- * Returns: uint32_t - Timestamp of first sample in current buffer
- *          (100 kHz = 10 µs per tick)
+ * Returns: uint32_t - Reference timestamp captured for the current ADC block
+ *          (100 kHz = 10 µs per tick).
  */
 uint32_t Logger_AdcBuffer_GetFirstTimestamp(void);
 
@@ -231,29 +296,32 @@ uint32_t Logger_AdcBuffer_GetFirstTimestamp(void);
  *
  * Data format from LSM6DS3 register read:
  *   Bytes 0-11:  Raw 12 bytes from SPI (gx, gy, gz, ax, ay, az as int16_t each)
- *   Bytes 12-15: timestamp (uint32_t) - TIM6 @ 100 kHz, captured when sample received
+ *   Bytes 12-15: timestamp (uint32_t) - 100 kHz tick counter, captured when sample received
  */
 typedef struct __attribute__((packed)) {
     uint8_t data[12];    // Raw 12 bytes from SPI (gx, gy, gz, ax, ay, az as int16_t each)
-    uint32_t timestamp;  // Timestamp of this IMU sample (TIM6 @ 100 kHz, 10 µs resolution, 4 bytes)
+    uint32_t timestamp;  // Timestamp of this IMU sample (100 kHz tick, 10 µs @ 100 kHz, 4 bytes)
 } ImuRawSample_t;
 
 _Static_assert(sizeof(ImuRawSample_t) == 16, "ImuRawSample_t must be 16 bytes");
 
 /**
- * @brief IMU raw buffer (from logger_imu_time.c)
+ * @brief IMU ring buffer (circular buffer for O(1) insert)
  *
- * Contains up to 50 ImuRawSample_t structures collected from LSM6DS3 at ~104 Hz.
- * Each sample includes 12 raw bytes (gyro + accel) plus 4-byte timestamp.
+ * Contains up to 50 ImuRawSample_t structures collected from LSM6DS3.
+ * Uses head/tail indices to avoid memmove() on overflow.
+ * When buffer is full, oldest sample is overwritten.
  */
 typedef struct {
-    ImuRawSample_t samples[50];  // Raw sample buffer (50 samples max)
-    volatile uint32_t count;     // Current sample count (0..50)
+    ImuRawSample_t samples[IMU_BUFFER_MAX_SAMPLES];  // Ring buffer (50 samples max)
+    volatile uint32_t head;                          // Write index (producer advances)
+    volatile uint32_t tail;                          // Read index (consumer advances)
+    volatile uint32_t count;                         // Current sample count (0..50)
 } ImuBuffer_t;
 
 /**
  * Prerequisites:
- *   - Logger_Timing_Init() completed (TIM6 running @ 100 kHz)
+ *   - Timestamp timebase running (TIM7 @ ADC_SAMPLING_FREQ_KHZ)
  *   - Logger_RingBuffer_Init() completed
  *   - LSM6DS3 running and polling for data
  *
@@ -297,23 +365,18 @@ void Logger_ImuOnNewSample(const uint8_t* raw_data);
 uint32_t Logger_ImuRing_GetCount(void);
 
 /**
- * @brief Get pointer to IMU buffer data
+ * @brief Pop IMU samples from ring buffer (thread-safe consumer function)
  *
- * @param out_count: Pointer to uint32_t to receive actual sample count
+ * Copies up to max_count most recent samples to output buffer.
+ * Uses critical section for thread-safe access between ISR and main loop.
+ * Clears ring buffer after copying.
  *
- * Returns: Pointer to ImuRawSample_t array (up to 50 samples),
- *          or NULL if buffer empty
+ * @param out_buf: Destination buffer for samples
+ * @param max_count: Maximum samples to copy (typically LOGGER_IMU_BLOCK_SIZE)
  *
- * Note: Buffer ownership remains in logger; caller should copy if keeping data.
+ * @return Number of samples actually copied (0..max_count)
  */
-const ImuRawSample_t* Logger_ImuRing_GetBuffer(uint32_t* out_count);
-
-/**
- * @brief Clear IMU buffer after frame assembly
- *
- * Direct access: Set g_imu_buffer.count = 0 after processing current IMU buffer.
- * Resets sample counter to 0 for next batch of samples.
- */
+uint32_t Logger_ImuRing_PopSamples(ImuRawSample_t* out_buf, uint32_t max_count);
 
 /* ============================================================================
  * PHASE 4: FRAME BUILDING (Implemented - logger_frame.c)
@@ -343,30 +406,33 @@ _Static_assert(sizeof(mavlink_log_data_t) == 10, "mavlink_log_data_t must be 10 
 /**
  * @brief Frame format structure (fixed-size frame for efficient SPI transfer)
  *
- * Layout (little-endian, fixed 842 bytes):
+ * Layout (little-endian, fixed 852 bytes):
  *   Bytes 0-1:       MAGIC_FRAME (0x5A5A)
  *   Bytes 2-3:       n_imu (uint16_t, number of IMU samples actually filled, 0-20)
- *   Bytes 4-7:       adc_timestamp (uint32_t, TIM6 counter @ 100 kHz of first ADC sample)
+ *   Bytes 4-7:       adc_timestamp (uint32_t, 100 kHz tick of first ADC sample)
  *   Bytes 8-519:     adc[256] (256 × int16_t = 512 bytes)
  *   Bytes 520-839:   imu[LOGGER_IMU_BLOCK_SIZE] (20 × ImuRawSample_t = 20 × 16 = 320 bytes)
- *   Bytes 840-841:   crc16 (CRC16 checksum)
+ *   Bytes 840-849:   mavlink_log (10 bytes)
+ *   Bytes 850:       checksum8 (CRC8 or SUM8 checksum, depends on LOGGER_CHECKSUM_ALGO)
+ *   Bytes 851:       checksum_pad (reserved, set to 0)
  *
- * Size: Fixed 842 bytes
+ * Size: Fixed 852 bytes
  *   - Magic (2) + n_imu (2) + adc_timestamp (4) = 8 bytes header
  *   - ADC block (256 × 2) = 512 bytes
  *   - IMU block (20 × 16) = 320 bytes (each sample includes 4B timestamp)
- *   - CRC16 (2 bytes) = 2 bytes
- *   - Total = 842 bytes (fixed, DMA-friendly SPI transfer)
+ *   - MAVLink log (10 bytes) = 10 bytes
+ *   - CRC (2 bytes) = 2 bytes
+ *   - Total = 852 bytes (fixed, DMA-friendly SPI transfer)
  *
  * Note: n_imu field indicates how many of the LOGGER_IMU_BLOCK_SIZE (20) slots are filled.
  *       Unused IMU slots are zeroed. Each IMU sample has its own timestamp.
  *
  * CRC Computation (Incremental):
- *       The CRC16 is computed in 4 stages to reduce interrupt latency:
+ *       The CRC8 is computed in 4 stages to reduce interrupt latency:
  *       Part 1: bytes 0-133 (header + 1st quarter ADC)
  *       Part 2: bytes 134-261 (2nd quarter ADC)
  *       Part 3: bytes 262-389 (3rd quarter ADC)
- *       Part 4: bytes 390-840 (4th quarter ADC + all IMU with timestamps, excl. crc field)
+ *       Part 4: bytes 390-849 (remainder of payload, excl. crc field)
  *       Each stage takes ~3µs @ 168MHz, enabling fast interrupt response.
  *
  * Queue: 10 frames max (~8.42 KB total)
@@ -374,11 +440,12 @@ _Static_assert(sizeof(mavlink_log_data_t) == 10, "mavlink_log_data_t must be 10 
 typedef struct __attribute__((packed)) {
     uint16_t magic;                             // 0x5A5A
     uint16_t n_imu;                             // Number of valid IMU samples (0-20)
-    uint32_t adc_timestamp;                     // Timestamp of first ADC sample (TIM6 @ 100 kHz, every 10 µs)
+    uint32_t adc_timestamp;                     // Timestamp of first ADC sample (100 kHz tick, 10 µs @ 100 kHz)
     int16_t adc[256];                           // Fixed 256 ADC samples
     ImuRawSample_t imu[LOGGER_IMU_BLOCK_SIZE];  // Fixed 20 IMU raw samples with timestamps (only first n_imu are valid)
     mavlink_log_data_t mavlink_log;             // MAVLink event flags + telemetry (10 bytes)
-    uint16_t crc16;                             // CRC16 checksum
+    uint8_t checksum8;                          // CRC8 or SUM8 checksum (8-bit)
+    uint8_t checksum_pad;                       // Reserved/padding (set to 0)
 } LogFrame_t;
 
 _Static_assert(sizeof(LogFrame_t) == 852, "LogFrame_t must be 852 bytes");
@@ -502,7 +569,7 @@ typedef enum {
     FRAME_STATE_CRC_PART1,  // CRC computation: bytes 0-133 (header + 1st quarter ADC)
     FRAME_STATE_CRC_PART2,  // CRC computation: bytes 134-261 (2nd quarter ADC)
     FRAME_STATE_CRC_PART3,  // CRC computation: bytes 262-389 (3rd quarter ADC)
-    FRAME_STATE_CRC_PART4,  // CRC computation: bytes 390-517 (4th quarter ADC + IMU), finalize & queue
+    FRAME_STATE_CRC_PART4,  // CRC computation: bytes 390-849 (remainder of payload), finalize & queue
 } FrameState_t;
 
 /**
@@ -522,7 +589,7 @@ typedef enum {
  * @brief CRC computation state for incremental frame CRC calculation
  *
  * Splits CRC8 calculation into 4 parts to reduce interrupt latency.
- * Each part processes ~270 bytes of the ~1118 byte frame (~25 µs per part).
+ * Each part processes a slice of the 850-byte payload (excluding the crc field).
  *
  * Part boundaries (crc8 compute divides frame into 4 segments):
  *   Part 1: header + 1st quarter ADC (6 + 128 bytes = 134 bytes)
@@ -674,7 +741,7 @@ void Solution_LoggingStart(void);
  *      - Get 256 ADC samples
  *      - Get 0..50 IMU samples
  *      - Assemble frame with both datasets
- *      - Compute CRC16, queue frame
+ *      - Compute CRC8, queue frame
  *   2. IMU_COLLECT: Queue the assembled frame, reset builder
  *
  * Single-pass design: All data collection happens in IDLE state,
@@ -709,14 +776,10 @@ int Logger_GetNextFrame(LogFrame_t* out_frame);
 /**
  * Integration checklist:
  *
- * [ ] 1. In hal_cfg.h: Add #define LOGGER_TIMESTAMP_TIMER_BASE TIM3
- * [ ] 2. In hal_cfg.h: Add extern TIM_HandleTypeDef htim3;
- * [ ] 3. In solution_wrapper.c: #include "logger.h"
- * [ ] 4. In solution_wrapper.c Solution_HalInit(): Add Logger_Timing_Init() call
- * [ ] 5. In LSM6DS3.c Lsm6ds3_GetDataCbk(): Add SPI_LOGGER_ENABLE gate before Logger_ImuOnNewSample()
- * [ ] 6. Compile and verify no errors
- * [ ] 7. Debug: Set breakpoint in Logger_Timing_Init(), verify TIM5->CNT increments @ 100 kHz
- * [ ] 8. Validate: Use Saleae to verify TIM6 TRGO matches TIM5 counter increments
+ * [ ] 1. Ensure TIM7 timestamp init is enabled in HAL config
+ * [ ] 2. Ensure Solution_LoggingStart() resets/starts TIM7 and starts ADC trigger timer
+ * [ ] 3. In LSM6DS3.c Lsm6ds3_GetDataCbk(): gate Logger_ImuOnNewSample() with SPI_LOGGER_ENABLE
+ * [ ] 4. Debug: watch Logger_GetTimestamp() while logging (should increment at 100 kHz)
  */
 
 /* ============================================================================
@@ -724,7 +787,7 @@ int Logger_GetNextFrame(LogFrame_t* out_frame);
  * ============================================================================
  *
  * Provides queue and transmission interface for Phase 4 LogFrame_t structures.
- * Queues complete frames (640 bytes) from logger_frame.c for DMA transmission.
+ * Queues complete frames (852 bytes) from logger_frame.c for DMA transmission.
  *
  * Architecture:
  *   - Phase 4 (logger_frame.c): Builds frames in g_frame_ctx.frame_queue via write_idx

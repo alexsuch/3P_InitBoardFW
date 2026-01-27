@@ -1,299 +1,266 @@
-# Logger Feature (SPI Logger) — IB_Wing_STM32G431CBT6
+# SPI Logger Feature — STM32G431 (IB_Wing) ↔ ESP32-S3 Logger
 
-This document describes how the **SPI logger** works in `3P_InitBoardFW`, focusing on code under:
-- `shared/`
-- `IB_Wing_STM32G431CBT6/`
+This document describes the **SPI logger** architecture in `3P_InitBoardFW`.
 
-The logger collects:
-- **ADC2 samples** (piezo/sensor input) at **100 kHz** via DMA
-- **LSM6DS3 IMU raw samples** (gyro+accel) via SPI1 (timestamped)
-- It **streams fixed-size frames to an external SPI master** (e.g., ESP32) over **SPI2 (slave)**
-
-Note: despite the repository also containing MAVLink support, **MAVLink data is not part of the SPI logger stream in `SPI_LOGGER_ENABLE` mode** (details below).
+In this system:
+- **STM32G431** samples **ADC2** and reads **LSM6DS3 IMU**, merges the data into **fixed-size frames**, and streams them over **SPI2 (slave)**.
+- **ESP32‑S3** acts as **SPI master**, reads the frames, and writes them to an SD card as a `.dat` file.
+- The **log converter** turns `.dat` files into CSV (`adc_data.csv`, `imu_data.csv`, etc.) without forcing “monotonic” timestamps.
 
 ---
 
-## Build/Config Switches (Logger Mode)
+## Binary Log Format (on SD card)
 
-Primary compile-time switch:
-- `IB_Wing_STM32G431CBT6/Core/Inc/prj_config.h`: `SPI_LOGGER_ENABLE`
-  - `0`: “standard” application mode (detonation / control features, MAVLink task etc.)
-  - `1`: logger mode (SPI logger pipeline runs; other application flows are largely bypassed)
-
-Logger-relevant configuration macros (same file):
-- `ADC_SAMPLING_FREQ_KHZ` (default `100u`)
-- `ADC_DMA_BUFFER_SIZE` (default `512u` samples)
-- `ADC_DMA_HALF_SIZE` (default `256u` samples)
-- `LOGGER_ADC_BLOCK_SIZE` (`ADC_DMA_HALF_SIZE`, i.e. 256 samples per block)
-- `LSM6DS3_SAMPLING_FREQ_HZ` (IMU ODR; see `LSM6DS3_ODR_VALUE` mapping)
-
-SPI pin/handle mapping:
-- `IB_Wing_STM32G431CBT6/Core/Inc/hal_cfg.h`:
-  - `LOGGER_SPI_HANDLE` → `hspi2` (SPI2 slave)
-  - `LOGGER_SPI_DATA_RDY_PORT/PIN` → `GPIOB/PB11` (“data ready” GPIO to master)
-
----
-
-## High-Level Data Flow
-
-1. **Init**
-   - `shared/Src/app.c`: `App_InitRun()` calls `Logger_Init()` when `SPI_LOGGER_ENABLE == 1u`.
-   - `shared/Src/logger_spi.c`: `Logger_Init()` arms SPI2 RX to wait for a config request from the SPI master.
-
-2. **SPI config handshake (one-time)**
-   - Master sends **command 42** (`0x2A`) over SPI2.
-   - Slave responds with `logger_config_t` (32 bytes).
-   - After config is sent, the logger starts ADC/IMU acquisition (`Solution_LoggingStart()`).
-
-3. **Acquisition**
-   - **ADC2** continuously samples at 100 kHz via **TIM6 TRGO** + **DMA circular buffer**.
-   - **LSM6DS3** delivers raw bursts (12 bytes: gyro+accel) and each is timestamped.
-
-4. **Framing**
-   - `Logger_Task()` (called from `App_Task()`) merges:
-     - 256 ADC samples + timestamp
-     - 0..N IMU samples (typically 0 or 1 per ADC block)
-   - Frames are queued in a small ring queue (10 frames).
-
-5. **SPI streaming**
-   - When SPI is idle and a frame is available, the slave starts a **SPI2 TX DMA** transfer.
-   - A **GPIO “data ready”** line is asserted high during a transfer and lowered on TX complete.
-
----
-
-## Block Diagram
+Each `.dat` file is a simple concatenation:
 
 ```text
-                       +------------------+
-                       |  SPI Master      |
-                       |  (ESP32, etc.)   |
-                       +---------+--------+
-                                 |
-                                 | SPI2 (NSS/SCK/MOSI/MISO)
-                                 v
-+----------------------+   +-------------------------+   +----------------------+
-| STM32 SPI2 (slave)   |<->| Logger SPI protocol     |-->| SPI2 TX DMA          |
-| hspi2                |   | shared/Src/logger_spi.c |   | + TX complete cbk    |
-+----------+-----------+   +-----------+-------------+   +----------+-----------+
-           ^                           |                            |
-           | PB11 (DATA_RDY)           |                            v
-           | GPIO high/low             |                     Master clocks out
-           |                           |
-           |                           v
-           |                +----------------------+
-           |                | Frame queue (x10)    |
-           |                | LogFrame_t (842B)    |
-           |                +----------+-----------+
-           |                           ^
-           |                           |
-           |                           v
-           |                +----------------------+
-           |                | Frame builder task   |
-           |                | Logger_Task()        |
-           |                +----+------------+----+
-           |                     |            |
-           |                     |            |
-           |                     v            v
-           |            +------------+   +------------------+
-           |            | ADC buffer |   | IMU ring buffer  |
-           |            | 256 samples|   | up to 50 samples |
-           |            +------+-----+   +--------+---------+
-           |                   ^                  ^
-           |                   |                  |
-           |                   |                  |
-           |   HAL_ADC DMA cbk |                  | LSM6DS3 read cbk
-           |                   |                  |
-           v                   |                  |
- +------------------+          |        +----------------------+
- | ADC2 + DMA       |          |        | LSM6DS3 (SPI1)       |
- | TIM6 TRGO @100kHz|----------+        | raw gyro+accel burst |
- +------------------+                   +----------------------+
+[ 64B logger_config_t header ][ 852B logger_frame_t ][ 852B logger_frame_t ]...
 ```
 
-Mermaid (optional):
-```mermaid
-flowchart TD
-  subgraph Master[External module (e.g., ESP32)]
-    M[SPI master]
-  end
+### Header (`logger_config_t`, 64 bytes)
 
-  subgraph STM32[STM32G431CBT6]
-    SPI2[SPI2 slave (hspi2)]
-    RDY[PB11 DATA_RDY GPIO]
-    RX[HAL_SPI_Receive_IT (5B cmd)]
-    TX[HAL_SPI_Transmit_DMA (config/frame)]
-    TXC[HAL_SPI_TxCpltCallback]
+Written by ESP32 at the start of the file (copied from STM32 config response).
 
-    TIM6[TIM6 TRGO @ 100kHz]
-    ADC2[ADC2 ext trig from TIM6]
-    DMA[DMA circular buffer (512 samples)]
-    ADCCB[HAL_ADC_ConvHalf/ConvCpltCallback]
-    ADCBUF[g_adc_buffer (256 samples + timestamp)]
+Key fields:
+- `magic = 0xCAFE`, version `major.minor`
+- ADC: `adc_sample_rate_khz`, `adc_block_size` (typically 100 kHz, 256)
+- IMU config snapshot (presence flags, ODR, ranges, register snapshots)
+- `reserved[0]` = checksum algorithm id (1=CRC8_SW, 2=SUM8, 3=CRC8_HW)
 
-    IMU[LSM6DS3 driver (SPI1)]
-    IMUCB[Lsm6ds3_GetDataCbk]
-    IMUBUF[g_imu_buffer (<=50 samples)]
+### Frame (`logger_frame_t` / `LogFrame_t`, 852 bytes)
 
-    TASK[Logger_Task()]
-    Q[Frame queue (10)]
-  end
-
-  M -->|SPI2 clocks| SPI2
-  SPI2 --> RX -->|cmd 0x2A| TX --> RDY
-  TX --> TXC -->|RDY low| RDY
-  TASK --> Q --> TX
-
-  TIM6 --> ADC2 --> DMA --> ADCCB --> ADCBUF --> TASK
-  IMU --> IMUCB --> IMUBUF --> TASK
-```
-
----
-
-## Data Collection Details
-
-### Timestamping (100 kHz tick)
-
-- `IB_Wing_STM32G431CBT6/Core/Src/solution_wrapper.c`:
-  - `static volatile uint32_t g_timestamp`
-  - `Logger_TIM6_UpdateCallback()` increments `g_timestamp`.
-  - `HAL_TIM_PeriodElapsedCallback()` calls `Logger_TIM6_UpdateCallback()` when `htim->Instance == TIM6`.
-  - `Logger_GetTimestamp()` returns `g_timestamp`.
-
-TIM6 setup:
-- `IB_Wing_STM32G431CBT6/Core/Src/solution_hal_cfg.c`: TIM6 period is derived from `ADC_SAMPLING_FREQ_KHZ`.
-- `IB_Wing_STM32G431CBT6/Core/Src/main.c`: CubeMX init sets `htim6.Init.Period = 1679` (for 168 MHz / 100 kHz).
-
-### ADC2 sampling (100 kHz, DMA circular)
-
-Configuration:
-- `IB_Wing_STM32G431CBT6/Core/Src/solution_hal_cfg.c`:
-  - ADC2 external trigger: `ADC_EXTERNALTRIG_T6_TRGO` on rising edge
-  - `DMAContinuousRequests = ENABLE`, `ContinuousConvMode = DISABLE` (triggered conversions)
-
-Runtime:
-- `IB_Wing_STM32G431CBT6/Core/Src/solution_wrapper.c`:
-  - `adc2_dma_buffer[ADC_DMA_BUFFER_SIZE]` (512 samples)
-  - `HAL_ADC_ConvHalfCpltCallback()` calls `Logger_AdcBuffer_OnComplete(adc2_dma_buffer, 256)`
-  - `HAL_ADC_ConvCpltCallback()` calls `Logger_AdcBuffer_OnComplete(&adc2_dma_buffer[256], 256)`
-- `shared/Src/logger_spi.c`:
-  - `Logger_AdcBuffer_OnComplete()` copies 256 samples into `g_adc_buffer.samples[]` and sets:
-    - `g_adc_buffer.block_timestamp = Logger_GetTimestamp()`
-    - `g_adc_buffer.ready = 1`
-
-Important nuance:
-- The code comments describe `block_timestamp` as “timestamp of first sample”, but the implementation stores the timestamp **when the DMA callback runs** (i.e., roughly at the end of a 256-sample block). If the receiver needs “first-sample timestamp”, it should account for an offset of ~`LOGGER_ADC_BLOCK_SIZE` ticks.
-
-### IMU raw samples (LSM6DS3)
-
-IMU config publication (sent in `logger_config_t`):
-- `shared/Src/LSM6DS3.c` builds an `imu_config_t` and calls:
-  - `Logger_OnAccelerometerReady(&imu_cfg)` (logger stores it into `loggerStat.config.imu_config`)
-
-Raw sample capture:
-- `shared/Src/LSM6DS3.c` in `Lsm6ds3_GetDataCbk()`:
-  - `Logger_ImuOnNewSample(&lsm6ds3_Stat.rd_buff[1])` (skips a dummy byte; passes 12 raw bytes)
-- `shared/Src/logger_spi.c` in `Logger_ImuOnNewSample()`:
-  - appends `{ data[12], timestamp=Logger_GetTimestamp() }` into `g_imu_buffer` (up to 50 samples)
-
-Raw IMU byte layout (12 bytes):
-- `[gx_lo,gx_hi, gy_lo,gy_hi, gz_lo,gz_hi, ax_lo,ax_hi, ay_lo,ay_hi, az_lo,az_hi]`
-
----
-
-## Frame Format (`LogFrame_t`, 842 bytes)
-
-Defined in `shared/Inc/logger.h` as a packed struct:
+Fixed layout (little-endian, packed):
 
 | Field | Size | Notes |
-|------:|-----:|------|
+|---:|---:|---|
 | `magic` | 2 | `0x5A5A` |
-| `n_imu` | 2 | number of valid IMU samples (intended 0..`LOGGER_IMU_BLOCK_SIZE` = 20) |
-| `adc_timestamp` | 4 | timestamp for the ADC block (see nuance above) |
-| `adc[256]` | 512 | 256 × `int16_t` |
-| `imu[20]` | 320 | 20 × `ImuRawSample_t` (16 bytes each) |
-| `crc16` | 2 | checksum field (see CRC note below) |
+| `n_imu` | 2 | number of valid IMU samples in `imu[]` (0..20) |
+| `adc_timestamp` | 4 | timestamp of the **first** ADC sample in this 256-sample block (ticks) |
+| `adc[256]` | 512 | `int16_t` |
+| `imu[20]` | 320 | each sample is 12 raw bytes + `uint32_t timestamp` (ticks) |
+| `mavlink_log` | 10 | MAVLink flags + basic telemetry (may be all zeros) |
+| `checksum8` | 1 | CRC8/SUM8 depending on build |
+| `checksum_pad` | 1 | reserved (0) |
 
-Endianness: STM32 is little-endian; the struct is packed, and the byte layout matches little-endian encoding of multi-byte fields.
+### Timestamps (ticks → microseconds)
 
-### CRC note (implementation vs naming)
+Firmware timestamps are **ticks** at `config.adc_sample_rate_khz * 1000` Hz.
+Example: 100 kHz ⇒ 1 tick = 10 µs.
 
-Although `LogFrame_t` has a `uint16_t crc16` field and `logger.h` documents “CRC16”, the actual implementation in `shared/Src/logger_spi.c` computes a **CRC-8** (table-based, polynomial `0x07`) and writes it into `frame->crc16` (upper byte will typically be `0`).
+The log converter converts ticks to `timestamp_us` using:
 
-Receiver-side recommendation (based on current code): validate **CRC-8 over the frame bytes excluding the last byte** as implemented, or update firmware + receiver together if true CRC16 is desired.
-
----
-
-## SPI Protocol (SPI2 Slave → Master)
-
-### Signals / pins
-
-- SPI2 pins (CubeMX / MSP init):
-  - `PB12` NSS, `PB13` SCK, `PB14` MISO, `PB15` MOSI
-- “Data ready” GPIO:
-  - `PB11` (`LOGGER_SPI_DATA_RDY_PIN`) toggled by `Logger_GPIO_SetReady()`
-
-### Startup handshake
-
-1. STM32 boots, calls `Logger_Init()`:
-   - arms `HAL_SPI_Receive_IT(..., 5)` to capture a 5-byte “command packet”
-   - ensures DATA_RDY is low
-2. Master asserts NSS and sends 5 bytes where the first byte is the command:
-   - supported command: `LOGGER_SPI_CMD_CONFIG = 42 (0x2A)`
-3. On RX complete:
-   - `Logger_SPI_RxCallback()` sends `logger_config_t` (32 bytes) via `HAL_SPI_Transmit_DMA`
-   - asserts DATA_RDY high during the transfer
-4. On TX complete:
-   - `Logger_SPI_TxCallback()` deasserts DATA_RDY and sets an internal “TX done” state
-
-### Frame streaming
-
-- After the config transmission is done, the logger starts acquisition via:
-  - `Solution_LoggingStart()` (called from `Logger_DrainQueue()` when `config_sent` is observed)
-- Frames are produced in `Logger_Task()` and immediately transmitted (DMA) whenever SPI is idle.
-
-Operationally, the master should:
-- wait for DATA_RDY to go high
-- clock out exactly `sizeof(LogFrame_t)` bytes (842) for a frame
-- DATA_RDY will go low when DMA finishes (TX complete callback)
+```text
+timestamp_us = ticks * 1000 / adc_sample_rate_khz
+```
 
 ---
 
-## MAVLink Data (Not part of SPI logger stream)
+## Build / Config Switches (STM32 side)
 
-The repository includes MAVLink parsing and application events under `shared/Src/mavlink_uart.c`, but when `SPI_LOGGER_ENABLE == 1u`:
-- `shared/Src/app.c` bypasses MAVLink init and `Mavlink_Process()` in the main task loop
-- `LogFrame_t` contains only ADC and IMU payloads (no MAVLink/event fields)
+Main switch:
+- `IB_Wing_STM32G431CBT6/Core/Inc/prj_config.h`: `SPI_LOGGER_ENABLE`
+  - `0`: “standard” application mode
+  - `1`: logger mode (SPI logger pipeline active)
 
-If “MAVLink events over SPI” are required, it would need an explicit protocol extension (new frame type/fields or a parallel message channel).
-
----
-
-## Files Involved (Logger Functionality)
-
-### Shared (`shared/`)
-- `shared/Inc/logger.h`: public structs and logger API (`LogFrame_t`, `logger_config_t`, callbacks)
-- `shared/Src/logger_spi.c`: ADC/IMU buffers, frame builder + queue, SPI protocol callbacks
-- `shared/Src/LSM6DS3.c`: IMU init/config extraction + raw sample callback into logger (`Logger_OnAccelerometerReady`, `Logger_ImuOnNewSample`)
-- `shared/Inc/LSM6DS3.h`: IMU register definitions and driver API used by the logger build
-- `shared/Src/app.c`: enables logger mode (`Logger_Init`, `Logger_Task`) when `SPI_LOGGER_ENABLE == 1u`
-
-### Board (`IB_Wing_STM32G431CBT6/`)
-- `IB_Wing_STM32G431CBT6/Core/Inc/prj_config.h`: `SPI_LOGGER_ENABLE`, ADC rate/buffer sizing, IMU ODR selection
-- `IB_Wing_STM32G431CBT6/Core/Inc/hal_cfg.h`: logger SPI2 handle + DATA_RDY pin mapping
-- `IB_Wing_STM32G431CBT6/Core/Src/solution_wrapper.c`: timestamp source, ADC DMA callbacks to logger, SPI2 wrapper callbacks (`HAL_SPI_*CpltCallback`)
-- `IB_Wing_STM32G431CBT6/Core/Src/solution_hal_cfg.c`: TIM6/ADC2 trigger configuration, GPIO setup for DATA_RDY
-- `IB_Wing_STM32G431CBT6/Core/Src/main.c`: CubeMX init for SPI2 slave, TIM6 base init, peripheral bring-up sequence
-- `IB_Wing_STM32G431CBT6/Core/Src/stm32g4xx_hal_msp.c`: SPI2 DMA (TX) + SPI2 GPIO AF config, ADC DMA, NVIC
-- `IB_Wing_STM32G431CBT6/Core/Src/stm32g4xx_it.c`: SPI2 IRQ handler, DMA2 Ch2 IRQ handler, TIM6 IRQ
-- `IB_Wing_STM32G431CBT6/IB_Wing_STM32G431CBT6.ioc`: CubeMX configuration (SPI2 slave pins, DMA request)
-- `IB_Wing_STM32G431CBT6/PINOUT.md`: pinout/interrupt mapping reference for logger mode
+Logger-related macros:
+- `ADC_SAMPLING_FREQ_KHZ` (default 100)
+- `ADC_DMA_BUFFER_SIZE` (default 512 samples)
+- `ADC_DMA_HALF_SIZE` (default 256 samples)
+- `LOGGER_ADC_BLOCK_SIZE` (typically 256)
+- `LSM6DS3_SAMPLING_FREQ_HZ` (IMU ODR: 1666 / 3332 / 6664, etc.)
+- `LOGGER_CHECKSUM_ALGO` (CRC8 / SUM8 / CRC8_HW)
 
 ---
 
-## Known Gaps / Things to Watch
+## High-Level End-to-End Data Flow
 
-- **CRC mismatch in naming**: implementation currently computes CRC-8 but stores into `crc16`.
-- **IMU sample count not clamped**: frame payload is sized for `LOGGER_IMU_BLOCK_SIZE` (20), while the IMU buffer can hold up to 50. In normal timing (100 kHz ADC blocks vs IMU ODR), `n_imu` is typically very small; if IMU ODR increases significantly, `Logger_Task()` should clamp/copy at most 20 samples.
-- **ADC timestamp meaning**: timestamp is captured at DMA callback time; adjust in the receiver if “first-sample timestamp” is needed.
-- **DATA_RDY pin documentation drift**: comments mention PB9 in one place; code mapping in `hal_cfg.h` is PB11.
+```text
+   (SPI1)                         (SPI2 slave)              (SPI3 master)            (SPI2 master)
+IMU LSM6DS3 ----INT---->  STM32G431 Logger firmware  --RDY--> ESP32-S3 logger fw  --> SD card (.dat)
+                      \      - ADC2 @100kHz DMA           /   - STM link task
+                       \     - IMU read + timestamp      /    - SD writer task
+                        \    - frame builder + checksum /
+                         \   - SPI2 TX DMA frames       /
+```
 
+---
+
+## STM32 Architecture (producer)
+
+Main code areas:
+- `shared/Src/logger_spi.c` — ADC buffer, IMU ring buffer, frame builder, SPI2 protocol
+- `shared/Src/LSM6DS3.c` — IMU init + data acquisition callback into logger
+- `IB_Wing_STM32G431CBT6/Core/Src/solution_wrapper.c` — HAL callbacks and timestamp source
+
+### 1) Timestamp source (shared timebase)
+
+The logger uses a hardware counter:
+- **TIM7** runs as a free-running counter at `ADC_SAMPLING_FREQ_KHZ` (e.g., 100 kHz).
+- `Logger_GetTimestamp()` extends TIM7 to 32-bit by tracking overflows (`UIF`).
+- It is atomic under PRIMASK because it can be called from both ISR and task contexts.
+
+This single timebase is used for:
+- ADC block timestamps (`adc_timestamp`)
+- IMU sample timestamps (`imu[i].timestamp`)
+- MAVLink data association (stored in the same frame)
+
+### 2) ADC2 sampling pipeline
+
+```text
+TIM6 TRGO @100kHz -> ADC2 -> DMA circular buffer (512 samples)
+TIM7 @100kHz (free-running) -> `Logger_GetTimestamp()` timebase for both ADC/IMU
+                        |
+                        +-> HAL_ADC_ConvHalf/ConvCpltCallback
+                              |
+                              v
+                        Logger_AdcBuffer_OnComplete(256 samples)
+                        - copies 256 samples into queued storage
+                        - computes ts_first = ts_end - (256-1)
+                        - stores ts_first for this block
+```
+
+Internals:
+- ADC block queue depth: `ADC_BLOCK_QUEUE_DEPTH = 4` (small backlog buffer).
+- Overruns are counted if producer outruns consumer.
+
+### 3) IMU sampling pipeline (LSM6DS3)
+
+Current implementation uses **SPI1 DMA burst reads** gated by the IMU INT pin:
+
+```text
+LSM6DS3 INT (level) -> Lsm6ds3_Task() polling ReadAccIntGpio()
+                         |
+                         v
+                   SpiGetAccData() (SPI1 TransmitReceive DMA, 13 bytes)
+                         |
+                         v
+                   Lsm6ds3_GetDataCbk()
+                         |
+                         v
+                   Logger_ImuOnNewSample(12 raw bytes)
+                         |
+                         v
+                   IMU ring buffer (max 50 samples)
+```
+
+Important nuance:
+- The IMU INT/DRDY is treated as a **level** signal in this code path (not EXTI edge-trigger).
+- If INT stays HIGH, polling can trigger multiple reads before the IMU updates output registers, producing **duplicate raw samples**.
+- To avoid that, the driver uses a **“re-arm” rule**: allow one read while INT is HIGH, and require INT to go LOW before allowing the next read.
+
+### 4) Frame builder (ADC + IMU merge)
+
+`Logger_Task()` runs in the main application loop and builds one frame per ADC block:
+
+1. Wait for an ADC block (256 samples + `ts_first`) from the ADC buffer queue.
+2. Pop IMU samples from the ring buffer:
+   - ring buffer can hold up to 50, but the frame stores up to **20** IMU samples
+3. Assemble `LogFrame_t`:
+   - `magic`, `n_imu`, `adc_timestamp`, `adc[]`, `imu[]`, `mavlink_log`
+4. Compute checksum **in slices** (multiple parts) to reduce worst-case blocking.
+5. Enqueue frame into a small frame FIFO (`LOGGER_FRAME_QUEUE_SIZE = 10`).
+
+### 5) SPI2 slave streaming to master (CMD 42 only)
+
+Signals:
+- SPI2 pins: `PB12` NSS, `PB13` SCK, `PB14` MISO, `PB15` MOSI
+- Data-ready GPIO: `PB11` (`LOGGER_SPI_DATA_RDY_PIN`) driven by `Logger_GPIO_SetReady()`
+
+Protocol:
+1. On boot `Logger_Init()` arms `HAL_SPI_Receive_IT(..., 5)` to receive a 5-byte command packet.
+2. Master sends 5 bytes; byte 0 is command.
+3. Supported command:
+   - `LOGGER_SPI_CMD_CONFIG = 42 (0x2A)` → read `logger_config_t` (64 bytes)
+4. On command receive:
+   - STM32 transmits `logger_config_t` via `HAL_SPI_Transmit_DMA` and raises DATA_RDY during TX.
+5. After config TX completes:
+   - STM32 starts acquisition by calling `Solution_LoggingStart()`
+   - frames begin to be produced and streamed automatically via SPI2 TX DMA when available
+
+---
+
+## ESP32-S3 Architecture (consumer + storage)
+
+Main code areas:
+- `logger/main/modules/remote_accel_reader.c` — SPI master to STM32 (config + frames)
+- `logger/main/modules/logger_module.c` — buffered binary writer to SD
+- `logger/main/app_logic.c` — button handling + mode transitions
+- `logger/include/target.h` — pin mapping + task core affinity + SPI clocks
+
+### Task placement (dual-core)
+
+Pinned task layout (see `logger/include/target.h`):
+- Core 0:
+  - `APP_LOGIC` (buttons/modes)
+  - `REM_STM` (STM32 link reader)
+- Core 1:
+  - `LOG_WRITE` (SD writer)
+
+This reduces contention between SPI ingest and SD writes.
+
+### STM32 link reader (SPI master)
+
+The ESP reads STM32 data via a dedicated SPI bus and a dedicated “INT/READY” GPIO:
+- SPI host: `LINK_SPI_HOST` (typically SPI3)
+- Clock: `LINK_SPI_FREQ_HZ` (currently 8 MHz)
+- Ready/INT: `LINK_INT_GPIO` (GPIO interrupt on posedge)
+
+Flow:
+1. **Config handshake**
+   - Send `CMD 42` (5 bytes: `{42,0,0,0,0}`)
+   - Wait for `LINK_INT_GPIO` to assert (with timeout)
+   - Read 64 bytes config
+   - If config is missing key IMU fields right after reset, retry after short delay
+   - If it fails repeatedly, reset STM32 and retry; after 5 attempts enter ERROR state
+   - On success, pass config to `logger_module_set_stm_config()` (writes 64B header to file)
+2. **Frame streaming (LOGGING mode only)**
+   - When `LINK_INT_GPIO` is HIGH, read `logger_frame_t` (852 bytes)
+   - Validate `magic` before writing
+   - Push bytes into logger buffers (`logger_module_write_frame()`)
+
+When not logging, the reader intentionally ignores streaming frames to keep SPI traffic minimal.
+
+### SD writer (buffered binary logging)
+
+ESP writes raw binary frames to SD using ping/pong buffers:
+- Two buffers (default 16 KB each)
+- A small queue of “chunks” to the writer task
+- Writer task writes chunks to SD and periodically flushes/fsyncs
+
+This keeps the SPI ingest path fast and avoids blocking on SD I/O.
+
+---
+
+## Diagnostics / Tooling
+
+The converter produces:
+- `config.csv` (decoded from 64B header)
+- `frame_status.csv` (per-frame magic + checksum check)
+- `timestamp_anomalies.csv` (ADC timestamp non-monotonic / delta mismatch)
+- `imu_anomalies.csv` (IMU duplicates / gaps)
+- `adc_data.csv`, `imu_data.csv`, `mavlink_events.csv`
+
+---
+
+## Known Pitfalls / Notes
+
+- **IMU duplicates** can appear if IMU INT is treated as a level and polled too frequently. The driver uses a “re-arm” rule to avoid repeated reads while INT remains HIGH.
+- **Startup gaps** in IMU data can happen right after reset while IMU is still initializing; first few frames may have `n_imu=0`.
+- **Checksum validation**: frames include an 8-bit checksum; validation is typically done offline (converter).
+- **Throughput**: at 100 kHz ADC and block 256, frame rate is ~390.6 fps; raw payload rate is ~333 kB/s (852 * 390.6). SPI link frequency must be comfortably above this with margin.
+
+---
+
+## File Map (most relevant)
+
+STM32:
+- `shared/Inc/logger.h` — public logger structs (`logger_config_t`, `LogFrame_t`) and constants
+- `shared/Src/logger_spi.c` — buffers + frame builder + SPI2 protocol callbacks
+- `shared/Src/LSM6DS3.c` — IMU init + acquisition, `Logger_ImuOnNewSample()`
+- `IB_Wing_STM32G431CBT6/Core/Src/solution_wrapper.c` — timestamp + HAL callbacks + `Solution_LoggingStart()`
+
+ESP32-S3:
+- `logger/main/modules/remote_accel_reader.c` — config handshake + frame reads
+- `logger/main/modules/logger_module.c` — buffered SD writes (`.dat`)
+- `logger/main/app_logic.c` — mode transitions (IDLE/LOGGING/ERROR)
+- `logger/include/target.h` — pin mapping, SPI clocks, task core affinity

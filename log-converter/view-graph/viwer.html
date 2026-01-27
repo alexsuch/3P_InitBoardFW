@@ -1,0 +1,1106 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Pro CSV Viewer v6 (High Contrast Selection)</title>
+    <link rel="stylesheet" href="uPlot.min.css" />
+    <script src="uPlot.iife.min.js"></script>
+
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        background: #121212;
+        color: #eee;
+        margin: 0;
+        padding: 0;
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+      }
+
+      /* --- ВІЗУАЛІЗАЦІЯ ВИДІЛЕННЯ (НОВЕ) --- */
+      .u-select {
+        background: rgba(0, 123, 255, 0.3) !important;
+        border: 1px solid #007bff !important;
+        box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+      }
+
+      /* --- SIDEBAR --- */
+      .sidebar {
+        width: 300px;
+        background: #1e1e1e;
+        border-right: 1px solid #333;
+        display: flex;
+        flex-direction: column;
+        padding: 15px;
+        box-sizing: border-box;
+        flex-shrink: 0;
+        overflow-y: auto;
+      }
+
+      .logo {
+        font-size: 18px;
+        font-weight: bold;
+        margin-bottom: 20px;
+        color: #fff;
+      }
+      .logo span {
+        color: #007bff;
+      }
+
+      .btn {
+        display: block;
+        width: 100%;
+        padding: 10px;
+        margin-bottom: 10px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: bold;
+        font-size: 14px;
+        color: white;
+        transition: 0.2s;
+      }
+      .btn-primary {
+        background: #007bff;
+      }
+      .btn-primary:hover {
+        background: #0056b3;
+      }
+
+      .btn-icon {
+        padding: 4px 8px;
+        font-size: 12px;
+        margin-left: 2px;
+        cursor: pointer;
+        border: none;
+        border-radius: 3px;
+        color: white;
+      }
+      .btn-settings {
+        background: #f59f00;
+      }
+      .btn-neutral {
+        background: #555;
+      }
+      .btn-fit {
+        background: #2f9e44;
+      }
+      .btn-del {
+        background: #e03131;
+      }
+
+      .dataset-list {
+        margin-top: 20px;
+        border-top: 1px solid #333;
+        padding-top: 10px;
+      }
+      .dataset-item {
+        background: #252525;
+        border: 1px solid #333;
+        border-radius: 4px;
+        padding: 10px;
+        margin-bottom: 8px;
+        position: relative;
+      }
+      .dataset-item.not-ready {
+        border-left: 3px solid #f59f00;
+        opacity: 0.9;
+      }
+      .dataset-item.ready {
+        border-left: 3px solid #2f9e44;
+      }
+      .dataset-item.master {
+        border-left: 3px solid #007bff;
+      }
+
+      .ds-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 5px;
+      }
+      .ds-name {
+        font-size: 13px;
+        font-weight: bold;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 140px;
+      }
+      .ds-status {
+        font-size: 10px;
+        color: #aaa;
+        margin-top: 2px;
+      }
+
+      /* --- MAIN AREA --- */
+      .main-area {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: #000;
+        overflow: hidden;
+        position: relative;
+      }
+
+      #hoverInfo {
+        height: 30px;
+        background: #111;
+        border-bottom: 1px solid #333;
+        display: flex;
+        gap: 20px;
+        align-items: center;
+        padding: 0 10px;
+        font-family: monospace;
+        font-size: 14px;
+        color: #aaa;
+        flex-shrink: 0;
+      }
+      #chart {
+        flex: 1;
+        width: 100%;
+        height: 100%;
+        position: relative;
+        cursor: crosshair;
+      }
+
+      .jump-panel {
+        height: 150px;
+        background: #1a1a1a;
+        border-top: 1px solid #333;
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+      }
+      .jump-tabs {
+        display: flex;
+        gap: 2px;
+        padding: 5px;
+        background: #222;
+        flex-wrap: wrap;
+      }
+      .jump-tab {
+        padding: 4px 10px;
+        font-size: 11px;
+        cursor: pointer;
+        border-radius: 3px 3px 0 0;
+        background: #333;
+        color: #888;
+        border: none;
+      }
+      .jump-tab:hover {
+        background: #444;
+        color: #fff;
+      }
+      .jump-tab.active {
+        background: #1a1a1a;
+        color: #4dabf7;
+        font-weight: bold;
+      }
+      .jump-tab .count {
+        color: #ff6b6b;
+        margin-left: 4px;
+      }
+      .jump-list {
+        overflow-y: auto;
+        flex: 1;
+        padding: 5px;
+      }
+      .jump-item {
+        display: inline-block;
+        padding: 4px 8px;
+        margin: 2px;
+        background: #333;
+        border-radius: 3px;
+        font-size: 12px;
+        font-family: monospace;
+        cursor: pointer;
+      }
+      .jump-bad {
+        color: #ff6b6b;
+        font-weight: bold;
+      }
+
+      /* --- MODAL --- */
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 1000;
+        display: none;
+        justify-content: center;
+        align-items: center;
+      }
+      .modal {
+        background: #252525;
+        padding: 20px;
+        border-radius: 8px;
+        width: 400px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        border: 1px solid #444;
+      }
+      .modal h3 {
+        margin-top: 0;
+        margin-bottom: 15px;
+        border-bottom: 1px solid #444;
+        padding-bottom: 10px;
+      }
+      .col-list {
+        max-height: 300px;
+        overflow-y: auto;
+        margin-bottom: 15px;
+        border: 1px solid #333;
+        padding: 5px;
+        background: #1a1a1a;
+      }
+      .col-item {
+        display: grid;
+        grid-template-columns: 30px 30px 1fr;
+        gap: 10px;
+        padding: 5px;
+        border-bottom: 1px solid #333;
+        align-items: center;
+        font-size: 13px;
+      }
+      .col-header {
+        display: grid;
+        grid-template-columns: 30px 30px 1fr;
+        gap: 10px;
+        padding: 5px;
+        font-weight: bold;
+        font-size: 12px;
+        color: #aaa;
+        border-bottom: 1px solid #555;
+      }
+
+      .modal-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+      #fileInput {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="modal-overlay" id="configModal">
+      <div class="modal">
+        <h3>Налаштування колонок</h3>
+        <div style="font-size: 12px; color: #aaa; margin-bottom: 10px">
+          Виберіть <b>одну</b> колонку для часу (X) і
+          <b>будь-яку кількість</b> для даних (Y).
+        </div>
+
+        <div class="col-header">
+          <span>X</span>
+          <span>Y</span>
+          <span>Назва колонки</span>
+        </div>
+        <div class="col-list" id="modalColList"></div>
+
+        <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #444;">
+          <label style="font-size: 12px; color: #aaa; display: block; margin-bottom: 5px;">
+            Очікувана частота (Hz) - для визначення аномалій:
+          </label>
+          <input type="number" id="modalFreq" placeholder="напр. 100000" style="
+            width: 100%;
+            background: #2c2c2c;
+            border: 1px solid #444;
+            color: white;
+            padding: 8px;
+            border-radius: 4px;
+          ">
+        </div>
+
+        <div class="modal-footer">
+          <button
+            class="btn btn-del"
+            style="width: auto"
+            onclick="closeModal()"
+          >
+            Скасувати
+          </button>
+          <button
+            class="btn btn-primary"
+            style="width: auto"
+            onclick="applyModalConfig()"
+          >
+            Застосувати
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="logo">⚡ CSV <span>Pro v6</span></div>
+
+      <button
+        class="btn btn-primary"
+        onclick="document.getElementById('fileInput').click()"
+      >
+        + Завантажити CSV
+      </button>
+      <input
+        type="file"
+        id="fileInput"
+        accept=".csv"
+        multiple
+        onchange="handleFiles(this.files)"
+      />
+
+      <div class="dataset-list" id="datasetList"></div>
+    </div>
+
+    <div class="main-area">
+      <div id="hoverInfo">
+        <div>TIME: <span id="dispTime" style="color: #4dabf7">-</span></div>
+        <div id="dispValues" style="display: flex; gap: 15px"></div>
+      </div>
+
+      <div id="chart"></div>
+
+      <div class="jump-panel">
+        <div class="jump-tabs" id="jumpTabs"></div>
+        <div class="jump-list" id="jumpList"></div>
+      </div>
+    </div>
+
+    <script>
+      // === GLOBAL STATE ===
+      const PALETTE = [
+        "#ff00ff",
+        "#00ccff",
+        "#ffff00",
+        "#ff6b6b",
+        "#ffa500",
+        "#00ffaa",
+        "#aa00ff",
+        "#ffffff",
+        "#995500",
+        "#ff0088",
+      ];
+
+      let datasets = [];
+      let activeModalDatasetIndex = -1;
+      let uplot = null;
+      let jumps = [];
+      let activeAnomalyTab = -1;  // Which dataset's anomalies to show
+
+      window.onload = () => {
+        if (typeof uPlot === "undefined")
+          alert("Помилка: uPlot.iife.min.js не знайдено!");
+      };
+
+      async function handleFiles(files) {
+        if (!files.length) return;
+        const btn = document.querySelector(".btn-primary");
+        btn.innerText = "Читання...";
+        btn.disabled = true;
+
+        for (let i = 0; i < files.length; i++) {
+          await processFile(files[i]);
+        }
+
+        btn.innerText = "+ Завантажити CSV";
+        btn.disabled = false;
+        document.getElementById("fileInput").value = "";
+      }
+
+      async function processFile(file) {
+        const text = await file.text();
+
+        const parsed = parseFullCSV(text);
+        if (!parsed) return alert(`Файл ${file.name} пустий або битий.`);
+
+        const newDs = {
+          id: datasets.length,
+          name: file.name,
+          rawColumns: parsed.columns,
+          config: { xIndex: -1, yIndices: [], expectedFreqHz: 0 },
+          anomalies: [],
+          isReady: false,
+        };
+
+        // Авто-визначення
+        if (parsed.columns.length === 2) {
+          const timeIdx = parsed.columns.findIndex((c) =>
+            c.name.toLowerCase().includes("timestamp_us"),
+          );
+          if (timeIdx !== -1) {
+            newDs.config.xIndex = timeIdx;
+            newDs.config.yIndices = [timeIdx === 0 ? 1 : 0];
+            newDs.isReady = true;
+            // Auto-detect frequency from data
+            newDs.config.expectedFreqHz = estimateFrequency(parsed.columns[timeIdx].data);
+          }
+        }
+
+        datasets.push(newDs);
+        updateListUI();
+
+        if (newDs.isReady) {
+          // Calculate anomalies for this dataset
+          calculateAnomalies(newDs);
+          renderAnomalyTabs();
+          renderChart();
+        }
+      }
+
+      function parseFullCSV(text) {
+        const firstLineEnd = text.indexOf("\n");
+        if (firstLineEnd === -1) return null;
+
+        const headerLine = text.substring(0, firstLineEnd).trim();
+        const sep = headerLine.includes(";") ? ";" : ",";
+        const headers = headerLine
+          .split(sep)
+          .map((h) => h.trim().replace(/^"|"$/g, ""));
+
+        const numCols = headers.length;
+        // Count actual newlines for accurate row estimation (faster than parsing twice)
+        let newlineCount = 0;
+        for (let i = 0; i < text.length; i++) {
+          if (text.charCodeAt(i) === 10) newlineCount++;  // '\n' = 10
+        }
+        const estRows = newlineCount + 1;  // +1 for possible last line without newline
+        const colData = headers.map(() => new Float64Array(estRows));
+
+        let row = 0;
+        let idx = firstLineEnd + 1;
+        const len = text.length;
+
+        while (idx < len) {
+          let nextIdx = text.indexOf("\n", idx);
+          if (nextIdx === -1) nextIdx = len;
+
+          const line = text.substring(idx, nextIdx).trim();
+          if (line.length > 0) {
+            const parts = line.split(sep);
+            for (let c = 0; c < numCols; c++) {
+              if (c < parts.length) {
+                colData[c][row] = parseFloat(parts[c]);
+              }
+            }
+            row++;
+          }
+          idx = nextIdx + 1;
+        }
+
+        const finalColumns = headers.map((h, i) => ({
+          name: h,
+          data: colData[i].subarray(0, row),
+        }));
+
+        return { columns: finalColumns };
+      }
+
+      // === UI: LIST & MODAL ===
+
+      function updateListUI() {
+        const list = document.getElementById("datasetList");
+        list.innerHTML = "";
+
+        datasets.forEach((ds, idx) => {
+          const div = document.createElement("div");
+          const isMaster = idx === getMasterIndex();
+          const statusClass = ds.isReady
+            ? isMaster
+              ? "master"
+              : "ready"
+            : "not-ready";
+
+          let statusText = ds.isReady
+            ? `Готово: X=${ds.rawColumns[ds.config.xIndex].name}, Y=[${ds.config.yIndices.length}]`
+            : "⚠️ Потрібне налаштування";
+
+          div.className = `dataset-item ${statusClass}`;
+          div.innerHTML = `
+                    <div class="ds-header">
+                        <div style="display:flex; align-items:center; overflow:hidden;">
+                            <span class="ds-name" title="${ds.name}">${ds.name}</span>
+                        </div>
+                        ${isMaster ? '<span style="font-size:9px; background:#007bff; padding:1px 3px; border-radius:3px;">MASTER</span>' : ""}
+                    </div>
+                    <div class="ds-status">${statusText}</div>
+                    <div style="margin-top:8px; display:flex; justify-content:space-between;">
+                        <button class="btn-icon ${ds.isReady ? "btn-neutral" : "btn-settings"}" onclick="openConfigModal(${idx})">⚙️ Налаштувати</button>
+                        <div>
+                             ${ds.isReady ? `<button class="btn-icon btn-fit" onclick="fitY(${idx})" title="Zoom Y">Fit Y</button>` : ""}
+                             <button class="btn-icon btn-del" onclick="removeDataset(${idx})">✕</button>
+                        </div>
+                    </div>
+                `;
+          list.appendChild(div);
+        });
+      }
+
+      function openConfigModal(idx) {
+        activeModalDatasetIndex = idx;
+        const ds = datasets[idx];
+        const list = document.getElementById("modalColList");
+        list.innerHTML = "";
+
+        const suggestX = ds.rawColumns.findIndex((c) =>
+          c.name.toLowerCase().includes("timestamp_us"),
+        );
+
+        ds.rawColumns.forEach((col, cIdx) => {
+          const isX =
+            ds.config.xIndex === cIdx ||
+            (ds.config.xIndex === -1 && cIdx === suggestX);
+          const isY = ds.config.yIndices.includes(cIdx);
+
+          const div = document.createElement("div");
+          div.className = "col-item";
+          div.innerHTML = `
+                    <input type="radio" name="col_x" value="${cIdx}" ${isX ? "checked" : ""}>
+                    <input type="checkbox" name="col_y" value="${cIdx}" ${isY ? "checked" : ""}>
+                    <span>${col.name}</span>
+                `;
+          list.appendChild(div);
+        });
+
+        // Set frequency field - use existing value or auto-detect
+        const freqInput = document.getElementById("modalFreq");
+        if (ds.config.expectedFreqHz > 0) {
+          freqInput.value = ds.config.expectedFreqHz;
+        } else if (suggestX !== -1) {
+          freqInput.value = estimateFrequency(ds.rawColumns[suggestX].data);
+        } else {
+          freqInput.value = "";
+        }
+
+        document.getElementById("configModal").style.display = "flex";
+      }
+
+      function closeModal() {
+        document.getElementById("configModal").style.display = "none";
+        activeModalDatasetIndex = -1;
+      }
+
+      function applyModalConfig() {
+        if (activeModalDatasetIndex === -1) return;
+
+        const list = document.getElementById("modalColList");
+        const radioX = list.querySelector('input[name="col_x"]:checked');
+        const checksY = list.querySelectorAll('input[name="col_y"]:checked');
+
+        if (!radioX) return alert("Виберіть колонку для осі X!");
+        if (checksY.length === 0)
+          return alert("Виберіть хоча б одну колонку даних (Y)!");
+
+        const xIdx = parseInt(radioX.value);
+        const yIdxs = Array.from(checksY).map((cb) => parseInt(cb.value));
+
+        const ds = datasets[activeModalDatasetIndex];
+        ds.config.xIndex = xIdx;
+        ds.config.yIndices = yIdxs;
+        
+        // Get frequency from input
+        const freqInput = document.getElementById("modalFreq");
+        ds.config.expectedFreqHz = parseInt(freqInput.value) || 0;
+        ds.isReady = true;
+        
+        // Calculate anomalies for this dataset
+        calculateAnomalies(ds);
+
+        closeModal();
+        updateListUI();
+        renderAnomalyTabs();  // Update anomaly tabs
+        renderChart();
+      }
+
+      function removeDataset(idx) {
+        // Reset active tab if it was the deleted dataset
+        if (activeAnomalyTab === idx) {
+          activeAnomalyTab = -1;
+        } else if (activeAnomalyTab > idx) {
+          activeAnomalyTab--;  // Adjust index for shifted datasets
+        }
+        
+        datasets.splice(idx, 1);
+        updateListUI();
+        renderAnomalyTabs();
+        renderChart();
+      }
+
+      // === LOGIC UTILS ===
+
+      function getMasterIndex() {
+        return datasets.findIndex((d) => d.isReady);
+      }
+
+      function countReadyDatasets() {
+        return datasets.filter((d) => d.isReady).length;
+      }
+
+      // Estimate frequency from first 1000 samples
+      function estimateFrequency(xData) {
+        const sampleCount = Math.min(1000, xData.length - 1);
+        if (sampleCount <= 0) return 0;
+        const totalTime = xData[sampleCount] - xData[0];  // microseconds
+        if (totalTime <= 0) return 0;
+        const avgInterval = totalTime / sampleCount;
+        return Math.round(1000000 / avgInterval);  // Hz
+      }
+
+      // Calculate anomalies for a dataset based on expected frequency
+      function calculateAnomalies(ds) {
+        ds.anomalies = [];
+        if (!ds.isReady || ds.config.expectedFreqHz <= 0) return;
+        
+        const xData = ds.rawColumns[ds.config.xIndex].data;
+        const expectedInterval = 1000000 / ds.config.expectedFreqHz;  // μs
+        const threshold = expectedInterval * 2;  // 200% = 2x expected interval
+        
+        for (let i = 1; i < xData.length; i++) {
+          const diff = xData[i] - xData[i - 1];
+          if (diff > threshold) {
+            ds.anomalies.push({ 
+              t: xData[i], 
+              diff: diff, 
+              expected: expectedInterval 
+            });
+          }
+        }
+      }
+
+      // Render anomaly tabs for all ready datasets
+      function renderAnomalyTabs() {
+        const tabsContainer = document.getElementById("jumpTabs");
+        const list = document.getElementById("jumpList");
+        tabsContainer.innerHTML = "";
+        list.innerHTML = "";
+
+        const readyDatasets = datasets.filter(ds => ds.isReady);
+        
+        if (readyDatasets.length === 0) {
+          list.innerHTML = '<span style="color:#777; padding:5px;">Завантажте файли</span>';
+          return;
+        }
+
+        // Calculate anomalies for all datasets if not done yet
+        readyDatasets.forEach(ds => {
+          if (ds.anomalies.length === 0 && ds.config.expectedFreqHz > 0) {
+            calculateAnomalies(ds);
+          }
+        });
+
+        // Create tabs
+        readyDatasets.forEach((ds, idx) => {
+          const dsIdx = datasets.indexOf(ds);
+          const tab = document.createElement("button");
+          tab.className = "jump-tab" + (activeAnomalyTab === dsIdx ? " active" : "");
+          
+          const count = ds.anomalies.length;
+          const shortName = ds.name.length > 15 ? ds.name.substring(0, 12) + "..." : ds.name;
+          tab.innerHTML = `${shortName}<span class="count">${count > 0 ? `(${count})` : "(0)"}</span>`;
+          tab.onclick = () => selectAnomalyTab(dsIdx);
+          tabsContainer.appendChild(tab);
+
+          // Auto-select first tab if none selected
+          if (activeAnomalyTab === -1 && idx === 0) {
+            activeAnomalyTab = dsIdx;
+            tab.classList.add("active");
+          }
+        });
+
+        // Render anomalies for active tab
+        renderAnomaliesForTab();
+      }
+
+      function selectAnomalyTab(dsIdx) {
+        activeAnomalyTab = dsIdx;
+        // Update tab styles
+        document.querySelectorAll(".jump-tab").forEach(tab => tab.classList.remove("active"));
+        const tabs = document.querySelectorAll(".jump-tab");
+        const readyDatasets = datasets.filter(ds => ds.isReady);
+        const tabIdx = readyDatasets.findIndex(ds => datasets.indexOf(ds) === dsIdx);
+        if (tabIdx >= 0 && tabs[tabIdx]) tabs[tabIdx].classList.add("active");
+        renderAnomaliesForTab();
+      }
+
+      function renderAnomaliesForTab() {
+        const list = document.getElementById("jumpList");
+        list.innerHTML = "";
+
+        if (activeAnomalyTab === -1 || !datasets[activeAnomalyTab]) {
+          list.innerHTML = '<span style="color:#777; padding:5px;">Виберіть датасет</span>';
+          return;
+        }
+
+        const ds = datasets[activeAnomalyTab];
+        const anomalies = ds.anomalies;
+
+        if (!ds.config.expectedFreqHz || ds.config.expectedFreqHz <= 0) {
+          list.innerHTML = '<span style="color:#777; padding:5px;">Вкажіть частоту в налаштуваннях</span>';
+          return;
+        }
+
+        if (anomalies.length === 0) {
+          list.innerHTML = '<span style="color:#2f9e44; padding:5px;">✓ Норма (немає аномалій)</span>';
+          return;
+        }
+
+        const limit = Math.min(anomalies.length, 300);
+        anomalies.slice(0, limit).forEach(a => {
+          const el = document.createElement("span");
+          el.className = "jump-item";
+          el.innerHTML = `T:${a.t} <span class="jump-bad">Δ${a.diff.toFixed(0)}</span> (${(a.diff / a.expected).toFixed(1)}x)`;
+          el.onclick = () => zoomTo(a.t);
+          list.appendChild(el);
+        });
+        if (anomalies.length > limit) {
+          list.innerHTML += `<span style="color:#777; padding:5px;">... ще ${anomalies.length - limit}</span>`;
+        }
+      }
+
+      // Legacy function - now just calls renderAnomalyTabs
+      function recalcJumps() {
+        renderAnomalyTabs();
+      }
+
+      function renderJumpsList() {
+        renderAnomaliesForTab();
+      }
+
+      // === CHART RENDERING ===
+
+      // Binary search to find index where srcX[idx] <= t < srcX[idx+1]
+      function binarySearch(arr, t) {
+        let lo = 0,
+          hi = arr.length - 1;
+        while (lo < hi) {
+          const mid = (lo + hi + 1) >> 1;
+          if (arr[mid] <= t) lo = mid;
+          else hi = mid - 1;
+        }
+        return lo;
+      }
+
+      // Helper function to interpolate data from one time axis to another
+      function interpolateToMasterTime(srcX, srcY, masterX) {
+        const len = masterX.length;
+        const result = new Float64Array(len); // Use Float64 for precision
+        const srcLen = srcX.length;
+        const srcFirst = srcX[0];
+        const srcLast = srcX[srcLen - 1];
+
+        for (let i = 0; i < len; i++) {
+          const t = masterX[i];
+
+          // Check if we're outside the source data range
+          if (t < srcFirst) {
+            result[i] = NaN;
+            continue;
+          }
+          if (t > srcLast) {
+            result[i] = NaN;
+            continue;
+          }
+
+          // Find position using binary search
+          const idx = binarySearch(srcX, t);
+
+          // If we're at the last point
+          if (idx >= srcLen - 1) {
+            result[i] = srcY[srcLen - 1];
+            continue;
+          }
+
+          // If exact match
+          const t0 = srcX[idx];
+          if (t0 === t) {
+            result[i] = srcY[idx];
+            continue;
+          }
+
+          // Linear interpolation between idx and idx+1
+          // const t1 = srcX[idx + 1];
+          // const v0 = srcY[idx];
+          // const v1 = srcY[idx + 1];
+
+          // const ratio = (t - t0) / (t1 - t0);
+          // result[i] = v0 + ratio * (v1 - v0);
+
+          // Sample-and-hold: use value from previous sample point (no interpolation)
+          result[i] = srcY[idx];
+        }
+
+        // Debug: check the result
+        let validCount = 0,
+          nanCount = 0;
+        let lastValidIdx = -1;
+        for (let i = 0; i < len; i++) {
+          if (!isNaN(result[i])) {
+            validCount++;
+            lastValidIdx = i;
+          } else {
+            nanCount++;
+          }
+        }
+        console.log(`Interpolation debug:
+  Master: ${len} points, range [${masterX[0]} - ${masterX[len - 1]}]
+  Source: ${srcLen} points, range [${srcFirst} - ${srcLast}]
+  Result: ${validCount} valid, ${nanCount} NaN
+  Last valid at index ${lastValidIdx}, masterX[${lastValidIdx}] = ${masterX[lastValidIdx]}`);
+
+        return result;
+      }
+
+      function renderChart() {
+        const div = document.getElementById("chart");
+        if (uplot) uplot.destroy();
+        div.innerHTML = "";
+
+        const mIdx = getMasterIndex();
+        if (mIdx === -1) return;
+
+        const masterDs = datasets[mIdx];
+        const masterX = masterDs.rawColumns[masterDs.config.xIndex].data;
+
+        const chartData = [masterX];
+        const series = [{}];
+        const scales = { x: { time: false } };
+        const axes = [
+          { scale: "x" }, // X axis
+        ];
+
+        let globalSeriesCounter = 0;
+
+        datasets.forEach((ds, dsIdx) => {
+          if (!ds.isReady) return;
+
+          const dsX = ds.rawColumns[ds.config.xIndex].data;
+          const isMaster = ds === masterDs;
+
+          ds.config.yIndices.forEach((yIdx) => {
+            const colName = ds.rawColumns[yIdx].name;
+            const yData = ds.rawColumns[yIdx].data;
+
+            // Create a unique scale name for this series
+            const scaleName =
+              globalSeriesCounter === 0 ? "y" : `y${globalSeriesCounter + 1}`;
+
+            let strokeColor;
+            if (globalSeriesCounter === 0) strokeColor = "#00ff00";
+            else {
+              const paletteIdx = (globalSeriesCounter - 1) % PALETTE.length;
+              strokeColor = PALETTE[paletteIdx];
+            }
+
+            // Calculate min/max for this specific column
+            let colMin = Infinity,
+              colMax = -Infinity;
+            for (let v of yData) {
+              if (!isNaN(v)) {
+                if (v < colMin) colMin = v;
+                if (v > colMax) colMax = v;
+              }
+            }
+            const range = colMax - colMin || 1;
+
+            // Add scale for this series
+            scales[scaleName] = {
+              auto: true,
+              range: [colMin - range * 0.05, colMax + range * 0.05],
+            };
+
+            // Add Y axis for this series
+            axes.push({
+              scale: scaleName,
+              side: globalSeriesCounter === 0 ? 3 : 1, // First on left, rest on right
+              grid: { show: globalSeriesCounter === 0 },
+              stroke: strokeColor,
+              ticks: { stroke: strokeColor },
+            });
+
+            globalSeriesCounter++;
+
+            series.push({
+              label: `${ds.name} (${colName})`,
+              stroke: strokeColor,
+              width: 1,
+              scale: scaleName, // Each series has its own scale
+              points: { show: false },
+            });
+
+            if (isMaster) {
+              // Master dataset - use data as-is
+              chartData.push(yData);
+            } else {
+              // Other datasets - interpolate to master time axis
+              const interpolated = interpolateToMasterTime(dsX, yData, masterX);
+              chartData.push(interpolated);
+            }
+          });
+        });
+
+        const opts = {
+          width: div.clientWidth,
+          height: div.clientHeight,
+          series: series,
+          scales: scales,
+          axes: axes,
+          cursor: { drag: { x: true, y: true, uni: 50 } },
+          legend: { show: false },
+          hooks: { setLegend: [updateHoverInfo] },
+          plugins: [wheelZoomPlugin({ factor: 0.75 }), middleClickPanPlugin()],
+        };
+
+        uplot = new uPlot(opts, chartData, div);
+        document.getElementById("dispValues").innerHTML = "";
+      }
+
+      function fitY(dsIndex) {
+        if (!uplot) return;
+        const ds = datasets[dsIndex];
+
+        // Count which series indices belong to this dataset
+        let seriesStartIdx = 0;
+        for (let i = 0; i < dsIndex; i++) {
+          if (datasets[i].isReady) {
+            seriesStartIdx += datasets[i].config.yIndices.length;
+          }
+        }
+
+        // Fit each column's scale
+        ds.config.yIndices.forEach((yIdx, colIdx) => {
+          const arr = ds.rawColumns[yIdx].data;
+          let gMin = Infinity,
+            gMax = -Infinity;
+
+          for (let v of arr) {
+            if (!isNaN(v)) {
+              if (v < gMin) gMin = v;
+              if (v > gMax) gMax = v;
+            }
+          }
+
+          if (gMin !== Infinity) {
+            const range = gMax - gMin || 1;
+            const seriesIdx = seriesStartIdx + colIdx;
+            const scaleName = seriesIdx === 0 ? "y" : `y${seriesIdx + 1}`;
+
+            uplot.setScale(scaleName, {
+              min: gMin - range * 0.05,
+              max: gMax + range * 0.05,
+            });
+          }
+        });
+      }
+
+      function zoomTo(time) {
+        if (!uplot) return;
+        uplot.setScale("x", { min: time - 5000, max: time + 5000 });
+      }
+
+      function updateHoverInfo(u) {
+        const idx = u.cursor.idx;
+        const tEl = document.getElementById("dispTime");
+        const vContainer = document.getElementById("dispValues");
+
+        if (idx === null || idx === undefined) {
+          tEl.innerText = "-";
+          vContainer.innerHTML = "";
+        } else {
+          tEl.innerText = u.data[0][idx];
+
+          let html = "";
+          for (let i = 1; i < u.series.length; i++) {
+            const val = u.data[i][idx];
+            const color = u.series[i]._stroke;
+            const label = u.series[i].label;
+            const shortName =
+              label.length > 20 ? label.substring(0, 18) + ".." : label;
+
+            html += `<div style="color:${color}; font-size:12px;">
+                        <span style="opacity:0.7">${shortName}:</span> 
+                        <b>${isNaN(val) ? "-" : val}</b>
+                    </div>`;
+          }
+          vContainer.innerHTML = html;
+        }
+      }
+
+      // === PLUGINS ===
+      function wheelZoomPlugin(opts) {
+        let factor = opts.factor || 0.75;
+        return {
+          hooks: {
+            ready: (u) => {
+              u.over.addEventListener("wheel", (e) => {
+                e.preventDefault();
+                let { left } = u.cursor;
+                let leftPct = left / u.bbox.width;
+                let xVal = u.posToVal(left, "x");
+                let xMin = u.scales.x.min;
+                let xMax = u.scales.x.max;
+                let xRange = xMax - xMin;
+                if (e.deltaY < 0)
+                  u.setScale("x", {
+                    min: xVal - leftPct * (xRange * factor),
+                    max: xVal + (1 - leftPct) * (xRange * factor),
+                  });
+                else
+                  u.setScale("x", {
+                    min: xVal - leftPct * (xRange / factor),
+                    max: xVal + (1 - leftPct) * (xRange / factor),
+                  });
+              });
+            },
+          },
+        };
+      }
+      function middleClickPanPlugin() {
+        return {
+          hooks: {
+            init: (u) => {
+              let isPanning = false,
+                startX = 0,
+                initMin = 0,
+                initMax = 0;
+              u.over.addEventListener("mousedown", (e) => {
+                if (e.button === 1) {
+                  e.preventDefault();
+                  isPanning = true;
+                  startX = e.clientX;
+                  initMin = u.scales.x.min;
+                  initMax = u.scales.x.max;
+                  document.body.style.cursor = "grabbing";
+                }
+              });
+              document.addEventListener("mousemove", (e) => {
+                if (!isPanning) return;
+                e.preventDefault();
+                const dxPx = startX - e.clientX;
+                const xRange = initMax - initMin;
+                const dxVal = dxPx / (u.bbox.width / xRange);
+                u.setScale("x", { min: initMin + dxVal, max: initMax + dxVal });
+              });
+              document.addEventListener("mouseup", (e) => {
+                if (e.button === 1) {
+                  isPanning = false;
+                  document.body.style.cursor = "default";
+                }
+              });
+            },
+          },
+        };
+      }
+
+      window.addEventListener("resize", () => {
+        if (uplot)
+          uplot.setSize({
+            width: document.getElementById("chart").clientWidth,
+            height: document.getElementById("chart").clientHeight,
+          });
+      });
+    </script>
+  </body>
+</html>

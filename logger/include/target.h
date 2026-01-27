@@ -3,35 +3,25 @@
 #include "hal/ws2812.h"
 #include "sdkconfig.h"
 
-#define ESP32
-
 // This firmware receives binary frames from the STM32 over SPI and writes them to storage.
 // Sensor acquisition and frame generation are performed on the STM32 side.
 #define USE_S3_MINI_BOARD
 
+#if !defined(CONFIG_IDF_TARGET_ESP32S3)
+#error "This logger firmware supports ESP32-S3 only."
+#endif
 
 #define USE_FEATURE_BUTTON
-// #define USE_PIEZO_COMPARATOR
 
 // SPI Host Configuration
 // Mapped per-target to available general-purpose SPI controllers.
-#if defined(CONFIG_IDF_TARGET_ESP32S3)
 // ESP32-S3 has SPI2_HOST and SPI3_HOST as general-purpose
-#define ACCEL_SPI_HOST SPI3_HOST   // Legacy name (link host)
 #define SDCARD_SPI_HOST SPI2_HOST  // General-purpose SPI - safe to use with PSRAM
 
 #if defined(USE_S3_MINI_BOARD)
 #define LINK_SPI_HOST SPI3_HOST  // Shares SPI host/pins with the STM32 link
 #else
-#define LINK_SPI_HOST SPI2_HOST  // Not used on ESP32-S3, but defined for compatibility
-#endif
-#elif defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32)
-// Use SPI3_HOST for the STM32 link, SPI2_HOST for SD card
-#define ACCEL_SPI_HOST SPI2_HOST
-#define SDCARD_SPI_HOST SPI2_HOST
-#define LINK_SPI_HOST SPI3_HOST  // Not used on ESP32/ESP32-S2, but defined for compatibility
-#else
-#error "Unsupported ESP32 target for SPI host configuration"
+#define LINK_SPI_HOST SPI2_HOST  // Alternative host option if SPI3 is unavailable
 #endif
 #define DAC_VREF_MV 3300
 
@@ -45,29 +35,7 @@
 #define LINK_SPI_FREQ_HZ (8U * 1000U * 1000U)
 #endif
 
-// Backward-compatible alias (legacy name).
-#ifndef ACCEL_SPI_FREQ_HZ
-#define ACCEL_SPI_FREQ_HZ LINK_SPI_FREQ_HZ
-#endif
-
-// Legacy self-test configuration (kept for compatibility; not used in STM32-link-only mode).
-#ifndef ENABLE_ACCEL_SELF_TEST
-#define ENABLE_ACCEL_SELF_TEST 1
-#endif
-
-// Legacy option (kept for compatibility; not used in STM32-link-only mode).
-#define LOG_GYRO 1
 #define LED_COLOR_ORDER 0
-
-// LINK_INT polarity (legacy macro name kept). For edge-triggered notifications use active-high.
-#ifndef ACC_INT_ACTIVE_HIGH
-#define ACC_INT_ACTIVE_HIGH 1
-#endif
-
-// Link IRQ emulation configuration for high-frequency testing (legacy; optional).
-#ifndef EMU_FREQ
-#define EMU_FREQ 6500U
-#endif
 
 
 // SD card tuning (SPI via SDSPI host).
@@ -75,11 +43,7 @@
 // Increase SDCARD_SPI_FREQ_KHZ cautiously to explore the maximum sustainable rate.
 
 #ifndef SDCARD_SPI_FREQ_KHZ
-#ifdef CONFIG_IDF_TARGET_ESP32S3
 #define SDCARD_SPI_FREQ_KHZ 20000U
-#else
-#define SDCARD_SPI_FREQ_KHZ 20000U  // 35 MHz - default for other ESP32 variants
-#endif
 #endif
 
 #ifndef SDCARD_MAX_FILES
@@ -108,12 +72,6 @@
 #define BUTTON_ENTER_GPIO 0
 #define BUTTON_EXTERNAL_GPIO 12
 
-#define ACC_INT_GPIO 10
-#define ACC_SPI_CLK_GPIO 1
-#define ACC_SPI_MISO_GPIO 2
-#define ACC_SPI_MOSI_GPIO 4
-#define ACC_SPI_CS_GPIO 5
-
 #define LED_OUT_GPIO 11
 #define RGB_LED_GPIO 48
 
@@ -136,34 +94,7 @@
 #define DAC_OUT_1_GPIO -1
 #define DAC_OUT_2_GPIO -1
 
-#elif defined(CONFIG_IDF_TARGET_ESP32)
-// ESP32 Configuration
-#define USE_WIFI
-#define USE_WEB_FILE_SEREVER
-// #define USE_USB_FILE_SERVER  // Use USB file server to download files from SD card
-
-#define BUTTON_ENTER_GPIO 0      // WARNING: This is a strapping pin; if held LOW on boot, the device enters bootloader mode.
-#define BUTTON_EXTERNAL_GPIO 36  // MOVED to a safe, input-only pin.
-
-#define ACC_INT_GPIO 22       // 21  // Changed from 25 (not working) to 21 (safe, commonly used for interrupts)
-#define ACC_SPI_CLK_GPIO 5    // 26
-#define ACC_SPI_MISO_GPIO 18  // 27  // SAO
-#define ACC_SPI_MOSI_GPIO 19  // 32  // SDA
-#define ACC_SPI_CS_GPIO 23    // 25
-
-#define SD_MOUNT_PATH "/sdcard"
-
-#define LED_OUT_GPIO 4  // OK.
-
-#define LINK_INT_GPIO 21       // 22  // 10 on s3
-#define LINK_SPI_CLK_GPIO 26   // 5    // 1 on s3
-#define LINK_SPI_MISO_GPIO 27  // 18  // 2 on s3
-#define LINK_SPI_MOSI_GPIO 32  // 19  // 4 on s3
-#define LINK_SPI_CS_GPIO 25    // 23    // 5 on s3
-
-#else
-#error "Unsupported ESP32 target. Please define CONFIG_IDF_TARGET_ESP32S2, CONFIG_IDF_TARGET_ESP32S3, CONFIG_IDF_TARGET_ESP32, or CONFIG_IDF_TARGET_ESP32C3"
-#endif
+#endif  // USE_S3_MINI_BOARD
 
 // Task Priority Definitions
 #define TASK_PRIORITY_LED_BLINK 1
@@ -171,8 +102,7 @@
 #define TASK_PRIORITY_APP_LOGIC 2
 #define TASK_PRIORITY_IO_MANAGER 3
 #define TASK_PRIORITY_LOGGER 6
-#define TASK_PRIORITY_ACCEL_TASK 8
-#define TASK_PRIORITY_PZ_TASK 10
+#define TASK_PRIORITY_STM_LINK 8
 #if defined(USE_WIFI)
 #define TASK_PRIORITY_WIFI_EVENT 4
 #endif
@@ -185,7 +115,7 @@
 
 #define CORE_APP_LOGIC 0
 #define CORE_IO_MANAGER 1
-#define CORE_ACCEL_TASK 0
+#define CORE_STM_LINK_TASK 0
 #define CORE_LOGGER_PROC 1
 #define CORE_LOGGER_WRITE 1
 
@@ -194,12 +124,12 @@
 // LED task only does simple GPIO operations and delays - no complex operations needed
 // Stack usage reduced by removing expensive printf-style logging calls
 #define TASK_STACK_SIZE_LED_BLINK (3072U)
-#define TASK_STACK_SIZE_USB_BOOT_CMD (1024U)
+// Note: uses stdio (`fgetc`) on the USB-CDC console, which needs more stack than a trivial task.
+#define TASK_STACK_SIZE_USB_BOOT_CMD (8192U)
 #define TASK_STACK_SIZE_APP_LOGIC (4096U)
 #define TASK_STACK_SIZE_IO_MANAGER (3048U)
 #define TASK_STACK_SIZE_LOGGER (4096U)
-#define TASK_STACK_SIZE_ACCEL_TASK (6000U)
-#define TASK_STACK_SIZE_PZ_TASK (2048U)
+#define TASK_STACK_SIZE_STM_LINK (6000U)
 
 #if defined(USE_WIFI)
 #define TASK_STACK_SIZE_WIFI_EVENT (4096U)
