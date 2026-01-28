@@ -18,6 +18,23 @@
         display: flex;
       }
 
+
+      /* --- LOADING SPINNER --- */
+      .spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid #555;
+        border-top: 2px solid #007bff;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        display: inline-block;
+        margin-right: 5px;
+      }
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+
       /* --- ВІЗУАЛІЗАЦІЯ ВИДІЛЕННЯ (НОВЕ) --- */
       .u-select {
         background: rgba(0, 123, 255, 0.3) !important;
@@ -112,6 +129,10 @@
       }
       .dataset-item.master {
         border-left: 3px solid #007bff;
+      }
+      .dataset-item.loading {
+        border-left: 3px solid #777;
+        opacity: 0.7;
       }
 
       .ds-header {
@@ -407,7 +428,222 @@
       let activeModalDatasetIndex = -1;
       let uplot = null;
       let jumps = [];
-      let activeAnomalyTab = -1; // Which dataset's anomalies to show
+      let activeAnomalyTab = -1;
+      
+      // Worker setup
+      
+      const WORKER_CODE = `
+self.onmessage = function(e) {
+    const msg = e.data;
+    
+    if (msg.type === 'parse') {
+        try {
+            const start = performance.now();
+            const result = parseFullCSV(msg.text);
+            if (!result) {
+                 self.postMessage({ type: 'error', id: msg.id, message: 'File is empty or corrupt' });
+                 return;
+            }
+            
+            // Auto-detect frequency
+            let freq = 0;
+            const timeIdx = result.columns.findIndex(c => c.name.toLowerCase().includes("timestamp_us"));
+            if (timeIdx !== -1) {
+                freq = estimateFrequency(result.columns[timeIdx].data);
+            }
+
+            // Identify transferables (the Float64Arrays)
+            const transferables = [];
+            result.columns.forEach(c => {
+                if (c.data && c.data.buffer) {
+                    transferables.push(c.data.buffer);
+                }
+            });
+
+            const end = performance.now();
+            console.log(\`Worker: Parsed in \${(end-start).toFixed(2)}ms\`);
+
+            self.postMessage({ 
+                type: 'parseComplete', 
+                id: msg.id,
+                columns: result.columns,
+                estimatedFreq: freq,
+                timeIdx: timeIdx
+            }, transferables);
+
+        } catch (err) {
+            console.error(err);
+            self.postMessage({ type: 'error', id: msg.id, message: err.message });
+        }
+    }
+    else if (msg.type === 'interpolate') {
+        try {
+            // msg: { id, srcX, srcY, masterX }
+            // inputs are copied (structured clone) so we don't destroy main thread data
+            const result = interpolateToMasterTime(msg.srcX, msg.srcY, msg.masterX);
+            
+            self.postMessage({
+                type: 'interpolateComplete',
+                id: msg.id,
+                result: result
+            }, [result.buffer]); // Transfer output back to avoid copy
+        } catch (err) {
+            console.error(err);
+            self.postMessage({ type: 'error', id: msg.id, message: err.message });
+        }
+    }
+};
+
+// --- Core Logic Functions ---
+
+function parseFullCSV(text) {
+    const firstLineEnd = text.indexOf("\\n");
+    if (firstLineEnd === -1) return null;
+
+    const headerLine = text.substring(0, firstLineEnd).trim();
+    const sep = headerLine.includes(";") ? ";" : ",";
+    const headers = headerLine
+      .split(sep)
+      .map((h) => h.trim().replace(/^"|"$/g, ""));
+
+    const numCols = headers.length;
+    // Count actual newlines for accurate row estimation
+    let newlineCount = 0;
+    for (let i = 0; i < text.length; i++) {
+        if (text.charCodeAt(i) === 10) newlineCount++;  // '\\n' = 10
+    }
+    const estRows = newlineCount + 1;
+    const colData = headers.map(() => new Float64Array(estRows));
+
+    let row = 0;
+    let idx = firstLineEnd + 1;
+    const len = text.length;
+
+    while (idx < len) {
+        let nextIdx = text.indexOf("\\n", idx);
+        if (nextIdx === -1) nextIdx = len;
+
+        const line = text.substring(idx, nextIdx).trim();
+        if (line.length > 0) {
+            const parts = line.split(sep);
+            for (let c = 0; c < numCols; c++) {
+                if (c < parts.length) {
+                    colData[c][row] = parseFloat(parts[c]);
+                }
+            }
+            row++;
+        }
+        idx = nextIdx + 1;
+    }
+
+    const finalColumns = headers.map((h, i) => ({
+      name: h,
+      data: colData[i].subarray(0, row),
+    }));
+
+    return { columns: finalColumns };
+}
+
+function estimateFrequency(xData) {
+    const sampleCount = Math.min(1000, xData.length - 1);
+    if (sampleCount <= 0) return 0;
+    const totalTime = xData[sampleCount] - xData[0];  // microseconds
+    if (totalTime <= 0) return 0;
+    const avgInterval = totalTime / sampleCount;
+    return Math.round(1000000 / avgInterval);  // Hz
+}
+
+function binarySearch(arr, t) {
+    let lo = 0,
+      hi = arr.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (arr[mid] <= t) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+}
+
+function interpolateToMasterTime(srcX, srcY, masterX) {
+    const len = masterX.length;
+    const result = new Float64Array(len);
+    const srcLen = srcX.length;
+    const srcFirst = srcX[0];
+    const srcLast = srcX[srcLen - 1];
+
+    for (let i = 0; i < len; i++) {
+      const t = masterX[i];
+
+      if (t < srcFirst) {
+        result[i] = NaN;
+        continue;
+      }
+      if (t > srcLast) {
+        result[i] = NaN;
+        continue;
+      }
+
+      // Find position using binary search
+      const idx = binarySearch(srcX, t);
+
+      if (idx >= srcLen - 1) {
+        result[i] = srcY[srcLen - 1];
+        continue;
+      }
+
+      const t0 = srcX[idx];
+      if (t0 === t) {
+        result[i] = srcY[idx];
+        continue;
+      }
+
+      // Sample-and-hold (as per previous logic)
+      result[i] = srcY[idx];
+    }
+    return result;
+}
+`;
+      
+      const blob = new Blob([WORKER_CODE], { type: "application/javascript" });
+      const worker = new Worker(URL.createObjectURL(blob));
+      
+      const pendingRequests = new Map();
+
+      worker.onmessage = (e) => {
+          const msg = e.data;
+          if (msg.type === 'error') {
+              console.error("Worker error:", msg.message);
+              const req = pendingRequests.get(msg.id);
+              if (req) {
+                  req.reject(msg.message);
+                  pendingRequests.delete(msg.id);
+              }
+          }
+          else if (msg.type === 'parseComplete') {
+              const req = pendingRequests.get(msg.id);
+              if (req && req.type === 'parse') {
+                  req.resolve(msg);
+                  pendingRequests.delete(msg.id);
+              }
+          }
+          else if (msg.type === 'interpolateComplete') {
+              const req = pendingRequests.get(msg.id);
+              if (req && req.type === 'interpolate') {
+                  req.resolve(msg.result);
+                  pendingRequests.delete(msg.id);
+              }
+          }
+      };
+
+      // Helper to generate IDs
+      let msgIdCounter = 0;
+      function callWorker(type, payload, transferables = []) {
+          return new Promise((resolve, reject) => {
+              const id = ++msgIdCounter;
+              pendingRequests.set(id, { type, resolve, reject });
+              worker.postMessage({ id, type, ...payload }, transferables);
+          });
+      }
 
       window.onload = () => {
         if (typeof uPlot === "undefined")
@@ -420,8 +656,12 @@
         btn.innerText = "Читання...";
         btn.disabled = true;
 
-        for (let i = 0; i < files.length; i++) {
-          await processFile(files[i]);
+        try {
+            for (let i = 0; i < files.length; i++) {
+                await processFile(files[i]);
+            }
+        } catch(e) {
+            alert("Помилка при читанні: " + e);
         }
 
         btn.innerText = "+ Завантажити CSV";
@@ -430,93 +670,51 @@
       }
 
       async function processFile(file) {
-        const text = await file.text();
-
-        const parsed = parseFullCSV(text);
-        if (!parsed) return alert(`Файл ${file.name} пустий або битий.`);
-
+        // Create initial entry in loading state
         const newDs = {
           id: datasets.length,
           name: file.name,
-          rawColumns: parsed.columns,
+          rawColumns: [],
           config: { xIndex: -1, yIndices: [], expectedFreqHz: 0 },
           anomalies: [],
           isReady: false,
+          isLoading: true, // NEW flag
         };
+        datasets.push(newDs);
+        updateListUI();
 
-        // Авто-визначення
-        if (parsed.columns.length === 2) {
-          const timeIdx = parsed.columns.findIndex((c) =>
-            c.name.toLowerCase().includes("timestamp_us"),
-          );
-          if (timeIdx !== -1) {
-            newDs.config.xIndex = timeIdx;
-            newDs.config.yIndices = [timeIdx === 0 ? 1 : 0];
-            newDs.isReady = true;
-            // Auto-detect frequency from data
-            newDs.config.expectedFreqHz = estimateFrequency(
-              parsed.columns[timeIdx].data,
-            );
-          }
+        const text = await file.text();
+        
+        // Offload parsing to worker
+        const parsed = await callWorker('parse', { text });
+        
+        if (!parsed || !parsed.columns) {
+            // Remove the dataset if failed
+            const idx = datasets.indexOf(newDs);
+            if (idx !== -1) datasets.splice(idx, 1);
+            updateListUI();
+            return alert(`Файл ${file.name} пустий або битий.`);
         }
 
-        datasets.push(newDs);
+        newDs.rawColumns = parsed.columns;
+        newDs.isLoading = false;
+
+        // Auto-detect config
+        if (parsed.columns.length === 2 && parsed.timeIdx !== -1) {
+            newDs.config.xIndex = parsed.timeIdx;
+            newDs.config.yIndices = [parsed.timeIdx === 0 ? 1 : 0];
+            newDs.isReady = true;
+            newDs.config.expectedFreqHz = parsed.estimatedFreq;
+        }
+
         updateListUI();
 
         if (newDs.isReady) {
           // Calculate anomalies for this dataset
           calculateAnomalies(newDs);
           renderAnomalyTabs();
-          renderChart();
+          await renderChart();
         }
-      }
-
-      function parseFullCSV(text) {
-        const firstLineEnd = text.indexOf("\n");
-        if (firstLineEnd === -1) return null;
-
-        const headerLine = text.substring(0, firstLineEnd).trim();
-        const sep = headerLine.includes(";") ? ";" : ",";
-        const headers = headerLine
-          .split(sep)
-          .map((h) => h.trim().replace(/^"|"$/g, ""));
-
-        const numCols = headers.length;
-        // Count actual newlines for accurate row estimation (faster than parsing twice)
-        let newlineCount = 0;
-        for (let i = 0; i < text.length; i++) {
-          if (text.charCodeAt(i) === 10) newlineCount++; // '\n' = 10
-        }
-        const estRows = newlineCount + 1; // +1 for possible last line without newline
-        const colData = headers.map(() => new Float64Array(estRows));
-
-        let row = 0;
-        let idx = firstLineEnd + 1;
-        const len = text.length;
-
-        while (idx < len) {
-          let nextIdx = text.indexOf("\n", idx);
-          if (nextIdx === -1) nextIdx = len;
-
-          const line = text.substring(idx, nextIdx).trim();
-          if (line.length > 0) {
-            const parts = line.split(sep);
-            for (let c = 0; c < numCols; c++) {
-              if (c < parts.length) {
-                colData[c][row] = parseFloat(parts[c]);
-              }
-            }
-            row++;
-          }
-          idx = nextIdx + 1;
-        }
-
-        const finalColumns = headers.map((h, i) => ({
-          name: h,
-          data: colData[i].subarray(0, row),
-        }));
-
-        return { columns: finalColumns };
       }
 
       // === UI: LIST & MODAL ===
@@ -528,32 +726,38 @@
         datasets.forEach((ds, idx) => {
           const div = document.createElement("div");
           const isMaster = idx === getMasterIndex();
-          const statusClass = ds.isReady
-            ? isMaster
-              ? "master"
-              : "ready"
-            : "not-ready";
+          
+          let statusClass = "not-ready";
+          if (ds.isLoading) statusClass = "loading";
+          else if (ds.isReady) statusClass = isMaster ? "master" : "ready";
 
-          let statusText = ds.isReady
-            ? `Готово: X=${ds.rawColumns[ds.config.xIndex].name}, Y=[${ds.config.yIndices.length}]`
-            : "⚠️ Потрібне налаштування";
+          let statusText = "";
+          if (ds.isLoading) {
+              statusText = "⏳ Обробка...";
+          } else if (ds.isReady) {
+              statusText = `Готово: X=${ds.rawColumns[ds.config.xIndex].name}, Y=[${ds.config.yIndices.length}]`;
+          } else {
+              statusText = "⚠️ Потрібне налаштування";
+          }
 
           div.className = `dataset-item ${statusClass}`;
           div.innerHTML = `
                     <div class="ds-header">
                         <div style="display:flex; align-items:center; overflow:hidden;">
+                            ${ds.isLoading ? '<span class="spinner"></span>' : ''}
                             <span class="ds-name" title="${ds.name}">${ds.name}</span>
                         </div>
-                        ${isMaster ? '<span style="font-size:9px; background:#007bff; padding:1px 3px; border-radius:3px;">MASTER</span>' : ""}
+                        ${!ds.isLoading && isMaster ? '<span style="font-size:9px; background:#007bff; padding:1px 3px; border-radius:3px;">MASTER</span>' : ""}
                     </div>
                     <div class="ds-status">${statusText}</div>
+                    ${!ds.isLoading ? `
                     <div style="margin-top:8px; display:flex; justify-content:space-between;">
                         <button class="btn-icon ${ds.isReady ? "btn-neutral" : "btn-settings"}" onclick="openConfigModal(${idx})">⚙️ Налаштувати</button>
                         <div>
                              ${ds.isReady ? `<button class="btn-icon btn-fit" onclick="fitY(${idx})" title="Zoom Y">Fit Y</button>` : ""}
                              <button class="btn-icon btn-del" onclick="removeDataset(${idx})">✕</button>
                         </div>
-                    </div>
+                    </div>` : ''}
                 `;
           list.appendChild(div);
         });
@@ -801,89 +1005,9 @@
 
       // === CHART RENDERING ===
 
-      // Binary search to find index where srcX[idx] <= t < srcX[idx+1]
-      function binarySearch(arr, t) {
-        let lo = 0,
-          hi = arr.length - 1;
-        while (lo < hi) {
-          const mid = (lo + hi + 1) >> 1;
-          if (arr[mid] <= t) lo = mid;
-          else hi = mid - 1;
-        }
-        return lo;
-      }
 
-      // Helper function to interpolate data from one time axis to another
-      function interpolateToMasterTime(srcX, srcY, masterX) {
-        const len = masterX.length;
-        const result = new Float64Array(len); // Use Float64 for precision
-        const srcLen = srcX.length;
-        const srcFirst = srcX[0];
-        const srcLast = srcX[srcLen - 1];
 
-        for (let i = 0; i < len; i++) {
-          const t = masterX[i];
-
-          // Check if we're outside the source data range
-          if (t < srcFirst) {
-            result[i] = NaN;
-            continue;
-          }
-          if (t > srcLast) {
-            result[i] = NaN;
-            continue;
-          }
-
-          // Find position using binary search
-          const idx = binarySearch(srcX, t);
-
-          // If we're at the last point
-          if (idx >= srcLen - 1) {
-            result[i] = srcY[srcLen - 1];
-            continue;
-          }
-
-          // If exact match
-          const t0 = srcX[idx];
-          if (t0 === t) {
-            result[i] = srcY[idx];
-            continue;
-          }
-
-          // Linear interpolation between idx and idx+1
-          // const t1 = srcX[idx + 1];
-          // const v0 = srcY[idx];
-          // const v1 = srcY[idx + 1];
-
-          // const ratio = (t - t0) / (t1 - t0);
-          // result[i] = v0 + ratio * (v1 - v0);
-
-          // Sample-and-hold: use value from previous sample point (no interpolation)
-          result[i] = srcY[idx];
-        }
-
-        // Debug: check the result
-        let validCount = 0,
-          nanCount = 0;
-        let lastValidIdx = -1;
-        for (let i = 0; i < len; i++) {
-          if (!isNaN(result[i])) {
-            validCount++;
-            lastValidIdx = i;
-          } else {
-            nanCount++;
-          }
-        }
-        console.log(`Interpolation debug:
-  Master: ${len} points, range [${masterX[0]} - ${masterX[len - 1]}]
-  Source: ${srcLen} points, range [${srcFirst} - ${srcLast}]
-  Result: ${validCount} valid, ${nanCount} NaN
-  Last valid at index ${lastValidIdx}, masterX[${lastValidIdx}] = ${masterX[lastValidIdx]}`);
-
-        return result;
-      }
-
-      function renderChart() {
+      async function renderChart() {
         const div = document.getElementById("chart");
         if (uplot) uplot.destroy();
         div.innerHTML = "";
@@ -902,6 +1026,10 @@
         ];
 
         let globalSeriesCounter = 0;
+        
+        // Prepare list of series to render and interpolation tasks
+        const seriesInfo = [];
+        const interpolationPromises = [];
 
         datasets.forEach((ds, dsIdx) => {
           if (!ds.isReady) return;
@@ -912,21 +1040,54 @@
           ds.config.yIndices.forEach((yIdx) => {
             const colName = ds.rawColumns[yIdx].name;
             const yData = ds.rawColumns[yIdx].data;
-
-            // Create a unique scale name for this series
-            const scaleName =
-              globalSeriesCounter === 0 ? "y" : `y${globalSeriesCounter + 1}`;
-
-            let strokeColor;
-            if (globalSeriesCounter === 0) strokeColor = "#00ff00";
-            else {
-              const paletteIdx = (globalSeriesCounter - 1) % PALETTE.length;
-              strokeColor = PALETTE[paletteIdx];
+            const scaleName = globalSeriesCounter === 0 ? "y" : `y${globalSeriesCounter + 1}`;
+            
+            // Collect metadata for later use
+            seriesInfo.push({
+                ds,
+                colName,
+                yData,
+                scaleName,
+                isMaster,
+                strokeColor: globalSeriesCounter === 0 ? "#00ff00" : PALETTE[(globalSeriesCounter - 1) % PALETTE.length],
+                globalIndex: globalSeriesCounter
+            });
+            
+            if (isMaster) {
+                // No interpolation needed
+                interpolationPromises.push(Promise.resolve(yData));
+            } else {
+                // Offload interpolation to worker
+                interpolationPromises.push(callWorker('interpolate', {
+                    srcX: dsX,
+                    srcY: yData,
+                    masterX: masterX
+                }));
             }
+            
+            globalSeriesCounter++;
+          });
+        });
 
-            // Calculate min/max for this specific column
-            let colMin = Infinity,
-              colMax = -Infinity;
+        // Wait for all interpolations to finish
+        let interpolatedResults;
+        try {
+            interpolatedResults = await Promise.all(interpolationPromises);
+        } catch (e) {
+            console.error("Interpolation failed", e);
+            alert("Interpolation error: " + e);
+            return;
+        }
+
+        // Build chart configuration and data
+        seriesInfo.forEach((info, idx) => {
+            const { ds, colName, inputs, scaleName, strokeColor, globalIndex } = info;
+            const yData = interpolatedResults[idx]; // Result from worker or direct pass-through
+
+             // Calculate min/max for this specific column (using the data we are about to plot)
+             // Note: if interpolated, we use the interpolated data for range which is correct for view
+             // Optimization: Use worker to calc min/max too? For now, main thread is fine for this loop.
+            let colMin = Infinity, colMax = -Infinity;
             for (let v of yData) {
               if (!isNaN(v)) {
                 if (v < colMin) colMin = v;
@@ -935,42 +1096,30 @@
             }
             const range = colMax - colMin || 1;
 
-            // Add scale for this series
             scales[scaleName] = {
               auto: true,
               range: [colMin - range * 0.05, colMax + range * 0.05],
             };
 
-            // Add Y axis for this series
             axes.push({
               scale: scaleName,
-              side: globalSeriesCounter === 0 ? 3 : 1, // First on left, rest on right
-              grid: { show: globalSeriesCounter === 0 },
+              side: globalIndex === 0 ? 3 : 1,
+              grid: { show: globalIndex === 0 },
               stroke: strokeColor,
               ticks: { stroke: strokeColor },
               label: `${ds.name} (${colName})`,
               labelSize: 30,
             });
 
-            globalSeriesCounter++;
-
             series.push({
               label: `${ds.name} (${colName})`,
               stroke: strokeColor,
               width: 1,
-              scale: scaleName, // Each series has its own scale
+              scale: scaleName,
               points: { show: false },
             });
-
-            if (isMaster) {
-              // Master dataset - use data as-is
-              chartData.push(yData);
-            } else {
-              // Other datasets - interpolate to master time axis
-              const interpolated = interpolateToMasterTime(dsX, yData, masterX);
-              chartData.push(interpolated);
-            }
-          });
+            
+            chartData.push(yData);
         });
 
         const opts = {
