@@ -866,6 +866,7 @@ void Logger_Init(void) {
     loggerStat.config.mavlink_logging_enabled = 1;                  // MAVLink logging enabled
     loggerStat.config.reserved[0] = (uint8_t)LOGGER_CHECKSUM_ALGO;  // checksum algorithm id (CRC8/SUM8)
 
+#if (SPI_LOGGER_ENABLE == 1u)
     // Populate IMU config early so the master can read a meaningful config immediately after reset.
     // The sensor driver will overwrite this later with the actual hardware-readback values.
     imu_config_t imu_cfg = {0};
@@ -882,7 +883,7 @@ void Logger_Init(void) {
     imu_cfg.reserved2 = LSM6DS3_CTRL3_C_VAL;
     Logger_OnAccelerometerReady(&imu_cfg);
 
-#if (SPI_LOGGER_ENABLE == 1u)
+
     // Initialize SPI2 NVIC for interrupt-driven reception
     Logger_SPI_Init();
 

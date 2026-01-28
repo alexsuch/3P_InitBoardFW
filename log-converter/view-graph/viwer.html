@@ -387,7 +387,7 @@
       <input
         type="file"
         id="fileInput"
-        accept=".csv"
+        accept=".csv,.dat"
         multiple
         onchange="handleFiles(this.files)"
       />
@@ -437,7 +437,8 @@ self.onmessage = function(e) {
     const msg = e.data;
     
     if (msg.type === 'parse') {
-        try {
+        // ... (existing CSV parse logic) ...
+         try {
             const start = performance.now();
             const result = parseFullCSV(msg.text);
             if (!result) {
@@ -461,14 +462,15 @@ self.onmessage = function(e) {
             });
 
             const end = performance.now();
-            console.log(\`Worker: Parsed in \${(end-start).toFixed(2)}ms\`);
+            console.log(\`Worker: CSV Parsed in \${(end-start).toFixed(2)}ms\`);
 
             self.postMessage({ 
                 type: 'parseComplete', 
                 id: msg.id,
                 columns: result.columns,
                 estimatedFreq: freq,
-                timeIdx: timeIdx
+                timeIdx: timeIdx,
+                isBinary: false
             }, transferables);
 
         } catch (err) {
@@ -476,23 +478,192 @@ self.onmessage = function(e) {
             self.postMessage({ type: 'error', id: msg.id, message: err.message });
         }
     }
+    else if (msg.type === 'parseBinary') {
+        try {
+            const start = performance.now();
+            const buffer = msg.buffer; // ArrayBuffer
+            const result = parseBinaryLog(buffer);
+
+            // Identify transferables
+            const transferables = [];
+            // ADC transferables
+            result.adc.columns.forEach(c => transferables.push(c.data.buffer));
+            // IMU transferables
+            result.imu.columns.forEach(c => transferables.push(c.data.buffer));
+
+            const end = performance.now();
+            console.log(\`Worker: Binary Parsed in \${(end-start).toFixed(2)}ms\`);
+
+            self.postMessage({
+                type: 'parseBinaryComplete',
+                id: msg.id,
+                adc: result.adc,
+                imu: result.imu,
+                isBinary: true
+            }, transferables);
+            
+        } catch(err) {
+             console.error(err);
+             self.postMessage({ type: 'error', id: msg.id, message: err.message });
+        }
+    }
     else if (msg.type === 'interpolate') {
         try {
-            // msg: { id, srcX, srcY, masterX }
-            // inputs are copied (structured clone) so we don't destroy main thread data
             const result = interpolateToMasterTime(msg.srcX, msg.srcY, msg.masterX);
-            
             self.postMessage({
                 type: 'interpolateComplete',
                 id: msg.id,
                 result: result
-            }, [result.buffer]); // Transfer output back to avoid copy
+            }, [result.buffer]); 
         } catch (err) {
             console.error(err);
             self.postMessage({ type: 'error', id: msg.id, message: err.message });
         }
     }
 };
+
+// --- Core Logic Functions ---
+
+function parseBinaryLog(buffer) {
+    const view = new DataView(buffer);
+    const totalLen = buffer.byteLength;
+    
+    // Constants
+    const HEADER_SIZE = 64;
+    const FRAME_SIZE = 852;
+    const LOG_CONFIG_MAGIC = 0xCAFE;
+    const LOG_FRAME_MAGIC = 0x5A5A;
+    const ADC_BLOCK_SIZE = 256;
+    const IMU_BLOCK_SIZE = 20;
+
+    // 1. Read Header
+    if (totalLen < HEADER_SIZE) throw new Error("File too short for header");
+    
+    const magic = view.getUint16(0, true);
+    if (magic !== LOG_CONFIG_MAGIC) throw new Error("Invalid Config Magic: " + magic.toString(16));
+
+    const adcRateKhz = view.getUint16(4, true); // Offset 4: adc_sample_rate_khz
+    // const adcBlockSize = view.getUint16(6, true); // Offset 6: adc_block_size
+    
+    const adcTickUs = 1000.0 / (adcRateKhz * 1000.0) * 1000000.0; // Wait, rate in kHz e.g. 100
+    // If rate is 100 kHz, period is 10us.
+    // 100 kHz = 100,000 Hz. Period = 1/100000 s = 10 us.
+    // Logic: 1000 / adcRateKhz (in kHz) -> period in us.
+    // e.g. 1000 / 100 = 10 us.
+    const samplePeriodUs = 1000 / (adcRateKhz || 100); // Default to 100kHz if 0
+
+    // 2. Count Frames to pre-allocate
+    const numFrames = Math.floor((totalLen - HEADER_SIZE) / FRAME_SIZE);
+    
+    // Estimate total samples
+    const maxAdcSamples = numFrames * ADC_BLOCK_SIZE;
+    const maxImuSamples = numFrames * IMU_BLOCK_SIZE;
+
+    // ADC Arrays
+    const adcTime = new Float64Array(maxAdcSamples);
+    const adcVal = new Float64Array(maxAdcSamples);
+    
+    // IMU Arrays
+    const imuTime = new Float64Array(maxImuSamples);
+    const imuGx = new Float64Array(maxImuSamples);
+    const imuGy = new Float64Array(maxImuSamples);
+    const imuGz = new Float64Array(maxImuSamples);
+    const imuAx = new Float64Array(maxImuSamples);
+    const imuAy = new Float64Array(maxImuSamples);
+    const imuAz = new Float64Array(maxImuSamples);
+
+    let adcIdx = 0;
+    let imuIdx = 0;
+    let offset = HEADER_SIZE;
+
+    while (offset + FRAME_SIZE <= totalLen) {
+        const fMagic = view.getUint16(offset, true);
+        if (fMagic !== LOG_FRAME_MAGIC) {
+            // console.warn("Invalid Frame Magic at " + offset);
+            offset += 1; // Try to resync? Or just skip frame? 
+            // For now, strict:
+            offset += FRAME_SIZE; 
+            continue; 
+        }
+
+        // Frame Layout:
+        // 0: Magic (2)
+        // 2: n_imu (2)
+        // 4: adc_timestamp (4)
+        // 8: adc_data (512) -> 256 * int16
+        // 520: imu_data (320) -> 20 * 16 bytes
+        // 840: mavlink (10)
+        // 850: checksum (2)
+
+        const nImu = view.getUint16(offset + 2, true);
+        const adcBaseTime = view.getUint32(offset + 4, true);
+
+        // --- Extract ADC ---
+        const adcOffset = offset + 8;
+        for (let i = 0; i < ADC_BLOCK_SIZE; i++) {
+            // FIX: adcBaseTime is in TICKS. i is TICKS offset. 
+            // Convert sum to microseconds.
+            adcTime[adcIdx] = (adcBaseTime + i) * samplePeriodUs;
+            adcVal[adcIdx] = view.getInt16(adcOffset + (i * 2), true);
+            adcIdx++;
+        }
+
+        // --- Extract IMU ---
+        const imuBaseOffset = offset + 520;
+        const validImuCount = Math.min(nImu, IMU_BLOCK_SIZE);
+        
+        for (let i = 0; i < validImuCount; i++) {
+            // IMU Sample: 12 bytes data, 4 bytes timestamp
+            // data: gx, gy, gz, ax, ay, az (int16)
+            const sOff = imuBaseOffset + (i * 16);
+            
+            const gx = view.getInt16(sOff + 0, true);
+            const gy = view.getInt16(sOff + 2, true);
+            const gz = view.getInt16(sOff + 4, true);
+            const ax = view.getInt16(sOff + 6, true);
+            const ay = view.getInt16(sOff + 8, true);
+            const az = view.getInt16(sOff + 10, true);
+            const ts = view.getUint32(sOff + 12, true);
+
+            // FIX: Convert ticks to microseconds
+            imuTime[imuIdx] = ts * samplePeriodUs;
+            
+            imuGx[imuIdx] = gx;
+            imuGy[imuIdx] = gy;
+            imuGz[imuIdx] = gz;
+            imuAx[imuIdx] = ax;
+            imuAy[imuIdx] = ay;
+            imuAz[imuIdx] = az;
+            
+            imuIdx++;
+        }
+
+        offset += FRAME_SIZE;
+    }
+
+    return {
+        adc: {
+            columns: [
+                { name: "timestamp_us", data: adcTime.subarray(0, adcIdx) },
+                { name: "adc_piezo", data: adcVal.subarray(0, adcIdx) }
+            ],
+            estimatedFreq: adcRateKhz * 1000
+        },
+        imu: {
+            columns: [
+                { name: "timestamp_us", data: imuTime.subarray(0, imuIdx) },
+                { name: "gyro_x", data: imuGx.subarray(0, imuIdx) },
+                { name: "gyro_y", data: imuGy.subarray(0, imuIdx) },
+                { name: "gyro_z", data: imuGz.subarray(0, imuIdx) },
+                { name: "accel_x", data: imuAx.subarray(0, imuIdx) },
+                { name: "accel_y", data: imuAy.subarray(0, imuIdx) },
+                { name: "accel_z", data: imuAz.subarray(0, imuIdx) }
+            ],
+            estimatedFreq: 0 // Will auto-detect or is variable
+        }
+    };
+}
+
 
 // --- Core Logic Functions ---
 
@@ -626,6 +797,13 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
                   pendingRequests.delete(msg.id);
               }
           }
+          else if (msg.type === 'parseBinaryComplete') {
+              const req = pendingRequests.get(msg.id);
+              if (req && req.type === 'parseBinary') {
+                  req.resolve(msg); // msg contains .adc and .imu
+                  pendingRequests.delete(msg.id);
+              }
+          }
           else if (msg.type === 'interpolateComplete') {
               const req = pendingRequests.get(msg.id);
               if (req && req.type === 'interpolate') {
@@ -670,51 +848,102 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
       }
 
       async function processFile(file) {
-        // Create initial entry in loading state
+        const isBinary = file.name.toLowerCase().endsWith(".dat");
+
+        const tempDs = {
+          id: -1, 
+          name: file.name,
+          isLoading: true,
+          isReady: false
+        };
+        datasets.push(tempDs);
+        updateListUI();
+
+        try {
+            if (isBinary) {
+                const buffer = await file.arrayBuffer();
+                const result = await callWorker('parseBinary', { buffer }, [buffer]);
+                
+                // Remove temp placeholder
+                const idx = datasets.indexOf(tempDs);
+                if (idx !== -1) datasets.splice(idx, 1);
+                
+                // Add ADC Dataset (Auto-enable)
+                if (result.adc) {
+                     addDatasetFromWorkerResult(file.name + " (ADC)", result.adc, true);
+                }
+                // Add IMU Dataset (Manual enable only)
+                if (result.imu) {
+                     addDatasetFromWorkerResult(file.name + " (IMU)", result.imu, false);
+                }
+            } 
+            else {
+                // CSV
+                const text = await file.text();
+                const result = await callWorker('parse', { text });
+                
+                // Remove temp placeholder
+                const idx = datasets.indexOf(tempDs);
+                if (idx !== -1) datasets.splice(idx, 1);
+                
+                if (!result || !result.columns) throw new Error("File empty or corrupt");
+                
+                addDatasetFromWorkerResult(file.name, result, true);
+            }
+        } catch (err) {
+            console.error(err);
+             // Remove temp placeholder on error
+            const idx = datasets.indexOf(tempDs);
+            if (idx !== -1) datasets.splice(idx, 1);
+            alert(`Error reading ${file.name}: ${err}`);
+        }
+        
+        updateListUI();
+      }
+
+      function addDatasetFromWorkerResult(name, parsed, autoEnable = true) {
         const newDs = {
           id: datasets.length,
-          name: file.name,
-          rawColumns: [],
+          name: name,
+          rawColumns: parsed.columns,
           config: { xIndex: -1, yIndices: [], expectedFreqHz: 0 },
           anomalies: [],
           isReady: false,
-          isLoading: true, // NEW flag
+          isLoading: false
         };
-        datasets.push(newDs);
-        updateListUI();
-
-        const text = await file.text();
-        
-        // Offload parsing to worker
-        const parsed = await callWorker('parse', { text });
-        
-        if (!parsed || !parsed.columns) {
-            // Remove the dataset if failed
-            const idx = datasets.indexOf(newDs);
-            if (idx !== -1) datasets.splice(idx, 1);
-            updateListUI();
-            return alert(`Файл ${file.name} пустий або битий.`);
-        }
-
-        newDs.rawColumns = parsed.columns;
-        newDs.isLoading = false;
 
         // Auto-detect config
-        if (parsed.columns.length === 2 && parsed.timeIdx !== -1) {
-            newDs.config.xIndex = parsed.timeIdx;
-            newDs.config.yIndices = [parsed.timeIdx === 0 ? 1 : 0];
-            newDs.isReady = true;
-            newDs.config.expectedFreqHz = parsed.estimatedFreq;
+        const timeIdx = parsed.timeIdx !== undefined ? parsed.timeIdx : 
+                        parsed.columns.findIndex(c => c.name.toLowerCase().includes("timestamp") || c.name.toLowerCase().includes("time"));
+        
+        if (timeIdx !== -1) {
+             newDs.config.xIndex = timeIdx;
+             
+             // Only set Y defaults if autoEnable is true
+             if (autoEnable) {
+                 const yIdx = parsed.columns.findIndex((_, i) => i !== timeIdx);
+                 if (yIdx !== -1) {
+                     newDs.config.yIndices = [yIdx];
+                     newDs.isReady = true;
+                 }
+             }
+             newDs.config.expectedFreqHz = parsed.estimatedFreq || 0;
         }
 
-        updateListUI();
-
+        datasets.push(newDs);
+        
+        // Render if ready (and master logic)
         if (newDs.isReady) {
-          // Calculate anomalies for this dataset
-          calculateAnomalies(newDs);
-          renderAnomalyTabs();
-          await renderChart();
+             calculateAnomalies(newDs);
+             renderAnomalyTabs();
+             // Append to chart if master exists, else this becomes master
+             if (datasets.filter(d => d.isReady).length === 1) {
+                 renderChart();
+             } else {
+                 renderChart();
+             }
         }
+        return newDs;
       }
 
       // === UI: LIST & MODAL ===

@@ -79,7 +79,7 @@ static void MX_ADC1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-#if TEST_DAC_ENABLE
+#if 0
 /* --- DAC test setup (unchanged) --- */
 #define DAC_MAX_VALUE 4095 /* 12-bit DAC maximum value */
 #define DAC_SAMPLES 151
@@ -123,14 +123,14 @@ int main(void) {
     MX_OPAMP2_Init();
     MX_SPI2_Init();
     MX_LPUART1_UART_Init();
-    MX_DAC1_Init();
+    // MX_DAC1_Init();
     MX_ADC1_Init();
     /* USER CODE BEGIN 2 */
     /* Configure Solution HAL peripherals */
     Solution_HalConfigure();
     /* Init Solution HAL layer */
     Solution_HalInit();
-#if TEST_DAC_ENABLE
+#if 0
     for (int i = 0; i < DAC_SAMPLES; i++) {
         dac_buffer[i] = ((((uint32_t)i) * DAC_MAX_VALUE) / (DAC_SAMPLES - 1));
     }

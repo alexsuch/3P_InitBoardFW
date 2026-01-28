@@ -564,9 +564,6 @@ static uint8_t logger_spi_rx_cmd_buffer[LOGGER_SPI_RX_COMMAND_SIZE] = {0};
 static volatile uint32_t g_timestamp_hi = 0u;
 
 /* Logger SPI Slave Support - Enabled when SPI_LOGGER_ENABLE is defined */
-#endif
-
-#if (SPI_LOGGER_ENABLE == 1u)
 
 /**
  * @brief Start ADC data acquisition and initialize logging subsystem
@@ -602,7 +599,7 @@ void Solution_LoggingStart(void) {
     TIM7->SR &= ~TIM_SR_UIF;
     TIM7->CR1 |= TIM_CR1_CEN;
 
-    /* 2. Arm ADC2 DMA circular buffer (ADC waits for TIM6 TRGO) */
+    /* 2. Start ADC2 DMA circular buffer for synchronized configurable kHz sampling */
     if (HAL_ADC_Start_DMA(&ADC_PIEZO_HANDLE, (uint32_t*)adc2_dma_buffer, LOGGER_ADC_DMA_BUFFER_SIZE) != HAL_OK) {
         Error_Handler();
     }

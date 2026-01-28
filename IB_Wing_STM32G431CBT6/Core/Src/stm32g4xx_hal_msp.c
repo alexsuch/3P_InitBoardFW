@@ -332,6 +332,7 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef* hspi) {
 
         __HAL_LINKDMA(hspi, hdmatx, hdma_spi2_tx);
 
+        /* USER CODE BEGIN SPI2_MspInit 1 */
         /* SPI2 interrupt Init - DISABLED HERE: Moved to Logger_SPI_Init() in solution_wrapper.c
          * to prevent premature interrupt triggering before logger is initialized.
          * This fixes reboot loop when SPI_LOGGER_ENABLE=1.

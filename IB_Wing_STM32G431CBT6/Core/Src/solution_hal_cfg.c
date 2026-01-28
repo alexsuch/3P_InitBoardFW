@@ -21,12 +21,17 @@
 #include "solution_wrapper.h"
 
 /* Private variables ---------------------------------------------------------*/
-TIM_HandleTypeDef htim1;          /* Pump PWM timer handle */
-TIM_HandleTypeDef htim2;          /* System tick timer handle */
-TIM_HandleTypeDef htim7;          /* Logger timestamp timer handle (free-running) */
-TIM_HandleTypeDef htim15;         /* Detonation high-side switch PWM timer handle */
-UART_HandleTypeDef huart2;        /* Main UART handle */
-UART_HandleTypeDef huart3;        /* VUSA UART handle */
+/* Timer handles */
+TIM_HandleTypeDef htim1;  /* Pump PWM timer handle */
+TIM_HandleTypeDef htim2;  /* System tick timer handle */
+TIM_HandleTypeDef htim7;  /* Logger timestamp timer handle (free-running) */
+TIM_HandleTypeDef htim15; /* Detonation high-side switch PWM timer handle */
+
+/* UART handles */
+UART_HandleTypeDef huart2; /* Main UART handle */
+UART_HandleTypeDef huart3; /* VUSA UART handle */
+
+/* DMA handles */
 DMA_HandleTypeDef hdma_usart3_tx; /* VUSA UART DMA TX handle */
 DAC_HandleTypeDef hdac1;          /* Test DAC handle */
 DMA_HandleTypeDef hdma_dac1_ch1;  /* Test DAC DMA handle */
@@ -43,18 +48,18 @@ static HAL_StatusTypeDef HalConfigure_SysTickTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_HighSidePwmTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_PumpPwmTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void);
+
 #endif /* SPI_LOGGER_ENABLE == 0 */
+
+static HAL_StatusTypeDef HalConfigure_TimestampTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_MainUart_Init(void);
 static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void);
 static HAL_StatusTypeDef HalConfigure_Opamp_Init(void);
 static HAL_StatusTypeDef HalConfigure_Adc2_Init(void);
 static HAL_StatusTypeDef HalConfigure_AdcTickTimer_Init(void);
-static HAL_StatusTypeDef HalConfigure_TimestampTimer_Init(void);
-
 #if (TEST_DAC_ENABLE == 1u)
 static HAL_StatusTypeDef HalConfigure_Dac1_Init(void);
 #endif
-
 #if (COMP_HIT_DETECTION_ENABLE == 1u)
 static HAL_StatusTypeDef HalConfigure_Comp1_Dac1_Init(void);
 #endif
@@ -114,12 +119,13 @@ void Solution_HalConfigure(void) {
         Error_Handler();
     }
 
+#if (TEST_DAC_ENABLE == 1u)
+    /* Initialize DAC1 (Test Signal Generator) */
     /* Initialize hardware timestamp timer */
     if (HalConfigure_TimestampTimer_Init() != HAL_OK) {
         Error_Handler();
     }
 
-#if (TEST_DAC_ENABLE == 1u)
     /* Initialize DAC1 (Test Signal Generator) */
     if (HalConfigure_Dac1_Init() != HAL_OK) {
         Error_Handler();
@@ -963,8 +969,8 @@ static HAL_StatusTypeDef HalConfigure_AdcTickTimer_Init(void) {
     return HAL_OK;
 }
 
-static HAL_StatusTypeDef HalConfigure_TimestampTimer_Init(void) {
 #if (SPI_LOGGER_ENABLE == 1u)
+static HAL_StatusTypeDef HalConfigure_TimestampTimer_Init(void) {
     /* Enable TIM7 clock */
     __HAL_RCC_TIM7_CLK_ENABLE();
 
@@ -989,10 +995,8 @@ static HAL_StatusTypeDef HalConfigure_TimestampTimer_Init(void) {
     if (HAL_TIM_Base_Init(&htim7) != HAL_OK) return HAL_ERROR;
 
     return HAL_OK;
-#else
-    return HAL_OK;
-#endif
 }
+#endif
 
 #if (TEST_DAC_ENABLE == 1u)
 static HAL_StatusTypeDef HalConfigure_Dac1_Init(void) {

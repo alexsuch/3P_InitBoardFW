@@ -11,7 +11,6 @@
  *
  ******************************************************************************
  */
-
 /* USER CODE END Header */
 
 #ifndef __HAL_CFG_H
@@ -123,15 +122,9 @@ extern "C" {
 #define ADC_PIEZO_TRIGGER ADC_EXTERNALTRIG_T6_TRGO
 
 /* Logger SPI Slave Configuration */
-#define LOGGER_SPI_HANDLE hspi2            /* Logger SPI2 slave handle */
-#define LOGGER_SPI_IRQ SPI2_IRQn           /* Logger SPI2 interrupt */
-#define LOGGER_SPI_DATA_RDY_PORT GPIOB     /* Data ready signal GxPIO port */
-/*
- * Logger SPI "DATA_RDY/INT" signal from STM32 -> ESP32.
- *
- * Note: This codebase can be reused across boards with different pin routing.
- * For the logger configuration and the dedicated logger board wiring, this signal is on PB11.
- */
+#define LOGGER_SPI_HANDLE hspi2             /* Logger SPI2 slave handle */
+#define LOGGER_SPI_IRQ SPI2_IRQn            /* Logger SPI2 interrupt */
+#define LOGGER_SPI_DATA_RDY_PORT GPIOB      /* Data ready signal GxPIO port */
 #define LOGGER_SPI_DATA_RDY_PIN GPIO_PIN_11 /* Data ready signal GPIO pin (B11) - used only when SPI_LOGGER_ENABLE */
 
 /* COMP1 Hit Detection Configuration (DAC1 threshold) -----------------------*/
