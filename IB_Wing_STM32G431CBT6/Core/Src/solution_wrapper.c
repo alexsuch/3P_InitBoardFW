@@ -29,9 +29,11 @@
 #include "hal_cfg.h"
 #include "init_brd.h"
 #include "logger.h"
+#if PIEZO_DETECTION_ENABLE
+#include "piezo_proc.h"
+#endif /* PIEZO_DETECTION_ENABLE */
 #include "main.h"
 #include "prj_config.h"
-#include "solution_hal_cfg.h"
 #include "timer.h"
 #include "uart_configurator.h"
 #if (CONTROL_MODE == PWM_CTRL_SUPP)
@@ -40,21 +42,27 @@
 #include "mavlink_uart.h"
 #endif
 
+#if (COMP_HIT_DETECTION_ENABLE == 1u)
+static HAL_StatusTypeDef Solution_Comp1Dac1Start(void);
+#endif
+#if (TEST_DAC_ENABLE == 1u)
+static HAL_StatusTypeDef Solution_TestDacStart(void);
+#endif
 // ============================================================================
 // ADC2 DMA buffer (declared at module level for early access)
 // ============================================================================
 
 /* ADC2 DMA circular buffer configuration
- * Size: ADC_DMA_BUFFER_SIZE samples × 2 bytes = ADC_DMA_BUFFER_SIZE * 2 bytes
+ * Size depends on build mode:
+ *   - Logger mode (SPI_LOGGER_ENABLE=1): LOGGER_ADC_DMA_BUFFER_SIZE samples (typically 512)
+ *   - Piezo mode (SPI_LOGGER_ENABLE=0): PIEZO_ADC_DMA_BLOCK samples (typically 16)
  * Used for configurable frequency synchronized sampling with DMA callbacks
- *
- * Architecture:
- *   - Total: ADC_DMA_BUFFER_SIZE samples (from prj_config.h)
- *   - Half-complete: first ADC_DMA_HALF_SIZE samples → Frame 1 ready
- *   - Complete: next ADC_DMA_HALF_SIZE samples → Frame 2 ready
- *   - Both halves allow frame builder to process immediately
  */
-uint16_t adc2_dma_buffer[ADC_DMA_BUFFER_SIZE] __attribute__((aligned(4)));
+#if (SPI_LOGGER_ENABLE == 1u)
+uint16_t adc2_dma_buffer[LOGGER_ADC_DMA_BUFFER_SIZE] __attribute__((aligned(4)));
+#else
+uint16_t adc2_dma_buffer[PIEZO_ADC_DMA_BLOCK] __attribute__((aligned(4)));
+#endif
 
 /**
  * @brief Initialize HAL and core system peripherals
@@ -86,9 +94,36 @@ void Solution_HalInit(void) {
     /* Start MAIN UART receiving in interrupt mode */
     UartGetOneByteRx();
 
-#if 0
-Solution_LoggingStart();
+#if (TEST_DAC_ENABLE == 1u)
+    /* Start DAC DMA (after TIM6 is configured but before it starts) */
+    if (Solution_TestDacStart() != HAL_OK) {
+        Error_Handler();
+    }
 #endif
+
+#if (COMP_HIT_DETECTION_ENABLE == 1u)
+    /* Start COMP1 comparator with DAC1 threshold for hit detection */
+    if (Solution_Comp1Dac1Start() != HAL_OK) {
+        Error_Handler();
+    }
+#endif
+
+#if ((SPI_LOGGER_ENABLE == 0u) && (PIEZO_DETECTION_ENABLE == 1u))
+    /* Start ADC tick timer (100 kHz) */
+    if (HAL_TIM_Base_Start_IT(&ADC_TICK_TIMER_HANDLE) != HAL_OK) {
+        Error_Handler();
+    }
+
+    /* 1. Calibrate ADC2 for best SNR */
+    if (HAL_ADCEx_Calibration_Start(&ADC_PIEZO_HANDLE, ADC_SINGLE_ENDED) != HAL_OK) {
+        Error_Handler();
+    }
+
+    /* 2. Start ADC2 DMA circular buffer for synchronized configurable kHz sampling */
+    if (HAL_ADC_Start_DMA(&ADC_PIEZO_HANDLE, (uint32_t*)adc2_dma_buffer, PIEZO_ADC_DMA_BLOCK) != HAL_OK) {
+        Error_Handler();
+    }
+#endif /* ((SPI_LOGGER_ENABLE == 0u) && (PIEZO_DETECTION_ENABLE == 1u)) */
 }
 
 // ---------------------- SYSTEM TIMER CALLBACKS ------------------------------------
@@ -99,8 +134,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
         Timer_TickCbk();
     }
 #if SPI_LOGGER_ENABLE
-    else if (htim->Instance == TIM6) {
-        /* Legacy hook only: TIM6 IRQ is not used for logger timestamps anymore. */
+    else if (htim->Instance == ADC_TICK_TIMER_INSTANCE) {
+        /* Increment 32-bit software timestamp counter @ 100 kHz */
         Logger_TIM6_UpdateCallback();
     }
 #endif /* SPI_LOGGER_ENABLE */
@@ -270,6 +305,60 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef* huart) {
     }
 }
 
+// ---------------------- PIEZO COMPARATOR --------------------------------
+#if (COMP_HIT_DETECTION_ENABLE == 1u)
+
+/* Macro to calculate DAC threshold value from mV */
+#define COMP_DAC_MV_TO_VALUE(mv) (((mv) * 4095UL) / COMP_DAC_VREF_MV)
+
+/* Static storage for piezo comparator callback and threshold */
+static app_ext_cbk_fn comp_system_cbk = NULL;
+static uint16_t comp_threshold_mv = 0u;
+
+static HAL_StatusTypeDef Solution_Comp1Dac1Start(void) {
+    /* Set DAC1 threshold voltage using stored threshold value */
+    uint16_t dac_value = COMP_DAC_MV_TO_VALUE(comp_threshold_mv);
+    if (HAL_DAC_SetValue(&TEST_DAC_HANDLE, DAC_CHANNEL_1, DAC_ALIGN_12B_R, dac_value) != HAL_OK) {
+        return HAL_ERROR;
+    }
+
+    /* Start DAC1 channel 1 (provides threshold to COMP1) */
+    if (HAL_DAC_Start(&TEST_DAC_HANDLE, DAC_CHANNEL_1) != HAL_OK) {
+        return HAL_ERROR;
+    }
+
+    /* Start COMP1 with interrupt */
+    if (HAL_COMP_Start(&COMP_HIT_HANDLE) != HAL_OK) {
+        return HAL_ERROR;
+    }
+
+    return HAL_OK;
+}
+
+void HAL_COMP_TriggerCallback(COMP_HandleTypeDef* hcomp) {
+    if (hcomp->Instance == COMP1_INSTANCE) {
+        Test2Toggle();
+        Test2Toggle();
+
+        /* Call the system callback if it was set during initialization */
+        if (comp_system_cbk != NULL) {
+            comp_system_cbk(SYSTEM_EVT_READY, comp_threshold_mv, NULL);
+        }
+    }
+}
+
+void PiezoComp_Init(app_ext_cbk_fn system_cbk, uint16_t threshold_mV) {
+    /* Store callback and threshold for later use in HAL_COMP_TriggerCallback */
+    comp_system_cbk = system_cbk;
+    comp_threshold_mv = threshold_mV;
+
+    /* Start the comparator and DAC with the provided threshold */
+    if (Solution_Comp1Dac1Start() != HAL_OK) {
+        Error_Handler();
+    }
+}
+#endif /* COMP_HIT_DETECTION_ENABLE */
+
 // ---------------------- SPI COMMUNICATION --------------------------------
 
 /**
@@ -278,11 +367,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef* huart) {
  * RX buffer: Received register data (variable size per sensor)
  */
 #if LIS2DH12_ACC_ENABLE
-__attribute__((aligned(4))) uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+__attribute__((aligned(4))) uint8_t spi_wr_buff[LIS2DH12_ACC_DATA_READ_SIZE] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 #elif LSM6DS3_ACC_ENABLE
-__attribute__((aligned(4))) uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+__attribute__((aligned(4))) uint8_t spi_wr_buff[LSM6DS3_ACC_DATA_READ_SIZE] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 #else
-__attribute__((aligned(4))) uint8_t spi_wr_buff[SPI_WR_BUFFER_SIZE] = {0x00};
+__attribute__((aligned(4))) uint8_t spi_wr_buff[LSM6DS3_ACC_DATA_READ_SIZE] = {0x00};
 #endif
 uint8_t readCommand = 0xF2;     // Default read command (unused in current implementation)
 app_cbk_fn acc_cbk = NULL;      // Callback on accelerometer SPI transaction complete
@@ -318,7 +407,7 @@ acc_read_status_t SpiGetAccData(uint8_t* rd_data_ptr, app_cbk_fn cbk) {
     uint8_t reg_addr = LIS2DH12_ACC_DATA_ZERO_BYTE;
     uint8_t data_size = LIS2DH12_ACC_DATA_READ_SIZE - 1; /* -1 for address byte in TransmitReceive */
 #elif LSM6DS3_ACC_ENABLE
-    uint8_t reg_addr = LSM6DS3_GYRO_DATA_ZERO_BYTE;
+    uint8_t reg_addr = LSM6DS3_ACC_DATA_ZERO_BYTE;
     uint8_t data_size = LSM6DS3_ACC_DATA_READ_SIZE - 1; /* 12 data bytes (6 gyro + 6 accel) */
 #else
 #error "No accelerometer type defined!"
@@ -392,12 +481,30 @@ bool SpiReadRegister(uint8_t address, uint8_t* value, uint8_t num) {
     return true;
 }
 
+#if (TEST_DAC_ENABLE == 1u)
+uint32_t dac_test_buffer[DAC_SAMPLES]; /* Test DAC waveform buffer */
+
+static HAL_StatusTypeDef Solution_TestDacStart(void) {
+    /* Initialize DAC waveform buffer (ramp pattern) */
+    for (int i = 0; i < DAC_SAMPLES; i++) {
+        dac_test_buffer[i] = ((((uint32_t)i) * DAC_MAX_VALUE) / (DAC_SAMPLES - 1));
+    }
+
+    /* Start DAC with DMA - must be called after TIM6 is initialized */
+    if (HAL_DAC_Start_DMA(&TEST_DAC_HANDLE, TEST_DAC_CHANNEL, (uint32_t*)dac_test_buffer, DAC_SAMPLES, DAC_ALIGN_12B_R) != HAL_OK) {
+        return HAL_ERROR;
+    }
+
+    return HAL_OK;
+}
+#endif /* (TEST_DAC_ENABLE == 1u) */
+
 // ---------------------- ADC OPERATIONS -----------------------------------
 
 /**
- * @brief ADC2 DMA half-complete callback (first ADC_DMA_HALF_SIZE samples ready)
+ * @brief ADC2 DMA half-complete callback (first LOGGER_ADC_DMA_HALF_SIZE samples ready)
  *
- * Called when ADC2 DMA has filled first half of circular buffer (ADC_DMA_HALF_SIZE samples).
+ * Called when ADC2 DMA has filled first half of circular buffer (LOGGER_ADC_DMA_HALF_SIZE samples).
  * Triggers ADC data processing via Logger_AdcBuffer_OnComplete (when SPI_LOGGER_ENABLE).
  *
  * This allows frame assembly to begin while second half is still being acquired,
@@ -406,16 +513,21 @@ bool SpiReadRegister(uint8_t address, uint8_t* value, uint8_t num) {
 void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc_ptr) {
     if (hadc_ptr == &ADC_PIEZO_HANDLE) {
 #if SPI_LOGGER_ENABLE
-        /* Phase 2: Copy first ADC_DMA_HALF_SIZE samples from DMA buffer */
-        Logger_AdcBuffer_OnComplete(adc2_dma_buffer, ADC_DMA_HALF_SIZE);
+        /* Phase 2: Copy first LOGGER_ADC_DMA_HALF_SIZE samples from DMA buffer */
+        Logger_AdcBuffer_OnComplete(adc2_dma_buffer, LOGGER_ADC_DMA_HALF_SIZE);
 #endif /* SPI_LOGGER_ENABLE */
+
+#if PIEZO_DETECTION_ENABLE
+        /* Piezo processing: first half of DMA buffer */
+        Piezo_OnDmaHalf();
+#endif /* PIEZO_DETECTION_ENABLE */
     }
 }
 
 /**
- * @brief ADC2 DMA complete callback (second ADC_DMA_HALF_SIZE samples ready)
+ * @brief ADC2 DMA complete callback (second LOGGER_ADC_DMA_HALF_SIZE samples ready)
  *
- * Called when ADC2 DMA circular buffer wraps and fills second half (samples ADC_DMA_HALF_SIZE..ADC_DMA_BUFFER_SIZE).
+ * Called when ADC2 DMA circular buffer wraps and fills second half (samples LOGGER_ADC_DMA_HALF_SIZE..LOGGER_ADC_DMA_BUFFER_SIZE).
  * Triggers ADC data processing via Logger_AdcBuffer_OnComplete (when SPI_LOGGER_ENABLE).
  *
  * Completes the frame assembly cycle, allowing Logger_Task() to build and queue frame
@@ -424,9 +536,14 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc_ptr) {
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc_ptr) {
     if (hadc_ptr == &ADC_PIEZO_HANDLE) {
 #if SPI_LOGGER_ENABLE
-        /* Phase 2: Copy second ADC_DMA_HALF_SIZE samples from DMA buffer */
-        Logger_AdcBuffer_OnComplete(&adc2_dma_buffer[ADC_DMA_HALF_SIZE], ADC_DMA_HALF_SIZE);
+        /* Phase 2: Copy second LOGGER_ADC_DMA_HALF_SIZE samples from DMA buffer */
+        Logger_AdcBuffer_OnComplete(&adc2_dma_buffer[LOGGER_ADC_DMA_HALF_SIZE], LOGGER_ADC_DMA_HALF_SIZE);
 #endif /* SPI_LOGGER_ENABLE */
+
+#if PIEZO_DETECTION_ENABLE
+        /* Piezo processing: second half of DMA buffer */
+        Piezo_OnDmaFull();
+#endif /* PIEZO_DETECTION_ENABLE */
     }
 }
 
@@ -434,18 +551,22 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc_ptr) {
 // Logger Subsystem: Frame Assembly, ADC Buffering, SPI Slave Communication
 // ============================================================================
 
+#if (SPI_LOGGER_ENABLE == 1u)
+
 /**
- * Global RX buffer – receives 5-byte command from master (cmd + 4 padding bytes).
+ * Global RX buffer – receives LOGGER_SPI_RX_COMMAND_SIZE bytes from master (1 cmd + 4 padding bytes).
  * Master sends command 42 (LOGGER_SPI_CMD_CONFIG) to request configuration transmission.
  * Persistent buffer for SPI DMA reception (not stack-allocated due to asynchronous DMA access).
  */
-static uint8_t logger_spi_rx_cmd_buffer[5] = {0};
+static uint8_t logger_spi_rx_cmd_buffer[LOGGER_SPI_RX_COMMAND_SIZE] = {0};
+
+// Upper 16 bits for the 32-bit logger timestamp (extended from TIM7->CNT).
+static volatile uint32_t g_timestamp_hi = 0u;
 
 /* Logger SPI Slave Support - Enabled when SPI_LOGGER_ENABLE is defined */
+#endif
 
 #if (SPI_LOGGER_ENABLE == 1u)
-
-static volatile uint32_t g_timestamp_hi = 0;
 
 /**
  * @brief Start ADC data acquisition and initialize logging subsystem
@@ -473,19 +594,16 @@ void Solution_LoggingStart(void) {
 
     /*
      * Reset/start timestamp counter so each logging session starts from 0 ticks.
-     *
-     * Important: do this AFTER potentially slow initialization steps (like ADC calibration),
-     * otherwise the first recorded timestamps will include that startup delay and you will
-     * see an artificial "gap" at the beginning of the log.
+     * Do this after calibration to avoid an artificial "gap" at the beginning of the log.
      */
-    g_timestamp_hi = 0;
+    g_timestamp_hi = 0u;
     TIM7->CR1 &= ~TIM_CR1_CEN;
-    TIM7->CNT = 0;
+    TIM7->CNT = 0u;
     TIM7->SR &= ~TIM_SR_UIF;
     TIM7->CR1 |= TIM_CR1_CEN;
 
     /* 2. Arm ADC2 DMA circular buffer (ADC waits for TIM6 TRGO) */
-    if (HAL_ADC_Start_DMA(&ADC_PIEZO_HANDLE, (uint32_t*)adc2_dma_buffer, ADC_DMA_BUFFER_SIZE) != HAL_OK) {
+    if (HAL_ADC_Start_DMA(&ADC_PIEZO_HANDLE, (uint32_t*)adc2_dma_buffer, LOGGER_ADC_DMA_BUFFER_SIZE) != HAL_OK) {
         Error_Handler();
     }
 
@@ -579,8 +697,8 @@ void Logger_SPI_Transmit(const uint8_t* buffer, uint16_t size) {
  */
 void Logger_SPI_Init(void) {
     // Enable SPI2 interrupt in NVIC
-    HAL_NVIC_SetPriority(SPI2_IRQn, 5, 0);  // TODO OSAV priority
-    HAL_NVIC_EnableIRQ(SPI2_IRQn);
+    HAL_NVIC_SetPriority(LOGGER_SPI_IRQ, 5, 0);
+    HAL_NVIC_EnableIRQ(LOGGER_SPI_IRQ);
 }
 
 /**
@@ -591,7 +709,8 @@ void Logger_SPI_Init(void) {
  */
 void Logger_SPI_StartListening(void) {
     // Arm RX for LOGGER_SPI_RX_COMMAND_SIZE bytes from master (command + padding bytes)
-    HAL_SPI_Receive_IT(&LOGGER_SPI_HANDLE, logger_spi_rx_cmd_buffer, LOGGER_SPI_RX_COMMAND_SIZE);
+    volatile HAL_StatusTypeDef spi_result = HAL_SPI_Receive_IT(&LOGGER_SPI_HANDLE, logger_spi_rx_cmd_buffer, LOGGER_SPI_RX_COMMAND_SIZE);
+    (void)spi_result;  // Breakpoint here to inspect result
 }
 
 #endif /* SPI_LOGGER_ENABLE */

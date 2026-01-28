@@ -35,18 +35,23 @@ static uint32_t s_drain_batches = 0;
 static const uint64_t DIAG_IDLE_INTERVAL_US = 2000000ULL;  // 2 seconds
 
 // Keep the SPI reader task responsive even if STM32 is unplugged/not running.
-static const uint64_t CONFIG_INT_WAIT_TIMEOUT_US = 30000ULL;  // 30 ms for INT to assert after CMD 42
-static const uint32_t CONFIG_MAX_ATTEMPTS = 5;
-static const TickType_t CONFIG_RETRY_AFTER_RESET_DELAY = pdMS_TO_TICKS(100);
-static const TickType_t STM_RESET_LOW_TIME = pdMS_TO_TICKS(100);
-static const uint64_t CONFIG_AFTER_RESET_GRACE_US = 100000ULL;  // Give STM32 time to boot after a reset
-static const uint64_t CONFIG_RETRY_AFTER_INCOMPLETE_US = 100000ULL;
+    static const uint64_t CONFIG_INT_WAIT_TIMEOUT_US = 30000ULL;  // 30 ms for INT to assert after CMD 42
+    static const uint32_t CONFIG_MAX_ATTEMPTS = 5;
+    static const TickType_t CONFIG_RETRY_AFTER_RESET_DELAY = pdMS_TO_TICKS(100);
+    static const TickType_t STM_RESET_LOW_TIME = pdMS_TO_TICKS(100);
+    // Give STM32 time to boot after a reset before we start sending CMD 42.
+    // If this value is too small, ESP can get stuck in a reset loop (STM never reaches Logger_Init()).
+    static const uint64_t CONFIG_AFTER_RESET_GRACE_US = 500000ULL;  // 500 ms
+    static const uint64_t CONFIG_RETRY_AFTER_INCOMPLETE_US = 150000ULL;
+    static const uint64_t CONFIG_RETRY_NO_INT_BACKOFF_US = 200000ULL;
+    static const uint32_t CONFIG_NO_INT_RETRY_WITHOUT_RESET = 2;
 
 static bool s_configured = false;
 static bool s_config_waiting_int = false;
-static uint32_t s_config_attempts = 0;
-static uint64_t s_config_next_attempt_us = 0;
-static uint64_t s_config_wait_deadline_us = 0;
+    static uint32_t s_config_attempts = 0;
+    static uint64_t s_config_next_attempt_us = 0;
+    static uint64_t s_config_wait_deadline_us = 0;
+    static uint32_t s_config_no_int_without_reset = 0;
 
 static uint32_t s_last_adc_timestamp = 0;
 static bool s_have_last_adc_timestamp = false;
@@ -71,17 +76,17 @@ DMA_ATTR static logger_frame_t s_frame_rx __attribute__((aligned(4)));
 static void remote_accel_reader_cleanup_spi(void);
 static void remote_accel_reader_log_config(const logger_config_t* cfg);
 
-static void remote_accel_reader_reset_stm32(void) {
-    LOG_W(TAG, "Resetting STM32 on GPIO %d", STM_RESET_GPIO);
-    gpio_reset_pin(STM_RESET_GPIO);
-    gpio_set_direction(STM_RESET_GPIO, GPIO_MODE_OUTPUT);
+    static void remote_accel_reader_reset_stm32(void) {
+        LOG_W(TAG, "Resetting STM32 on GPIO %d", STM_RESET_GPIO);
+        gpio_reset_pin(STM_RESET_GPIO);
+        gpio_set_direction(STM_RESET_GPIO, GPIO_MODE_OUTPUT);
     gpio_set_level(STM_RESET_GPIO, 0);
     vTaskDelay(STM_RESET_LOW_TIME);
     gpio_set_level(STM_RESET_GPIO, 1);
     vTaskDelay(CONFIG_RETRY_AFTER_RESET_DELAY);
-    // Set back to Hi-Z (input) so ST-LINK can control STM32 reset for debugging.
-    gpio_set_direction(STM_RESET_GPIO, GPIO_MODE_INPUT);
-}
+        // Set back to Hi-Z (input) so ST-LINK can control STM32 reset for debugging.
+        gpio_set_direction(STM_RESET_GPIO, GPIO_MODE_INPUT);
+    }
 
 static void remote_accel_reader_log_config(const logger_config_t* cfg) {
     if (!cfg) {
@@ -132,7 +137,7 @@ static void remote_accel_reader_log_config(const logger_config_t* cfg) {
           (unsigned)cfg->reserved[28], (unsigned)cfg->reserved[29], (unsigned)cfg->reserved[30], (unsigned)cfg->reserved[31]);
 }
 
-void remote_accel_reader_restart_session(void) {
+    void remote_accel_reader_restart_session(void) {
     const app_state_t *state = app_state_get_instance();
     if (state && state->system_error_code != APP_OK) {
         LOG_W(TAG, "STM32 link restart requested while app is in error state (err=%ld); ignoring", (long)state->system_error_code);
@@ -152,7 +157,8 @@ void remote_accel_reader_restart_session(void) {
     // Pause frame reception until we re-fetch the config.
     s_configured = false;
     s_config_waiting_int = false;
-    s_config_attempts = 0;
+        s_config_attempts = 0;
+        s_config_no_int_without_reset = 0;
     // Prevent the reader task from requesting config while the STM32 is being reset/booting.
     s_config_next_attempt_us = esp_timer_get_time() + CONFIG_AFTER_RESET_GRACE_US;
     s_config_wait_deadline_us = 0;
@@ -177,14 +183,14 @@ void remote_accel_reader_restart_session(void) {
     g_logger_module.stm_config_received = false;
 
     // Restart STM32, wait for it to boot, then the reader task will re-run the config handshake.
-    remote_accel_reader_reset_stm32();
+        remote_accel_reader_reset_stm32();
 
     // Kick the task so it doesn't wait for a GPIO edge.
     xTaskNotifyGive(s_reader_task_handle);
-}
+    }
 
-static void remote_accel_reader_fail_config_and_retry(const char* reason) {
-    ++s_config_attempts;
+    static void remote_accel_reader_fail_config_and_retry(const char* reason) {
+        ++s_config_attempts;
 
     if (s_config_attempts >= CONFIG_MAX_ATTEMPTS) {
         LOG_E(TAG, "STM32 config failed after %u attempts (%s). Entering ERROR state.", (unsigned)s_config_attempts, reason ? reason : "unknown");
@@ -198,15 +204,34 @@ static void remote_accel_reader_fail_config_and_retry(const char* reason) {
         return;
     }
 
-    LOG_W(TAG, "STM32 config failed (%s). Attempt %u/%u -> resetting STM32 and retrying...",
-          reason ? reason : "unknown", (unsigned)s_config_attempts, (unsigned)CONFIG_MAX_ATTEMPTS);
+        const bool no_int = (reason != NULL) && (strcmp(reason, "no config response (INT stayed low)") == 0);
 
-    s_config_waiting_int = false;
-    s_config_next_attempt_us = esp_timer_get_time() + CONFIG_AFTER_RESET_GRACE_US;
-    s_config_wait_deadline_us = 0;
+        if (no_int && s_config_no_int_without_reset < CONFIG_NO_INT_RETRY_WITHOUT_RESET) {
+            // Avoid reset-looping the STM32: it may still be booting / not yet arming SPI RX.
+            // Back off and re-send CMD42 without resetting first.
+            s_config_no_int_without_reset++;
+            LOG_W(TAG,
+                  "STM32 config failed (%s). Attempt %u/%u -> backing off %llu ms and retrying without reset (%u/%u)...",
+                  reason, (unsigned)s_config_attempts, (unsigned)CONFIG_MAX_ATTEMPTS,
+                  (unsigned long long)(CONFIG_RETRY_NO_INT_BACKOFF_US / 1000ULL),
+                  (unsigned)s_config_no_int_without_reset, (unsigned)CONFIG_NO_INT_RETRY_WITHOUT_RESET);
 
-    remote_accel_reader_reset_stm32();
-}
+            s_config_waiting_int = false;
+            s_config_next_attempt_us = esp_timer_get_time() + CONFIG_RETRY_NO_INT_BACKOFF_US;
+            s_config_wait_deadline_us = 0;
+            return;
+        }
+
+        s_config_no_int_without_reset = 0;
+        LOG_W(TAG, "STM32 config failed (%s). Attempt %u/%u -> resetting STM32 and retrying...",
+              reason ? reason : "unknown", (unsigned)s_config_attempts, (unsigned)CONFIG_MAX_ATTEMPTS);
+
+        s_config_waiting_int = false;
+        s_config_next_attempt_us = esp_timer_get_time() + CONFIG_AFTER_RESET_GRACE_US;
+        s_config_wait_deadline_us = 0;
+
+        remote_accel_reader_reset_stm32();
+    }
 
 static void remote_accel_reader_cleanup_spi(void) {
     if (s_link_device.lock) {
@@ -237,10 +262,10 @@ static void IRAM_ATTR remote_link_isr(void* arg) {
     }
 }
 
-static void remote_accel_reader_step_config(uint64_t now_us) {
-    if (!s_reader_ready || s_configured) {
-        return;
-    }
+    static void remote_accel_reader_step_config(uint64_t now_us) {
+        if (!s_reader_ready || s_configured) {
+            return;
+        }
 
     const app_state_t *state = app_state_get_instance();
     if (state && state->system_error_code != APP_OK) {
@@ -252,8 +277,8 @@ static void remote_accel_reader_step_config(uint64_t now_us) {
         return;
     }
 
-    if (s_config_waiting_int) {
-        if (hal_gpio_get_level(LINK_INT_GPIO) == HAL_GPIO_HIGH) {
+        if (s_config_waiting_int) {
+            if (hal_gpio_get_level(LINK_INT_GPIO) == HAL_GPIO_HIGH) {
             // Give STM32 a short moment to prepare the config DMA buffer.
             vTaskDelay(pdMS_TO_TICKS(2));
 
@@ -277,16 +302,17 @@ static void remote_accel_reader_step_config(uint64_t now_us) {
             const bool imu_cfg_missing =
                 (config_response.imu_config.chip_id == 0) && (config_response.imu_config.accel_odr_hz == 0) && (config_response.imu_config.gyro_odr_hz == 0) &&
                 (config_response.imu_config.reserved0 == 0) && (config_response.imu_config.reserved1 == 0);
-            if (imu_cfg_missing) {
+                if (imu_cfg_missing) {
                 // STM32 responded, but the IMU config fields are not populated yet (likely still initializing after a reset).
                 // Wait a bit and re-request the config without resetting again.
-                LOG_W(TAG, "STM32 config received but IMU fields are not ready yet; retrying...");
-                s_config_next_attempt_us = now_us + CONFIG_RETRY_AFTER_INCOMPLETE_US;
-                return;
-            }
+                    LOG_W(TAG, "STM32 config received but IMU fields are not ready yet; retrying...");
+                    s_config_next_attempt_us = now_us + CONFIG_RETRY_AFTER_INCOMPLETE_US;
+                    return;
+                }
 
-            s_configured = true;
-            s_config_attempts = 0;
+                s_configured = true;
+                s_config_attempts = 0;
+                s_config_no_int_without_reset = 0;
 
             remote_accel_reader_log_config(&config_response);
             s_expected_adc_delta_ticks = (uint32_t)config_response.adc_block_size;
@@ -297,9 +323,9 @@ static void remote_accel_reader_step_config(uint64_t now_us) {
             s_spi_frame_read_max_us = 0;
             s_spi_frame_read_count = 0;
 
-            logger_module_set_stm_config(&g_logger_module, &config_response);
-            return;
-        }
+                logger_module_set_stm_config(&g_logger_module, &config_response);
+                return;
+            }
 
         if (now_us >= s_config_wait_deadline_us) {
             s_config_waiting_int = false;
@@ -307,13 +333,15 @@ static void remote_accel_reader_step_config(uint64_t now_us) {
         }
 
         return;
-    }
+        }
 
-    hal_err_t err = hal_spi_device_transmit(&s_link_device, 0, 0, s_config_cmd_tx, sizeof(s_config_cmd_tx), NULL, 0);
-    if (err != HAL_ERR_NONE) {
-        remote_accel_reader_fail_config_and_retry("spi config request send failed");
-        return;
-    }
+        LOG_I(TAG, "Requesting STM32 config (CMD 42), attempt %u/%u (INT=%d)",
+              (unsigned)(s_config_attempts + 1u), (unsigned)CONFIG_MAX_ATTEMPTS, (int)hal_gpio_get_level(LINK_INT_GPIO));
+        hal_err_t err = hal_spi_device_transmit(&s_link_device, 0, 0, s_config_cmd_tx, sizeof(s_config_cmd_tx), NULL, 0);
+        if (err != HAL_ERR_NONE) {
+            remote_accel_reader_fail_config_and_retry("spi config request send failed");
+            return;
+        }
 
     // Request sent: wait for INT to assert, but do not block the whole task.
     s_config_waiting_int = true;

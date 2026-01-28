@@ -201,7 +201,8 @@ void SysTick_Handler(void) {
 /* For the available peripheral interrupt handler names,                      */
 /* please refer to the startup file (startup_stm32g4xx.s).                    */
 /******************************************************************************/
-
+extern DMA_HandleTypeDef hdma_dac1_ch1;
+extern DAC_HandleTypeDef hdac1;
 /**
  * @brief This function handles DMA1 channel1 global interrupt.
  */

@@ -5,6 +5,9 @@
 
 #include "acc_proc.h"
 #include "app_config.h"
+#if PIEZO_DETECTION_ENABLE
+#include "piezo_proc.h"
+#endif /* PIEZO_DETECTION_ENABLE */
 #include "indication.h"
 #include "init_brd.h"
 #include "solution_wrapper.h"
@@ -30,7 +33,9 @@ static bool start_up;
 static void App_SafeTmrStop(void);
 static void App_ClearError(uint32_t err_code);
 static void App_SetError(err_type_t err_type, uint32_t usr_data);
+#if (CONTROL_MODE == PWM_CTRL_SUPP)
 static void App_SafeTmrPause(void);
+#endif /* (CONTROL_MODE == PWM_CTRL_SUPP) */
 static void App_SafeTmrRelease(void);
 static void App_ArmRun(void);
 #if VBAT_MEASURE_FEATURE
@@ -873,7 +878,7 @@ static uint8_t App_MavlinkCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr
 #endif /* !SELF_DESTROY_DISABLE */
                 ) {
                     /* Try to run ignition */
-                    App_IgnitionRun();
+                    App_MavlinkIgnitionTryRun();
                 }
 
                 break;
@@ -1008,6 +1013,30 @@ static uint8_t App_MavlinkCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr
     return ret;
 }
 #endif
+
+/***************************************** PIEZO PROCESSING  ********************************************************/
+
+#if PIEZO_DETECTION_ENABLE
+static void App_PiezoProcCbk(system_evt_t evt, uint32_t usr_data) {
+    if (evt == SYSTEM_EVT_READY) {
+        switch (usr_data) {
+            case PIEZO_EVT_INIT_OK:
+                // Piezo subsystem initialized successfully
+                break;
+            case PIEZO_EVT_TRIGGER_DETECTED:
+                // Quick trigger detected in ISR (for diagnostics)
+                break;
+            case PIEZO_EVT_SNAPSHOT_READY:
+                // Snapshot ready for analysis in main loop
+                // User can call piezo_try_get_snapshot() to retrieve data
+                // TODO: Implement heavy analysis (FFT, pattern matching, etc.)
+                break;
+            default:
+                break;
+        }
+    }
+}
+#endif /* PIEZO_DETECTION_ENABLE */
 
 /***************************************** ACCELEROMETER PROCESSING  ********************************************************/
 
@@ -1572,12 +1601,14 @@ static void App_SafeTmrStop(void) {
     sysStatus.sys_info.timer_mode = TIMER_MODE_NONE;
 }
 
+#if (CONTROL_MODE == PWM_CTRL_SUPP)
 static void App_SafeTmrPause(void) {
     /* Pause the safe timer */
     sysStatus.safe_tmr_pause = true;
     /* Clear Status */
     Indication_SetStatus(IND_STATUS_NONE, 0u);
 }
+#endif /* (CONTROL_MODE == PWM_CTRL_SUPP) */
 
 static void App_SafeTmrRelease(void) {
     /* Release the safe timer */
@@ -1823,6 +1854,11 @@ void App_InitFinish(void) {
     Mavlink_Init(App_MavlinkCbk, &sysStatus.sys_info);
 #endif /* CONTROL_MODE == MAVLINK_V2_CTRL_SUPP */
 
+#if PIEZO_DETECTION_ENABLE
+    /* Init Piezo processing */
+    Piezo_Init(App_PiezoProcCbk);
+#endif /* PIEZO_DETECTION_ENABLE */
+
 #if VUSA_ENABLE
     if (sysStatus.config->vusaEnable != false) {
         /* Start Vusa functionality */
@@ -1856,6 +1892,11 @@ void App_InitRun(void) {
 
     /* Init Mavlink processing */
     Mavlink_Init(Logger_MavlinkCbk, &sysStatus.sys_info);
+
+#if (COMP_HIT_DETECTION_ENABLE == 1u)
+    /* Init Piezo comparator processing */
+    PiezoComp_Init(Logger_PiezoCompCbk, COMP_DAC_THRESHOLD_MV);
+#endif /* (COMP_HIT_DETECTION_ENABLE == 1u) */
 #endif /* (CONTROL_MODE == MAVLINK_V2_CTRL_SUPP) */
 #else
 
@@ -2061,6 +2102,11 @@ void App_Task(void) {
 
     /* Pending Application tasks */
     App_Process();
+
+#if PIEZO_DETECTION_ENABLE
+    /* Piezo snapshot extraction and analysis */
+    Piezo_Task();
+#endif /* PIEZO_DETECTION_ENABLE */
 
     /* LED/Sound indication */
     Indication_Task();

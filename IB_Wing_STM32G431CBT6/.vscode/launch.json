@@ -4,7 +4,7 @@
     {
       "name": "STM32 Debug (Cortex-Debug / ST-LINK) — PATH",
       "type": "cortex-debug",
-      "request": "attach",
+      "request": "launch",
       "cwd": "${workspaceFolder}",
       "executable": "${workspaceFolder}/build/Debug/IB_Wing_STM32G431CBT6.elf",
       "device": "STM32G431CB",
@@ -17,8 +17,7 @@
       // Все через PATH:
       "gdbPath": "arm-none-eabi-gdb.exe",
       "serverpath": "ST-LINK_gdbserver.exe",
-
-      "preLaunchTask": "Erase and Flash Debug",
+      "preLaunchTask": "Build Debug + Generate HEX",
       "serverArgs": [],
       "showDevDebugOutput": "parsed",
       "swoConfig": {

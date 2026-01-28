@@ -24,14 +24,49 @@ extern "C" {
 
 #define LIS2DH12_ACC_DATA_READ_SIZE (7u)
 #define LIS2DH12_ACC_DATA_ZERO_BYTE (0xE8u)
-#define LSM6DS3_ACC_DATA_READ_SIZE (13u)    /* 1 dummy + 6 gyro + 6 accel bytes */
-#define LSM6DS3_ACC_DATA_ZERO_BYTE (0xA2u)  /* OUTX_L_G (0x22) with READ bit (0x80) - start from gyro */
-#define LSM6DS3_GYRO_DATA_READ_SIZE (13u)   /* 1 dummy + 6 gyro + 6 accel bytes */
-#define LSM6DS3_GYRO_DATA_ZERO_BYTE (0xA2u) /* OUTX_L_G (0x22) - auto-increment controlled by CTRL3_C.IF_INC */
+#define LSM6DS3_ACC_DATA_READ_SIZE (13u)   /* 1 dummy + 6 gyro + 6 accel bytes */
+#define LSM6DS3_ACC_DATA_ZERO_BYTE (0xA2u) /* OUTX_L_G (0x22) with READ bit (0x80) - start from gyro */
+
 #define ADC_SELF_PWR_CHANNEL_IDX (ADC_CHANNEL_VREFINT)
 #define ADC_VBAT_CHANNEL_IDX (ADC_CHANNEL_11)
 
 #define UART_BUFFER_SIZE (64u)
+
+/* Timeout Definitions -------------------------------------------------------*/
+#define SPI_TIMEOUT_MS 10   /* SPI communication timeout */
+#define UART_TIMEOUT_MS 100 /* UART communication timeout */
+
+/* System 10ms Tick Timer Configuration (TIM2) ------------------------------------*/
+#define SYS_TICK_TIMER_PRESCALER 1679 /* 1680 divider: APB1 clock / 1680 */
+#define SYS_TICK_TIMER_PERIOD 999     /* 1000 counts: results in 10ms interrupt @ 168MHz */
+/* Detonation High-Side Switch PWM (TIM15) -----------------------------------*/
+#define DETON_PWM_TIMER_PRESCALER 0 /* No prescaler for high resolution */
+#define DETON_PWM_TIMER_PERIOD 1216 /* 168MHz / 1217 = 138.05 kHz PWM frequency */
+#define DETON_PWM_PULSE 608         /* 50% duty cycle: 1217/2 */
+/* Pump PWM (TIM1) -----------------------------------------------------------*/
+#define PUMP_PWM_TIMER_PRESCALER 0 /* No prescaler */
+#define PUMP_PWM_TIMER_PERIOD 2099 /* 168MHz / (1 * 2100 * 2) = 40 kHz PWM frequency (center-aligned) */
+#define PUMP_PWM_PULSE 1050        /* 50% duty cycle: 2100/2 */
+
+/* UART Baud Rate Configuration ----------------------------------------------*/
+#define MAIN_UART_BAUD_RATE 9600   /* Main UART baud rate */
+#define VUSA_UART_BAUD_RATE 115200 /* VUSA UART baud rate */
+
+/* SPI Configuration ---------------------------------------------------------*/
+#define ACC_SPI_BAUD_RATE_PRESCALER SPI_BAUDRATEPRESCALER_16 /* APB2=84MHz / 16 = 5.25 MHz */
+
+/* Buffer Size Definitions ---------------------------------------------------*/
+#define UART_RX_TEMP_BUFFER_SIZE 10  /* UART RX temporary buffer size */
+#define VUSA_PACKET_LENGTH 4         /* VUSA packet length */
+#define LOGGER_SPI_RX_COMMAND_SIZE 5 /* Logger SPI RX command buffer size (1 cmd + 4 padding bytes) */
+
+/* DAC Test Signal Parameters */
+#define DAC_MAX_VALUE 4095 /* 12-bit DAC maximum value */
+#define DAC_SAMPLES 151    /* Number of samples in DAC waveform buffer */
+
+/* COMP1 DAC Threshold Configuration -----------------------------------------*/
+#define COMP_DAC_VREF_MV 3300u
+#define COMP_DAC_THRESHOLD_VALUE ((COMP_DAC_THRESHOLD_MV * 4095UL) / COMP_DAC_VREF_MV)
 
 #define SET_ERROR_LED(status) LedErrorSet(status)
 #define SET_STATUS_LED(status) LedStatusSet(status)
@@ -42,15 +77,6 @@ typedef enum {
     ACC_READ_BUSY,   /**< SPI module busy - transaction in progress */
     ACC_READ_FAIL    /**< SPI read failed - DMA or transmission error */
 } acc_read_status_t;
-
-/* External Variables --------------------------------------------------------*/
-extern TIM_HandleTypeDef htim14;
-extern TIM_HandleTypeDef htim16;
-extern TIM_HandleTypeDef htim17;
-extern UART_HandleTypeDef huart1;
-extern UART_HandleTypeDef huart2;
-extern SPI_HandleTypeDef hspi1;
-// extern ADC_HandleTypeDef hadc1;  /* ADC not used in this project */
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Solution_HalInit(void);
@@ -109,8 +135,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef* huart);
 void HAL_SPI_ErrorCallback(SPI_HandleTypeDef* hspi);
 void HAL_SPI_DMAErrorCallback(SPI_HandleTypeDef* hspi);
 bool Logger_SPI_Poll_CS(void);
-// void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc_ptr);  /* ADC not used */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim);
+void HAL_COMP_TriggerCallback(COMP_HandleTypeDef* hcomp);
+void PiezoComp_Init(app_ext_cbk_fn system_cbk, uint16_t threshold_mV);
 
 #ifdef __cplusplus
 }

@@ -153,11 +153,11 @@ extern volatile uint32_t g_logger_frames_dropped;
 
 typedef struct {
     int16_t samples[ADC_BLOCK_QUEUE_DEPTH][ADC_BUFFER_MAX_SAMPLES];  // ADC blocks (FIFO)
-    volatile uint32_t block_timestamps[ADC_BLOCK_QUEUE_DEPTH];        // Timestamp of first sample for each block
-    volatile uint32_t write_idx;                                      // Producer write index
-    volatile uint32_t read_idx;                                       // Consumer read index (oldest block)
-    volatile uint32_t count;                                          // Number of queued blocks (0..DEPTH)
-    volatile uint32_t overruns;                                       // Number of dropped blocks due to full queue
+    volatile uint32_t block_timestamps[ADC_BLOCK_QUEUE_DEPTH];       // Timestamp of first sample for each block
+    volatile uint32_t write_idx;                                     // Producer write index
+    volatile uint32_t read_idx;                                      // Consumer read index (oldest block)
+    volatile uint32_t count;                                         // Number of queued blocks (0..DEPTH)
+    volatile uint32_t overruns;                                      // Number of dropped blocks due to full queue
 
     // Compatibility fields (kept to minimize changes in frame builder logic)
     volatile uint32_t ready;            // 1 if count > 0
@@ -852,6 +852,24 @@ int Logger_GetNextFrame(LogFrame_t* out_frame);
  * Integration: Register via Mavlink_Init(Logger_MavlinkCbk, ...) in App_InitRun
  */
 uint8_t Logger_MavlinkCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr);
+
+/**
+ * @brief Piezo comparator trigger callback for logger
+ *
+ * Called when comparator detects a piezo hit event above threshold.
+ * Handles threshold event notification and logging.
+ *
+ * @param evt: System event type (SYSTEM_EVT_READY for trigger events)
+ * @param usr_data: Comparator threshold value in mV
+ * @param usr_ptr: Reserved (NULL)
+ *
+ * Returns: 0 (standard callback return)
+ *
+ * Integration: Register via PiezoComp_Init(Logger_PiezoCompCbk, threshold_mV) in App_InitRun
+ */
+#if (COMP_HIT_DETECTION_ENABLE == 1u)
+uint8_t Logger_PiezoCompCbk(system_evt_t evt, uint32_t usr_data, void* usr_ptr);
+#endif /* COMP_HIT_DETECTION_ENABLE */
 
 /**
  * @brief Initialize SPI slave transmission pipeline

@@ -303,18 +303,36 @@
         </div>
         <div class="col-list" id="modalColList"></div>
 
-        <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #444;">
-          <label style="font-size: 12px; color: #aaa; display: block; margin-bottom: 5px;">
+        <div
+          style="
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px solid #444;
+          "
+        >
+          <label
+            style="
+              font-size: 12px;
+              color: #aaa;
+              display: block;
+              margin-bottom: 5px;
+            "
+          >
             Очікувана частота (Hz) - для визначення аномалій:
           </label>
-          <input type="number" id="modalFreq" placeholder="напр. 100000" style="
-            width: 100%;
-            background: #2c2c2c;
-            border: 1px solid #444;
-            color: white;
-            padding: 8px;
-            border-radius: 4px;
-          ">
+          <input
+            type="number"
+            id="modalFreq"
+            placeholder="напр. 100000"
+            style="
+              width: 100%;
+              background: #2c2c2c;
+              border: 1px solid #444;
+              color: white;
+              padding: 8px;
+              border-radius: 4px;
+            "
+          />
         </div>
 
         <div class="modal-footer">
@@ -389,7 +407,7 @@
       let activeModalDatasetIndex = -1;
       let uplot = null;
       let jumps = [];
-      let activeAnomalyTab = -1;  // Which dataset's anomalies to show
+      let activeAnomalyTab = -1; // Which dataset's anomalies to show
 
       window.onload = () => {
         if (typeof uPlot === "undefined")
@@ -436,7 +454,9 @@
             newDs.config.yIndices = [timeIdx === 0 ? 1 : 0];
             newDs.isReady = true;
             // Auto-detect frequency from data
-            newDs.config.expectedFreqHz = estimateFrequency(parsed.columns[timeIdx].data);
+            newDs.config.expectedFreqHz = estimateFrequency(
+              parsed.columns[timeIdx].data,
+            );
           }
         }
 
@@ -465,9 +485,9 @@
         // Count actual newlines for accurate row estimation (faster than parsing twice)
         let newlineCount = 0;
         for (let i = 0; i < text.length; i++) {
-          if (text.charCodeAt(i) === 10) newlineCount++;  // '\n' = 10
+          if (text.charCodeAt(i) === 10) newlineCount++; // '\n' = 10
         }
-        const estRows = newlineCount + 1;  // +1 for possible last line without newline
+        const estRows = newlineCount + 1; // +1 for possible last line without newline
         const colData = headers.map(() => new Float64Array(estRows));
 
         let row = 0;
@@ -600,18 +620,18 @@
         const ds = datasets[activeModalDatasetIndex];
         ds.config.xIndex = xIdx;
         ds.config.yIndices = yIdxs;
-        
+
         // Get frequency from input
         const freqInput = document.getElementById("modalFreq");
         ds.config.expectedFreqHz = parseInt(freqInput.value) || 0;
         ds.isReady = true;
-        
+
         // Calculate anomalies for this dataset
         calculateAnomalies(ds);
 
         closeModal();
         updateListUI();
-        renderAnomalyTabs();  // Update anomaly tabs
+        renderAnomalyTabs(); // Update anomaly tabs
         renderChart();
       }
 
@@ -620,9 +640,9 @@
         if (activeAnomalyTab === idx) {
           activeAnomalyTab = -1;
         } else if (activeAnomalyTab > idx) {
-          activeAnomalyTab--;  // Adjust index for shifted datasets
+          activeAnomalyTab--; // Adjust index for shifted datasets
         }
-        
+
         datasets.splice(idx, 1);
         updateListUI();
         renderAnomalyTabs();
@@ -643,28 +663,28 @@
       function estimateFrequency(xData) {
         const sampleCount = Math.min(1000, xData.length - 1);
         if (sampleCount <= 0) return 0;
-        const totalTime = xData[sampleCount] - xData[0];  // microseconds
+        const totalTime = xData[sampleCount] - xData[0]; // microseconds
         if (totalTime <= 0) return 0;
         const avgInterval = totalTime / sampleCount;
-        return Math.round(1000000 / avgInterval);  // Hz
+        return Math.round(1000000 / avgInterval); // Hz
       }
 
       // Calculate anomalies for a dataset based on expected frequency
       function calculateAnomalies(ds) {
         ds.anomalies = [];
         if (!ds.isReady || ds.config.expectedFreqHz <= 0) return;
-        
+
         const xData = ds.rawColumns[ds.config.xIndex].data;
-        const expectedInterval = 1000000 / ds.config.expectedFreqHz;  // μs
-        const threshold = expectedInterval * 2;  // 200% = 2x expected interval
-        
+        const expectedInterval = 1000000 / ds.config.expectedFreqHz; // μs
+        const threshold = expectedInterval * 2; // 200% = 2x expected interval
+
         for (let i = 1; i < xData.length; i++) {
           const diff = xData[i] - xData[i - 1];
           if (diff > threshold) {
-            ds.anomalies.push({ 
-              t: xData[i], 
-              diff: diff, 
-              expected: expectedInterval 
+            ds.anomalies.push({
+              t: xData[i],
+              diff: diff,
+              expected: expectedInterval,
             });
           }
         }
@@ -677,15 +697,16 @@
         tabsContainer.innerHTML = "";
         list.innerHTML = "";
 
-        const readyDatasets = datasets.filter(ds => ds.isReady);
-        
+        const readyDatasets = datasets.filter((ds) => ds.isReady);
+
         if (readyDatasets.length === 0) {
-          list.innerHTML = '<span style="color:#777; padding:5px;">Завантажте файли</span>';
+          list.innerHTML =
+            '<span style="color:#777; padding:5px;">Завантажте файли</span>';
           return;
         }
 
         // Calculate anomalies for all datasets if not done yet
-        readyDatasets.forEach(ds => {
+        readyDatasets.forEach((ds) => {
           if (ds.anomalies.length === 0 && ds.config.expectedFreqHz > 0) {
             calculateAnomalies(ds);
           }
@@ -695,10 +716,12 @@
         readyDatasets.forEach((ds, idx) => {
           const dsIdx = datasets.indexOf(ds);
           const tab = document.createElement("button");
-          tab.className = "jump-tab" + (activeAnomalyTab === dsIdx ? " active" : "");
-          
+          tab.className =
+            "jump-tab" + (activeAnomalyTab === dsIdx ? " active" : "");
+
           const count = ds.anomalies.length;
-          const shortName = ds.name.length > 15 ? ds.name.substring(0, 12) + "..." : ds.name;
+          const shortName =
+            ds.name.length > 15 ? ds.name.substring(0, 12) + "..." : ds.name;
           tab.innerHTML = `${shortName}<span class="count">${count > 0 ? `(${count})` : "(0)"}</span>`;
           tab.onclick = () => selectAnomalyTab(dsIdx);
           tabsContainer.appendChild(tab);
@@ -717,10 +740,14 @@
       function selectAnomalyTab(dsIdx) {
         activeAnomalyTab = dsIdx;
         // Update tab styles
-        document.querySelectorAll(".jump-tab").forEach(tab => tab.classList.remove("active"));
+        document
+          .querySelectorAll(".jump-tab")
+          .forEach((tab) => tab.classList.remove("active"));
         const tabs = document.querySelectorAll(".jump-tab");
-        const readyDatasets = datasets.filter(ds => ds.isReady);
-        const tabIdx = readyDatasets.findIndex(ds => datasets.indexOf(ds) === dsIdx);
+        const readyDatasets = datasets.filter((ds) => ds.isReady);
+        const tabIdx = readyDatasets.findIndex(
+          (ds) => datasets.indexOf(ds) === dsIdx,
+        );
         if (tabIdx >= 0 && tabs[tabIdx]) tabs[tabIdx].classList.add("active");
         renderAnomaliesForTab();
       }
@@ -730,7 +757,8 @@
         list.innerHTML = "";
 
         if (activeAnomalyTab === -1 || !datasets[activeAnomalyTab]) {
-          list.innerHTML = '<span style="color:#777; padding:5px;">Виберіть датасет</span>';
+          list.innerHTML =
+            '<span style="color:#777; padding:5px;">Виберіть датасет</span>';
           return;
         }
 
@@ -738,17 +766,19 @@
         const anomalies = ds.anomalies;
 
         if (!ds.config.expectedFreqHz || ds.config.expectedFreqHz <= 0) {
-          list.innerHTML = '<span style="color:#777; padding:5px;">Вкажіть частоту в налаштуваннях</span>';
+          list.innerHTML =
+            '<span style="color:#777; padding:5px;">Вкажіть частоту в налаштуваннях</span>';
           return;
         }
 
         if (anomalies.length === 0) {
-          list.innerHTML = '<span style="color:#2f9e44; padding:5px;">✓ Норма (немає аномалій)</span>';
+          list.innerHTML =
+            '<span style="color:#2f9e44; padding:5px;">✓ Норма (немає аномалій)</span>';
           return;
         }
 
         const limit = Math.min(anomalies.length, 300);
-        anomalies.slice(0, limit).forEach(a => {
+        anomalies.slice(0, limit).forEach((a) => {
           const el = document.createElement("span");
           el.className = "jump-item";
           el.innerHTML = `T:${a.t} <span class="jump-bad">Δ${a.diff.toFixed(0)}</span> (${(a.diff / a.expected).toFixed(1)}x)`;
@@ -918,6 +948,8 @@
               grid: { show: globalSeriesCounter === 0 },
               stroke: strokeColor,
               ticks: { stroke: strokeColor },
+              label: `${ds.name} (${colName})`,
+              labelSize: 30,
             });
 
             globalSeriesCounter++;

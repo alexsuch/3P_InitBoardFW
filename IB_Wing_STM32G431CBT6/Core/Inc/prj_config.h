@@ -16,12 +16,17 @@ extern "C" {
 #define SPI_LOGGER_ENABLE (1u)        // RELEASE VALUE - 0u
 #define TEST_DAC_ENABLE (1u)          // RELEASE VALUE - 0u
 #define LOGGER_PROFILING_ENABLE (0u)  // RELEASE VALUE - 0u
+/*-------------------------- ADC Logger Configuration -----------------------------------------*/
+#define LOGGER_ADC_DMA_BUFFER_SIZE (512u)                          // Total DMA buffer size in samples
+#define LOGGER_ADC_DMA_HALF_SIZE (LOGGER_ADC_DMA_BUFFER_SIZE / 2)  // Half buffer for callbacks
+/* LOGGER_ADC_BLOCK_SIZE always defined for logger.h compatibility */
+#define LOGGER_ADC_BLOCK_SIZE (LOGGER_ADC_DMA_HALF_SIZE)  // Samples per ADC block
 
 /*-------------------------- APP VERSION & DEVICE TYPE-----------------------------------------*/
 #define APP_MINOR_VERSION (0u)
-#define APP_MAJOR_VERSION (2u)
+#define APP_MAJOR_VERSION (1u)
 #define APP_VERSION ((APP_MAJOR_VERSION << 4) | (APP_MINOR_VERSION))
-#define DEFAULT_DEVICE_TYPE (DEVICE_TYPE_FOR_REGULAR_FPV)
+#define DEFAULT_DEVICE_TYPE (DEVICE_TYPE_FOR_CUSTOM_WING)
 #define DEFAULT_CUSTOMER_INFO (0u)
 
 #define NO_CTRL (0u)
@@ -81,13 +86,6 @@ extern "C" {
 #error "Invalid LSM6DS3_SAMPLING_FREQ_HZ. Choose from: 26, 52, 104, 208, 416, 833, 1666, 3332, 6664"
 #endif
 
-/*-------------------------- ADC Configuration -----------------------------------------*/
-
-#define ADC_SAMPLING_FREQ_KHZ (100u)                 // ADC sampling frequency in kHz
-#define ADC_DMA_BUFFER_SIZE (512u)                   // Total DMA buffer size in samples
-#define ADC_DMA_HALF_SIZE (ADC_DMA_BUFFER_SIZE / 2)  // Half buffer for callbacks (256 samples @ 512 total)
-#define LOGGER_ADC_BLOCK_SIZE (ADC_DMA_HALF_SIZE)    // Samples per ADC block
-
 #define RELEASE_CONFIGURATION_ENABLE (0u)
 
 #if (RELEASE_CONFIGURATION_ENABLE == 0u)  // TEST CONFIGURATION
@@ -98,6 +96,19 @@ extern "C" {
 #define ACC_SUPPORTED_ENABLE (1u)
 #define START_UP_DELAY_ENABLE (1u)
 #define UART_ENABLE (0u)
+
+/*-------------------------- PIEZO DETECTION -----------------------------------------*/
+#define PIEZO_DETECTION_ENABLE (0u)  // RELEASE VALUE - 1u
+/*-------------------------- Piezo ADC Configuration -----------------------------------------*/
+#define PIEZO_ADC_DMA_BLOCK (16u)     // Total DMA block size for piezo processing (16 samples)
+#define PIEZO_HIST_N (512u)           // History ring buffer size (must be power of 2)
+#define PIEZO_SNAP_N (64u)            // Snapshot window size for heavy analysis
+#define ADC_SAMPLING_FREQ_KHZ (100u)  // ADC sampling frequency in kHz
+
+/*-------------------------- COMPARATOR PIEZO DETECTION -----------------------------------------*/
+/* NOTE: Set TEST_DAC_ENABLE to 0u if COMP_HIT_DETECTION_ENABLE is 1u */
+#define COMP_HIT_DETECTION_ENABLE (0u)  // RELEASE VALUE - 1u  //
+#define COMP_DAC_THRESHOLD_MV (200u)    // RELEASE VALUE - 200 mV
 
 /*--------------------------- VUSA MACROS -----------------------------------------*/
 #define VUSA_ENABLE (1u)          // RELEASE VALUE - 1u

@@ -189,7 +189,6 @@ extern ADC_HandleTypeDef hadc2;
 #define UART_TIMEOUT_MS 100 /* UART communication timeout */
 
 /* Buffer Size Definitions ---------------------------------------------------*/
-#define SPI_WR_BUFFER_SIZE 13       /* SPI write buffer size (13 for LSM6DS3 gyro+accel) */
 #define UART_RX_TEMP_BUFFER_SIZE 10 /* UART RX temporary buffer size */
 #define VUSA_PACKET_LENGTH 4        /* VUSA packet length */
 

@@ -824,6 +824,15 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
             }
             break;
         case APP_CMD_SET_MODE_LOGGING: {
+            // Do not allow starting logging if the app is already in ERROR state.
+            // Otherwise UI may show "LOGGING" (green LED) while nothing is actually recorded.
+            if (state->current_mode == APP_MODE_ERROR || state->system_error_code != APP_OK) {
+                LOG_W(TAG, "Ignoring LOGGING start request: app is in ERROR state (error=%ld, mode=%d)",
+                      state->system_error_code, state->current_mode);
+                result = APP_ERR_INVALID_STATE;
+                break;
+            }
+
             app_err_t restore_err = app_logic_restore_logging_resources(app);
             if (restore_err != APP_OK) {
                 LOG_E(TAG, "Failed to restore logging resources: %d", restore_err);
