@@ -1,29 +1,25 @@
 {
   "folders": [
-    {
-      "path": "logger",
-    },
-    {
-      "path": "IB_Wing_STM32G431CBT6",
-    },
-    {
-      "path": "docs",
-    },
-    {
-      "path": "shared",
-    },
-    {
-      "path": "log-converter",
-    },
-  ],
+	{
+		"path": "IB_Wing_STM32G431CBT6"
+	},
+	{
+		"path": "logger"
+	},
+	{
+		"path": "shared"
+	},
+	{
+		"path": "docs"
+	},
+	{
+		"path": "log-converter"
+	}
+],
   "settings": {
     "files.associations": {
-      "*.h": "c",
+      "*.h": "c"
     },
-    "clangd.arguments": [
-      "--background-index",
-      "--query-driver=C:\\Espressif\\tools\\xtensa-esp-elf\\esp-14.2.0_20241119\\xtensa-esp-elf\\bin\\xtensa-esp32s3-elf-gcc.exe",
-      "--compile-commands-dir=c:\\projects\\3p\\3p-logger-next\\logger\\build",
-    ],
-  },
+    "cortex-debug.stm32cubeprogrammer.windows": "c:/ST/STM32CubeCLT_1.20.0/STM32CubeProgrammer/bin"
+  }
 }

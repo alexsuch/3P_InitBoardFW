@@ -243,6 +243,74 @@
         font-weight: bold;
       }
 
+      /* --- WARNING BANNER --- */
+      .warning-banner {
+        background: linear-gradient(90deg, #f59f00, #e67700);
+        color: #000;
+        padding: 8px 15px;
+        font-size: 13px;
+        font-weight: 500;
+        display: none;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+      }
+      .warning-banner.visible {
+        display: flex;
+      }
+      .warning-banner .warning-icon {
+        font-size: 16px;
+      }
+      .warning-banner .warning-text {
+        flex: 1;
+      }
+      
+      /* --- PAGE NAVIGATION --- */
+      .page-nav {
+        background: #1a1a1a;
+        border-top: 1px solid #333;
+        padding: 8px 15px;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        gap: 15px;
+        flex-shrink: 0;
+      }
+      .page-nav.visible {
+        display: flex;
+      }
+      .page-nav-btn {
+        background: #333;
+        border: 1px solid #555;
+        color: #fff;
+        padding: 6px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      .page-nav-btn:hover:not(:disabled) {
+        background: #444;
+        border-color: #666;
+      }
+      .page-nav-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .page-nav-info {
+        font-size: 13px;
+        color: #aaa;
+      }
+      .page-nav-info strong {
+        color: #4dabf7;
+      }
+      .page-nav-select {
+        background: #2c2c2c;
+        border: 1px solid #555;
+        color: #fff;
+        padding: 4px 8px;
+        border-radius: 4px;
+      }
+
       /* --- MODAL --- */
       .modal-overlay {
         position: fixed;
@@ -356,6 +424,68 @@
           />
         </div>
 
+        <!-- IMU Sensitivity Settings -->
+        <div
+          id="imuSettingsSection"
+          style="
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px solid #444;
+            display: none;
+          "
+        >
+          <div style="font-size: 12px; color: #4dabf7; margin-bottom: 10px; font-weight: bold;">
+            ⚙️ Налаштування IMU сенсора (LSM6DS3)
+          </div>
+          <div style="display: flex; gap: 15px;">
+            <div style="flex: 1;">
+              <label style="font-size: 12px; color: #aaa; display: block; margin-bottom: 5px;">
+                Діапазон акселерометра (±g):
+              </label>
+              <select
+                id="modalAccelRange"
+                style="
+                  width: 100%;
+                  background: #2c2c2c;
+                  border: 1px solid #444;
+                  color: white;
+                  padding: 8px;
+                  border-radius: 4px;
+                "
+              >
+                <option value="2">±2g</option>
+                <option value="4">±4g</option>
+                <option value="8">±8g</option>
+                <option value="16" selected>±16g</option>
+              </select>
+            </div>
+            <div style="flex: 1;">
+              <label style="font-size: 12px; color: #aaa; display: block; margin-bottom: 5px;">
+                Діапазон гіроскопа (dps):
+              </label>
+              <select
+                id="modalGyroRange"
+                style="
+                  width: 100%;
+                  background: #2c2c2c;
+                  border: 1px solid #444;
+                  color: white;
+                  padding: 8px;
+                  border-radius: 4px;
+                "
+              >
+                <option value="245">245 dps</option>
+                <option value="500">500 dps</option>
+                <option value="1000">1000 dps</option>
+                <option value="2000" selected>2000 dps</option>
+              </select>
+            </div>
+          </div>
+          <div style="font-size: 11px; color: #666; margin-top: 8px;">
+            LSB чутливість: Accel = range/32768 g/LSB, Gyro = range/32768 dps/LSB
+          </div>
+        </div>
+
         <div class="modal-footer">
           <button
             class="btn btn-del"
@@ -382,7 +512,7 @@
         class="btn btn-primary"
         onclick="document.getElementById('fileInput').click()"
       >
-        + Завантажити CSV
+        + Завантажити .DATA  або .CSV
       </button>
       <input
         type="file"
@@ -396,12 +526,28 @@
     </div>
 
     <div class="main-area">
+      <!-- Warning Banner -->
+      <div class="warning-banner" id="warningBanner">
+        <span class="warning-icon">⚠️</span>
+        <span class="warning-text" id="warningText">File truncated. Showing first 100,000 frames.</span>
+      </div>
+      
       <div id="hoverInfo">
         <div>TIME: <span id="dispTime" style="color: #4dabf7">-</span></div>
         <div id="dispValues" style="display: flex; gap: 15px"></div>
       </div>
 
       <div id="chart"></div>
+
+      <!-- Page Navigation -->
+      <div class="page-nav" id="pageNav">
+        <button class="page-nav-btn" id="prevPageBtn" onclick="goToPage(-1)">◀ Попередня</button>
+        <span class="page-nav-info">
+          Сторінка <strong id="currentPage">1</strong> з <strong id="totalPages">1</strong>
+          <select class="page-nav-select" id="pageSelect" onchange="goToPageDirect(this.value)"></select>
+        </span>
+        <button class="page-nav-btn" id="nextPageBtn" onclick="goToPage(1)">Наступна ▶</button>
+      </div>
 
       <div class="jump-panel">
         <div class="jump-tabs" id="jumpTabs"></div>
@@ -430,8 +576,321 @@
       let jumps = [];
       let activeAnomalyTab = -1;
       
+      // Pagination state
+      const FRAMES_PER_PAGE = 100000;
+      const FRAME_SIZE = 852;
+      const HEADER_SIZE = 64;
+      let activePaginatedDataset = null;  // Dataset with pagination
+      let currentPageFile = null;  // File reference for lazy loading
+      
+      // IMU sensitivity settings (from LSM6DS3 sensor configuration)
+      const imuSettings = {
+          accelRangeG: 16,      // ±16g default (from LSM6DS3_CTRL1_XL_HIT_VAL)
+          gyroRangeDps: 2000    // 2000 dps default (from LSM6DS3_CTRL2_G_HIT_VAL)
+      };
+      
+      /**
+       * Calculate derived IMU columns (Gforce and GyroS) from raw sensor data.
+       * 
+       * @param {Object} imuData - IMU parsed data with columns
+       * @returns {Object} - Modified imuData with Gforce and GyroS columns added
+       */
+      function calculateImuDerivedColumns(imuData) {
+          if (!imuData || !imuData.columns) return imuData;
+          
+          // Find required columns
+          const findCol = (name) => imuData.columns.find(c => c.name.toLowerCase().includes(name));
+          
+          const accelX = findCol('accel_x') || findCol('ax');
+          const accelY = findCol('accel_y') || findCol('ay');
+          const accelZ = findCol('accel_z') || findCol('az');
+          const gyroX = findCol('gyro_x') || findCol('gx');
+          const gyroY = findCol('gyro_y') || findCol('gy');
+          const gyroZ = findCol('gyro_z') || findCol('gz');
+          
+          const sampleCount = accelX ? accelX.data.length : (gyroX ? gyroX.data.length : 0);
+          if (sampleCount === 0) return imuData;
+          
+          // Sensitivity factors (raw int16 -> real units)
+          const accelScale = imuSettings.accelRangeG / 32768.0;
+          const gyroScale = imuSettings.gyroRangeDps / 32768.0;
+          
+          // Calculate Gforce (absolute acceleration in G)
+          if (accelX && accelY && accelZ) {
+              const gforce = new Float64Array(sampleCount);
+              for (let i = 0; i < sampleCount; i++) {
+                  const ax = accelX.data[i] * accelScale;
+                  const ay = accelY.data[i] * accelScale;
+                  const az = accelZ.data[i] * accelScale;
+                  gforce[i] = Math.sqrt(ax * ax + ay * ay + az * az);
+              }
+              imuData.columns.push({ name: 'Gforce', data: gforce });
+              console.log(`Calculated Gforce (${sampleCount} samples, range ±${imuSettings.accelRangeG}g)`);
+          }
+          
+          // Calculate GyroS (absolute rotation speed in dps)
+          if (gyroX && gyroY && gyroZ) {
+              const gyroS = new Float64Array(sampleCount);
+              for (let i = 0; i < sampleCount; i++) {
+                  const gx = gyroX.data[i] * gyroScale;
+                  const gy = gyroY.data[i] * gyroScale;
+                  const gz = gyroZ.data[i] * gyroScale;
+                  gyroS[i] = Math.sqrt(gx * gx + gy * gy + gz * gz);
+              }
+              imuData.columns.push({ name: 'GyroS', data: gyroS });
+              console.log(`Calculated GyroS (${sampleCount} samples, range ±${imuSettings.gyroRangeDps}dps)`);
+          }
+          
+          return imuData;
+      }
+      
       // Worker setup
       
+      // Load Wasm Log Parser Module
+      let wasmModule = null;
+      let wasmReady = false;
+      
+      // Wasm Helper Functions
+      let wasm_parse_binary_log = null;
+      let wasm_calculate_anomalies = null;
+      let wasm_interpolate_to_master = null;
+      
+      var script = document.createElement('script');
+      script.src = "log_parser.js";
+      script.onload = function() {
+          console.log("log_parser.js loaded, initializing module...");
+          createLogParserModule().then(module => {
+              wasmModule = module;
+              wasmReady = true;
+              console.log("Wasm Log Parser Module Initialized!");
+              
+              // Wrap exported functions
+              wasm_parse_binary_log = module.cwrap('parse_binary_log', 'number', [
+                  'number', 'number',  // buffer, buffer_len
+                  'number',            // max_frames
+                  'number', 'number',  // adc_time, adc_val
+                  'number',            // imu_time
+                  'number', 'number', 'number',  // imu_gx, gy, gz
+                  'number', 'number', 'number',  // imu_ax, ay, az
+                  'number', 'number'   // out_adc_count, out_imu_count
+              ]);
+              
+              wasm_calculate_anomalies = module.cwrap('calculate_anomalies', 'number', [
+                  'number', 'number',  // x_data, length
+                  'number',            // threshold_us
+                  'number', 'number',  // anomaly_indices, anomaly_diffs
+                  'number'             // max_anomalies
+              ]);
+              
+              wasm_interpolate_to_master = module.cwrap('interpolate_to_master', null, [
+                  'number', 'number', 'number',  // src_x, src_y, src_len
+                  'number', 'number',            // master_x, master_len
+                  'number'                       // result
+              ]);
+              
+              // Test
+              const helloWorld = module.cwrap('hello_world', 'string', []);
+              console.log("Wasm says:", helloWorld());
+          });
+      };
+      document.head.appendChild(script);
+      
+      // Wasm Binary Parser Function (main thread)
+      function parseBinaryWithWasm(buffer) {
+          if (!wasmReady) {
+              throw new Error("Wasm module not ready");
+          }
+          
+          const M = wasmModule;
+          const bufferLen = buffer.byteLength;
+          
+          // Estimate max samples
+          const HEADER_SIZE = 64;
+          const FRAME_SIZE = 852;
+          const ADC_BLOCK_SIZE = 256;
+          const IMU_BLOCK_SIZE = 20;
+          const MAX_FRAMES = 100000;  // Limit to prevent memory exhaustion (matches C converter)
+          
+          let numFrames = Math.floor((bufferLen - HEADER_SIZE) / FRAME_SIZE);
+          const totalFramesInFile = numFrames;
+          let isTruncated = false;
+          
+          // Apply frame limit for very large files
+          if (numFrames > MAX_FRAMES) {
+              console.warn(`File has ${numFrames} frames, limiting to ${MAX_FRAMES} frames`);
+              numFrames = MAX_FRAMES;
+              isTruncated = true;
+          }
+          
+          const maxAdcSamples = numFrames * ADC_BLOCK_SIZE;
+          const maxImuSamples = numFrames * IMU_BLOCK_SIZE;
+          
+          // Calculate total memory needed (rough estimate)
+          const totalMemoryNeeded = bufferLen + (maxAdcSamples * 8 * 2) + (maxImuSamples * 8 * 7) + 8;
+          console.log(`Allocating ~${(totalMemoryNeeded / (1024*1024)).toFixed(1)}MB for Wasm parsing (${numFrames} frames)`);
+          
+          // Allocate memory in Wasm heap
+          const bufferPtr = M._malloc(bufferLen);
+          if (bufferPtr === 0) throw new Error("Failed to allocate input buffer");
+          
+          const adcTimePtr = M._malloc(maxAdcSamples * 8);  // Float64
+          const adcValPtr = M._malloc(maxAdcSamples * 8);
+          const imuTimePtr = M._malloc(maxImuSamples * 8);
+          const imuGxPtr = M._malloc(maxImuSamples * 8);
+          const imuGyPtr = M._malloc(maxImuSamples * 8);
+          const imuGzPtr = M._malloc(maxImuSamples * 8);
+          const imuAxPtr = M._malloc(maxImuSamples * 8);
+          const imuAyPtr = M._malloc(maxImuSamples * 8);
+          const imuAzPtr = M._malloc(maxImuSamples * 8);
+          const outAdcCountPtr = M._malloc(4);  // uint32
+          const outImuCountPtr = M._malloc(4);
+          
+          // Check all allocations succeeded
+          if (!adcTimePtr || !adcValPtr || !imuTimePtr || !imuGxPtr || !imuGyPtr || 
+              !imuGzPtr || !imuAxPtr || !imuAyPtr || !imuAzPtr || !outAdcCountPtr || !outImuCountPtr) {
+              // Free what we allocated
+              if (bufferPtr) M._free(bufferPtr);
+              if (adcTimePtr) M._free(adcTimePtr);
+              if (adcValPtr) M._free(adcValPtr);
+              if (imuTimePtr) M._free(imuTimePtr);
+              if (imuGxPtr) M._free(imuGxPtr);
+              if (imuGyPtr) M._free(imuGyPtr);
+              if (imuGzPtr) M._free(imuGzPtr);
+              if (imuAxPtr) M._free(imuAxPtr);
+              if (imuAyPtr) M._free(imuAyPtr);
+              if (imuAzPtr) M._free(imuAzPtr);
+              if (outAdcCountPtr) M._free(outAdcCountPtr);
+              if (outImuCountPtr) M._free(outImuCountPtr);
+              throw new Error("Failed to allocate Wasm memory for parsing. File may be too large.");
+          }
+          
+          try {
+              // Copy input buffer to Wasm heap
+              M.HEAPU8.set(new Uint8Array(buffer), bufferPtr);
+              
+              const start = performance.now();
+              
+              // Call Wasm function
+              const adcRateKhz = wasm_parse_binary_log(
+                  bufferPtr, bufferLen,
+                  numFrames,  // max_frames limit
+                  adcTimePtr, adcValPtr,
+                  imuTimePtr,
+                  imuGxPtr, imuGyPtr, imuGzPtr,
+                  imuAxPtr, imuAyPtr, imuAzPtr,
+                  outAdcCountPtr, outImuCountPtr
+              );
+              
+              const end = performance.now();
+              console.log(`Wasm: Binary parsed in ${(end-start).toFixed(2)}ms`);
+              
+              // Read output counts
+              const adcCount = M.HEAPU32[outAdcCountPtr >> 2];
+              const imuCount = M.HEAPU32[outImuCountPtr >> 2];
+              
+              // Copy results to JS arrays
+              const adcTime = new Float64Array(M.HEAPF64.buffer, adcTimePtr, adcCount).slice();
+              const adcVal = new Float64Array(M.HEAPF64.buffer, adcValPtr, adcCount).slice();
+              const imuTime = new Float64Array(M.HEAPF64.buffer, imuTimePtr, imuCount).slice();
+              const imuGx = new Float64Array(M.HEAPF64.buffer, imuGxPtr, imuCount).slice();
+              const imuGy = new Float64Array(M.HEAPF64.buffer, imuGyPtr, imuCount).slice();
+              const imuGz = new Float64Array(M.HEAPF64.buffer, imuGzPtr, imuCount).slice();
+              const imuAx = new Float64Array(M.HEAPF64.buffer, imuAxPtr, imuCount).slice();
+              const imuAy = new Float64Array(M.HEAPF64.buffer, imuAyPtr, imuCount).slice();
+              const imuAz = new Float64Array(M.HEAPF64.buffer, imuAzPtr, imuCount).slice();
+              
+              return {
+                  adc: {
+                      columns: [
+                          { name: "timestamp_us", data: adcTime },
+                          { name: "adc_piezo", data: adcVal }
+                      ],
+                      estimatedFreq: adcRateKhz * 1000
+                  },
+                  imu: {
+                      columns: [
+                          { name: "timestamp_us", data: imuTime },
+                          { name: "gyro_x", data: imuGx },
+                          { name: "gyro_y", data: imuGy },
+                          { name: "gyro_z", data: imuGz },
+                          { name: "accel_x", data: imuAx },
+                          { name: "accel_y", data: imuAy },
+                          { name: "accel_z", data: imuAz }
+                      ],
+                      estimatedFreq: 0
+                  },
+                  pagination: {
+                      isTruncated: isTruncated,
+                      loadedFrames: numFrames,
+                      totalFrames: totalFramesInFile,
+                      currentPage: 1,
+                      totalPages: Math.ceil(totalFramesInFile / MAX_FRAMES)
+                  }
+              };
+          } finally {
+              // Free Wasm memory
+              M._free(bufferPtr);
+              M._free(adcTimePtr);
+              M._free(adcValPtr);
+              M._free(imuTimePtr);
+              M._free(imuGxPtr);
+              M._free(imuGyPtr);
+              M._free(imuGzPtr);
+              M._free(imuAxPtr);
+              M._free(imuAyPtr);
+              M._free(imuAzPtr);
+              M._free(outAdcCountPtr);
+              M._free(outImuCountPtr);
+          }
+      }
+      
+      // Wasm Anomaly Detection Function
+      function calculateAnomaliesWasm(xData, thresholdUs, maxAnomalies = 10000) {
+          if (!wasmReady) return [];
+          
+          const M = wasmModule;
+          const length = xData.length;
+          
+          // Allocate memory
+          const xDataPtr = M._malloc(length * 8);
+          const indicesPtr = M._malloc(maxAnomalies * 4);
+          const diffsPtr = M._malloc(maxAnomalies * 8);
+          
+          try {
+              // Copy input
+              M.HEAPF64.set(xData, xDataPtr >> 3);
+              
+              // Call Wasm
+              const count = wasm_calculate_anomalies(
+                  xDataPtr, length,
+                  thresholdUs,
+                  indicesPtr, diffsPtr,
+                  maxAnomalies
+              );
+              
+              // Read results
+              const indices = new Uint32Array(M.HEAPU32.buffer, indicesPtr, count).slice();
+              const diffs = new Float64Array(M.HEAPF64.buffer, diffsPtr, count).slice();
+              
+              // Format as anomaly objects
+              const anomalies = [];
+              const expectedInterval = 1000000 / (1000000 / thresholdUs * 2);  // Reverse threshold
+              for (let i = 0; i < count; i++) {
+                  anomalies.push({
+                      t: xData[indices[i]],
+                      diff: diffs[i],
+                      expected: expectedInterval
+                  });
+              }
+              
+              return anomalies;
+          } finally {
+              M._free(xDataPtr);
+              M._free(indicesPtr);
+              M._free(diffsPtr);
+          }
+      }
+
       const WORKER_CODE = `
 self.onmessage = function(e) {
     const msg = e.data;
@@ -862,20 +1321,42 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
         try {
             if (isBinary) {
                 const buffer = await file.arrayBuffer();
-                const result = await callWorker('parseBinary', { buffer }, [buffer]);
+                let result;
+                
+                // Use Wasm parser if available (faster), fallback to Worker
+                if (wasmReady) {
+                    console.log("Using Wasm parser for binary file...");
+                    result = parseBinaryWithWasm(buffer);
+                } else {
+                    console.log("Wasm not ready, using Worker parser...");
+                    result = await callWorker('parseBinary', { buffer }, [buffer]);
+                }
                 
                 // Remove temp placeholder
                 const idx = datasets.indexOf(tempDs);
                 if (idx !== -1) datasets.splice(idx, 1);
                 
-                // Add ADC Dataset (Auto-enable)
+                // Handle pagination for large files
+                if (result.pagination && result.pagination.isTruncated) {
+                    currentPageFile = file;  // Store file for lazy loading
+                    showPaginationUI(result.pagination);
+                } else {
+                    hidePaginationUI();
+                }
+                
+                // Add ADC Dataset (Auto-enable, skip render)
                 if (result.adc) {
-                     addDatasetFromWorkerResult(file.name + " (ADC)", result.adc, true);
+                     const adcDs = addDatasetFromWorkerResult(file.name + " (ADC)", result.adc, true, true);
+                     if (result.pagination) adcDs.pagination = result.pagination;
                 }
-                // Add IMU Dataset (Manual enable only)
+                // Add IMU Dataset - calculate derived columns first
                 if (result.imu) {
-                     addDatasetFromWorkerResult(file.name + " (IMU)", result.imu, false);
+                     calculateImuDerivedColumns(result.imu);
+                     const imuDs = addDatasetFromWorkerResult(file.name + " (IMU)", result.imu, true, true);
+                     if (result.pagination) imuDs.pagination = result.pagination;
                 }
+                // Render once after all datasets added
+                renderChart();
             } 
             else {
                 // CSV
@@ -887,6 +1368,14 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
                 if (idx !== -1) datasets.splice(idx, 1);
                 
                 if (!result || !result.columns) throw new Error("File empty or corrupt");
+                
+                // Check if this is IMU data CSV (has gyro/accel columns)
+                const isImuCsv = file.name.toLowerCase().includes('imu') || 
+                    result.columns.some(c => c.name.toLowerCase().includes('gyro') || c.name.toLowerCase().includes('accel'));
+                
+                if (isImuCsv) {
+                    calculateImuDerivedColumns(result);
+                }
                 
                 addDatasetFromWorkerResult(file.name, result, true);
             }
@@ -901,7 +1390,7 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
         updateListUI();
       }
 
-      function addDatasetFromWorkerResult(name, parsed, autoEnable = true) {
+      function addDatasetFromWorkerResult(name, parsed, autoEnable = true, skipRender = false) {
         const newDs = {
           id: datasets.length,
           name: name,
@@ -921,7 +1410,11 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
              
              // Only set Y defaults if autoEnable is true
              if (autoEnable) {
-                 const yIdx = parsed.columns.findIndex((_, i) => i !== timeIdx);
+                 // Prefer Gforce column for IMU data, otherwise use first non-time column
+                 let yIdx = parsed.columns.findIndex(c => c.name === 'Gforce');
+                 if (yIdx === -1) {
+                     yIdx = parsed.columns.findIndex((_, i) => i !== timeIdx);
+                 }
                  if (yIdx !== -1) {
                      newDs.config.yIndices = [yIdx];
                      newDs.isReady = true;
@@ -932,18 +1425,162 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
 
         datasets.push(newDs);
         
-        // Render if ready (and master logic)
-        if (newDs.isReady) {
+        // Render if ready (and master logic) - unless skipRender
+        if (newDs.isReady && !skipRender) {
              calculateAnomalies(newDs);
              renderAnomalyTabs();
-             // Append to chart if master exists, else this becomes master
-             if (datasets.filter(d => d.isReady).length === 1) {
-                 renderChart();
-             } else {
-                 renderChart();
-             }
+             renderChart();
+        } else if (newDs.isReady) {
+             // Still calculate anomalies even if skipping render
+             calculateAnomalies(newDs);
+             renderAnomalyTabs();
         }
         return newDs;
+      }
+
+      // === PAGINATION UI FUNCTIONS ===
+      
+      function showPaginationUI(pagination) {
+          const banner = document.getElementById('warningBanner');
+          const warningText = document.getElementById('warningText');
+          const pageNav = document.getElementById('pageNav');
+          const currentPageSpan = document.getElementById('currentPage');
+          const totalPagesSpan = document.getElementById('totalPages');
+          const pageSelect = document.getElementById('pageSelect');
+          const prevBtn = document.getElementById('prevPageBtn');
+          const nextBtn = document.getElementById('nextPageBtn');
+          
+          // Update warning banner
+          const totalSeconds = Math.round((pagination.totalFrames * 256) / 100000);  // approx seconds at 100kHz
+          warningText.textContent = `Файл скорочено: показано ${pagination.loadedFrames.toLocaleString()} кадрів з ${pagination.totalFrames.toLocaleString()} (~${totalSeconds}с). Використовуйте навігацію для перегляду інших сторінок.`;
+          banner.classList.add('visible');
+          
+          // Update page navigation
+          currentPageSpan.textContent = pagination.currentPage;
+          totalPagesSpan.textContent = pagination.totalPages;
+          
+          // Build page select dropdown
+          pageSelect.innerHTML = '';
+          for (let i = 1; i <= pagination.totalPages; i++) {
+              const opt = document.createElement('option');
+              opt.value = i;
+              opt.textContent = `${i}`;
+              if (i === pagination.currentPage) opt.selected = true;
+              pageSelect.appendChild(opt);
+          }
+          
+          // Update button states
+          prevBtn.disabled = pagination.currentPage <= 1;
+          nextBtn.disabled = pagination.currentPage >= pagination.totalPages;
+          
+          pageNav.classList.add('visible');
+          
+          // Store current pagination state
+          activePaginatedDataset = pagination;
+      }
+      
+      function hidePaginationUI() {
+          document.getElementById('warningBanner').classList.remove('visible');
+          document.getElementById('pageNav').classList.remove('visible');
+          activePaginatedDataset = null;
+          currentPageFile = null;
+      }
+      
+      async function goToPage(delta) {
+          if (!activePaginatedDataset || !currentPageFile) return;
+          
+          const newPage = activePaginatedDataset.currentPage + delta;
+          if (newPage < 1 || newPage > activePaginatedDataset.totalPages) return;
+          
+          await loadPage(newPage);
+      }
+      
+      async function goToPageDirect(pageNum) {
+          const page = parseInt(pageNum);
+          if (isNaN(page) || !activePaginatedDataset || !currentPageFile) return;
+          if (page < 1 || page > activePaginatedDataset.totalPages) return;
+          
+          await loadPage(page);
+      }
+      
+      async function loadPage(pageNum) {
+          if (!currentPageFile || !wasmReady) return;
+          
+          const file = currentPageFile;
+          const startFrame = (pageNum - 1) * FRAMES_PER_PAGE;
+          const startOffset = HEADER_SIZE + (startFrame * FRAME_SIZE);
+          
+          // Calculate how many bytes we need to read
+          const bytesToRead = Math.min(
+              FRAMES_PER_PAGE * FRAME_SIZE,
+              file.size - startOffset
+          );
+          
+          if (bytesToRead <= 0) {
+              alert('Неможливо завантажити сторінку: кінець файлу');
+              return;
+          }
+          
+          console.log(`Loading page ${pageNum}: offset=${startOffset}, bytes=${bytesToRead}`);
+          
+          // Show loading indicator
+          const btn = document.querySelector(".btn-primary");
+          btn.innerText = "Завантаження...";
+          btn.disabled = true;
+          
+          try {
+              // Read the header + the slice for this page
+              const headerBuffer = await file.slice(0, HEADER_SIZE).arrayBuffer();
+              const pageBuffer = await file.slice(startOffset, startOffset + bytesToRead).arrayBuffer();
+              
+              // Combine header with page data
+              const combined = new Uint8Array(HEADER_SIZE + pageBuffer.byteLength);
+              combined.set(new Uint8Array(headerBuffer), 0);
+              combined.set(new Uint8Array(pageBuffer), HEADER_SIZE);
+              
+              // Parse this slice
+              const result = parseBinaryWithWasm(combined.buffer);
+              
+              // Clear existing paginated datasets and add new ones
+              const paginatedIdx = datasets.findIndex(ds => ds.pagination);
+              if (paginatedIdx !== -1) {
+                  // Remove old paginated datasets (both ADC and IMU from same file)
+                  datasets = datasets.filter(ds => !ds.pagination);
+              }
+              
+              // Update pagination state
+              const newPagination = {
+                  ...result.pagination,
+                  currentPage: pageNum,
+                  totalFrames: activePaginatedDataset.totalFrames,
+                  totalPages: activePaginatedDataset.totalPages
+              };
+              
+              // Add new datasets (skip render, will batch after)
+              if (result.adc) {
+                  const adcDs = addDatasetFromWorkerResult(file.name + " (ADC)", result.adc, true, true);
+                  adcDs.pagination = newPagination;
+              }
+              if (result.imu) {
+                  calculateImuDerivedColumns(result.imu);
+                  const imuDs = addDatasetFromWorkerResult(file.name + " (IMU)", result.imu, true, true);
+                  imuDs.pagination = newPagination;
+              }
+              
+              // Render once after all datasets added
+              renderChart();
+              
+              // Update UI
+              showPaginationUI(newPagination);
+              updateListUI();
+              
+          } catch (err) {
+              console.error('Error loading page:', err);
+              alert('Помилка завантаження сторінки: ' + err);
+          } finally {
+              btn.innerText = "+ Завантажити CSV";
+              btn.disabled = false;
+          }
       }
 
       // === UI: LIST & MODAL ===
@@ -1028,6 +1665,18 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
           freqInput.value = "";
         }
 
+        // Show/hide IMU settings section based on dataset type
+        const isImuDataset = ds.name.toLowerCase().includes('imu') || 
+            ds.rawColumns.some(c => c.name.toLowerCase().includes('gyro') || c.name.toLowerCase().includes('accel'));
+        const imuSection = document.getElementById('imuSettingsSection');
+        imuSection.style.display = isImuDataset ? 'block' : 'none';
+        
+        if (isImuDataset) {
+            // Set current values
+            document.getElementById('modalAccelRange').value = imuSettings.accelRangeG;
+            document.getElementById('modalGyroRange').value = imuSettings.gyroRangeDps;
+        }
+
         document.getElementById("configModal").style.display = "flex";
       }
 
@@ -1059,6 +1708,31 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
         ds.config.expectedFreqHz = parseInt(freqInput.value) || 0;
         ds.isReady = true;
 
+        // Check if IMU settings changed and recalculate derived columns
+        const isImuDataset = ds.name.toLowerCase().includes('imu') || 
+            ds.rawColumns.some(c => c.name.toLowerCase().includes('gyro') || c.name.toLowerCase().includes('accel'));
+        
+        if (isImuDataset) {
+            const newAccelRange = parseInt(document.getElementById('modalAccelRange').value);
+            const newGyroRange = parseInt(document.getElementById('modalGyroRange').value);
+            
+            // Check if settings changed
+            if (newAccelRange !== imuSettings.accelRangeG || newGyroRange !== imuSettings.gyroRangeDps) {
+                imuSettings.accelRangeG = newAccelRange;
+                imuSettings.gyroRangeDps = newGyroRange;
+                
+                // Remove old Gforce and GyroS columns
+                ds.rawColumns = ds.rawColumns.filter(c => c.name !== 'Gforce' && c.name !== 'GyroS');
+                
+                // Recalculate derived columns
+                const imuData = { columns: ds.rawColumns };
+                calculateImuDerivedColumns(imuData);
+                ds.rawColumns = imuData.columns;
+                
+                console.log(`Recalculated IMU data with Accel=${newAccelRange}g, Gyro=${newGyroRange}dps`);
+            }
+        }
+
         // Calculate anomalies for this dataset
         calculateAnomalies(ds);
 
@@ -1076,7 +1750,24 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
           activeAnomalyTab--; // Adjust index for shifted datasets
         }
 
+        // Explicitly clear data arrays to help GC
+        const ds = datasets[idx];
+        if (ds) {
+          if (ds.rawColumns) {
+            ds.rawColumns.forEach(col => {
+              col.data = null;
+            });
+            ds.rawColumns = null;
+          }
+          ds.anomalies = null;
+          ds.config = null;
+        }
+
         datasets.splice(idx, 1);
+        
+        // Force garbage collection hint
+        if (typeof gc === 'function') gc();
+        
         updateListUI();
         renderAnomalyTabs();
         renderChart();
@@ -1111,6 +1802,17 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
         const expectedInterval = 1000000 / ds.config.expectedFreqHz; // μs
         const threshold = expectedInterval * 2; // 200% = 2x expected interval
 
+        // Use Wasm if available for faster processing
+        if (wasmReady && xData.length > 1000) {
+            console.log(`Using Wasm for anomaly detection (${xData.length} samples)...`);
+            const start = performance.now();
+            ds.anomalies = calculateAnomaliesWasm(xData, threshold);
+            const end = performance.now();
+            console.log(`Wasm anomaly detection: ${(end-start).toFixed(2)}ms, found ${ds.anomalies.length} anomalies`);
+            return;
+        }
+
+        // Fallback to JS implementation
         for (let i = 1; i < xData.length; i++) {
           const diff = xData[i] - xData[i - 1];
           if (diff > threshold) {
@@ -1234,11 +1936,24 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
 
       // === CHART RENDERING ===
 
-
+      // Store reference to current chart data for cleanup
+      let currentChartData = null;
 
       async function renderChart() {
         const div = document.getElementById("chart");
-        if (uplot) uplot.destroy();
+        
+        // Clean up previous chart data
+        if (currentChartData) {
+          for (let i = 0; i < currentChartData.length; i++) {
+            currentChartData[i] = null;
+          }
+          currentChartData = null;
+        }
+        
+        if (uplot) {
+          uplot.destroy();
+          uplot = null;
+        }
         div.innerHTML = "";
 
         const mIdx = getMasterIndex();
@@ -1340,12 +2055,14 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
               labelSize: 30,
             });
 
+            // Add custom path builder with downsampling for large datasets
             series.push({
               label: `${ds.name} (${colName})`,
               stroke: strokeColor,
               width: 1,
               scale: scaleName,
               points: { show: false },
+              paths: downsamplePath,  // Use custom downsampling path builder
             });
             
             chartData.push(yData);
@@ -1364,7 +2081,120 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
         };
 
         uplot = new uPlot(opts, chartData, div);
+        currentChartData = chartData;  // Store reference for cleanup
         document.getElementById("dispValues").innerHTML = "";
+      }
+      
+      // Clear all datasets and free memory
+      function clearAllDatasets() {
+        console.log("Clearing all datasets...");
+        
+        // Clean up chart
+        if (currentChartData) {
+          for (let i = 0; i < currentChartData.length; i++) {
+            currentChartData[i] = null;
+          }
+          currentChartData = null;
+        }
+        
+        if (uplot) {
+          uplot.destroy();
+          uplot = null;
+        }
+        
+        // Clean up all datasets
+        datasets.forEach(ds => {
+          if (ds && ds.rawColumns) {
+            ds.rawColumns.forEach(col => {
+              col.data = null;
+            });
+            ds.rawColumns = null;
+          }
+          if (ds) {
+            ds.anomalies = null;
+            ds.config = null;
+          }
+        });
+        
+        datasets.length = 0;
+        activeAnomalyTab = -1;
+        
+        updateListUI();
+        renderAnomalyTabs();
+        document.getElementById("chart").innerHTML = "";
+        document.getElementById("dispValues").innerHTML = "";
+        
+        console.log("Memory cleared");
+      }
+      
+      // Custom downsampling path builder using min/max decimation
+      // This reduces the number of points drawn while preserving visual peaks
+      function downsamplePath(u, seriesIdx, idx0, idx1, extendGap, buildClip) {
+        const s = u.series[seriesIdx];
+        const xdata = u.data[0];
+        const ydata = u.data[seriesIdx];
+        const scaleX = u.scales.x;
+        const scaleY = u.scales[s.scale];
+        
+        // Target ~2000 points max for smooth rendering
+        const MAX_POINTS = 2000;
+        const totalPoints = idx1 - idx0;
+        
+        // If data is small enough, use default path builder
+        if (totalPoints <= MAX_POINTS) {
+          return uPlot.paths.linear()(u, seriesIdx, idx0, idx1, extendGap, buildClip);
+        }
+        
+        console.log(`Downsampling ${totalPoints} points to ~${MAX_POINTS}`);
+        
+        const bucketSize = Math.ceil(totalPoints / MAX_POINTS);
+        const path = new Path2D();
+        
+        let first = true;
+        let prevX = null;
+        
+        for (let bucket = 0; bucket < MAX_POINTS && (idx0 + bucket * bucketSize) < idx1; bucket++) {
+          const bucketStart = idx0 + bucket * bucketSize;
+          const bucketEnd = Math.min(bucketStart + bucketSize, idx1);
+          
+          // Find min and max in bucket
+          let minVal = Infinity, maxVal = -Infinity;
+          let minIdx = bucketStart, maxIdx = bucketStart;
+          
+          for (let i = bucketStart; i < bucketEnd; i++) {
+            const val = ydata[i];
+            if (val == null || isNaN(val)) continue;
+            if (val < minVal) { minVal = val; minIdx = i; }
+            if (val > maxVal) { maxVal = val; maxIdx = i; }
+          }
+          
+          if (minVal === Infinity) continue;
+          
+          // Draw both min and max points (in order of appearance)
+          const points = minIdx < maxIdx 
+            ? [[minIdx, minVal], [maxIdx, maxVal]]
+            : [[maxIdx, maxVal], [minIdx, minVal]];
+          
+          for (const [idx, val] of points) {
+            const x = u.valToPos(xdata[idx], 'x', true);
+            const y = u.valToPos(val, s.scale, true);
+            
+            if (first) {
+              path.moveTo(x, y);
+              first = false;
+            } else {
+              path.lineTo(x, y);
+            }
+            prevX = x;
+          }
+        }
+        
+        return {
+          stroke: path,
+          fill: null,
+          clip: null,
+          flags: 0
+        };
       }
 
       function fitY(dsIndex) {
