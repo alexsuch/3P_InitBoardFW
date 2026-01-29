@@ -1410,14 +1410,24 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
              
              // Only set Y defaults if autoEnable is true
              if (autoEnable) {
-                 // Prefer Gforce column for IMU data, otherwise use first non-time column
-                 let yIdx = parsed.columns.findIndex(c => c.name === 'Gforce');
-                 if (yIdx === -1) {
-                     yIdx = parsed.columns.findIndex((_, i) => i !== timeIdx);
-                 }
-                 if (yIdx !== -1) {
-                     newDs.config.yIndices = [yIdx];
+                 // Prefer Gforce and GyroS for IMU data, otherwise use first non-time column
+                 const gforceIdx = parsed.columns.findIndex(c => c.name === 'Gforce');
+                 const gyroSIdx = parsed.columns.findIndex(c => c.name === 'GyroS');
+                 
+                 if (gforceIdx !== -1 && gyroSIdx !== -1) {
+                     // IMU data - show both Gforce and GyroS
+                     newDs.config.yIndices = [gforceIdx, gyroSIdx];
                      newDs.isReady = true;
+                 } else if (gforceIdx !== -1) {
+                     newDs.config.yIndices = [gforceIdx];
+                     newDs.isReady = true;
+                 } else {
+                     // Fallback to first non-time column
+                     const yIdx = parsed.columns.findIndex((_, i) => i !== timeIdx);
+                     if (yIdx !== -1) {
+                         newDs.config.yIndices = [yIdx];
+                         newDs.isReady = true;
+                     }
                  }
              }
              newDs.config.expectedFreqHz = parsed.estimatedFreq || 0;
@@ -2251,17 +2261,52 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
         } else {
           tEl.innerText = u.data[0][idx];
 
+          // Check if all series come from the same source file
+          const uniqueFiles = new Set();
+          for (let i = 1; i < u.series.length; i++) {
+              const label = u.series[i].label || "";
+              // Extract file name (before " (ADC)" or " (IMU)" or just before " (")
+              const match = label.match(/^(.+?)\s*\(/);
+              if (match) uniqueFiles.add(match[1]);
+          }
+          const singleFile = uniqueFiles.size <= 1;
+
           let html = "";
           for (let i = 1; i < u.series.length; i++) {
             const val = u.data[i][idx];
             const color = u.series[i]._stroke;
-            const label = u.series[i].label;
-            const shortName =
-              label.length > 20 ? label.substring(0, 18) + ".." : label;
+            const label = u.series[i].label || "";
+            
+            // Extract just the column name if single file
+            let displayName = label;
+            if (singleFile) {
+                // Label format: "filename (ADC) (colName)" or "filename (IMU) (colName)"
+                // Extract the last parenthesized part as column name
+                const colMatch = label.match(/\(([^)]+)\)$/);
+                if (colMatch) {
+                    displayName = colMatch[1];
+                }
+            }
+            
+            const shortName = displayName.length > 20 ? displayName.substring(0, 18) + ".." : displayName;
 
-            html += `<div style="color:${color}; font-size:12px;">
+            // Format value: 2 decimal places for Gforce/GyroS, otherwise smart formatting
+            let formattedVal = "-";
+            if (!isNaN(val)) {
+                if (label.includes('Gforce') || label.includes('GyroS')) {
+                    formattedVal = val.toFixed(2);
+                } else if (Math.abs(val) >= 1000000) {
+                    formattedVal = val.toExponential(2);
+                } else if (Number.isInteger(val)) {
+                    formattedVal = val.toString();
+                } else {
+                    formattedVal = val.toFixed(2);
+                }
+            }
+
+            html += `<div style="color:${color}; font-size:12px; display:inline-flex; margin-right:15px;">
                         <span style="opacity:0.7">${shortName}:</span> 
-                        <b>${isNaN(val) ? "-" : val}</b>
+                        <b style="min-width:70px; text-align:right; font-family:monospace;">${formattedVal}</b>
                     </div>`;
           }
           vContainer.innerHTML = html;
