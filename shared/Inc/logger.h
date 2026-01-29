@@ -51,33 +51,50 @@ extern "C" {
 #define LOGGER_CONFIG_VERSION_MAJOR 0
 #define LOGGER_CONFIG_VERSION_MINOR 1
 
+/**
+ * @brief Statistics counter for a single profiled operation
+ *
+ * Tracks execution time (in CPU cycles) for one type of operation.
+ * To convert cycles to microseconds: cycles / (cpu_hz / 1000000)
+ */
 typedef struct {
-    uint32_t count;
-    uint32_t last_cycles;
-    uint32_t max_cycles;
-    uint64_t sum_cycles;
+    uint32_t count;        // Number of times this operation was executed
+    uint32_t last_cycles;  // CPU cycles taken in the most recent execution
+    uint32_t max_cycles;   // Worst-case (maximum) cycles ever observed
+    uint64_t sum_cycles;   // Cumulative total cycles (for computing average: sum/count)
 } logger_prof_counter_t;
 
+/**
+ * @brief Logger profiling data - timing statistics for all critical operations
+ *
+ * Contains cycle counters for each profiled code section in the logger.
+ * Populated when LOGGER_PROFILING_ENABLE == 1u.
+ * Access via global: g_logger_profile
+ */
 typedef struct {
-    uint32_t enabled;
-    uint32_t cpu_hz;
+    uint32_t enabled;  // 1 if profiling is active (DWT enabled)
+    uint32_t cpu_hz;   // CPU frequency in Hz (for cycle-to-time conversion)
 
-    logger_prof_counter_t task_total;
+    logger_prof_counter_t task_total;  // Total Logger_Task() execution time
 
-    logger_prof_counter_t adc_builder_copy;
-    logger_prof_counter_t imu_pop;
+    /* Frame builder data collection */
+    logger_prof_counter_t adc_builder_copy;  // memcpy ADC data to builder
+    logger_prof_counter_t imu_pop;           // Logger_ImuRing_PopSamples() call
 
-    logger_prof_counter_t adc_frame_copy;
-    logger_prof_counter_t imu_frame_copy;
-    logger_prof_counter_t imu_frame_zero;
+    /* Frame assembly (copy to output frame) */
+    logger_prof_counter_t adc_frame_copy;  // memcpy ADC block to frame
+    logger_prof_counter_t imu_frame_copy;  // memcpy IMU samples to frame
+    logger_prof_counter_t imu_frame_zero;  // memset unused IMU slots to zero
 
-    logger_prof_counter_t crc_part1;
-    logger_prof_counter_t crc_part2;
-    logger_prof_counter_t crc_part3;
-    logger_prof_counter_t crc_part4;
+    /* Incremental CRC/checksum computation (4-part split for low latency) */
+    logger_prof_counter_t crc_part1;  // CRC bytes 0-133 (header + 1st quarter ADC)
+    logger_prof_counter_t crc_part2;  // CRC bytes 134-261 (2nd quarter ADC)
+    logger_prof_counter_t crc_part3;  // CRC bytes 262-389 (3rd quarter ADC)
+    logger_prof_counter_t crc_part4;  // CRC bytes 390-849 (remainder + finalize)
 
-    logger_prof_counter_t builder_reset;
-    logger_prof_counter_t frame_dequeue_copy;
+    /* SPI transmission */
+    logger_prof_counter_t builder_reset;       // Reset builder state after frame queued
+    logger_prof_counter_t frame_dequeue_copy;  // memcpy frame from queue to TX buffer
 } logger_profile_t;
 
 extern volatile logger_profile_t g_logger_profile;

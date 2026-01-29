@@ -57,6 +57,21 @@ static volatile uint8_t s_start_pending = 0;
 volatile logger_profile_t g_logger_profile = {0};
 
 #if (LOGGER_PROFILING_ENABLE == 1u)
+/**
+ * @brief Initialize ARM DWT (Data Watchpoint and Trace) cycle counter
+ *
+ * Called once on first Logger_Task() invocation when profiling is enabled.
+ * Configures the Cortex-M debug hardware for CPU cycle counting:
+ *   1. Enables trace unit via CoreDebug->DEMCR (TRCENA bit)
+ *   2. Resets cycle counter DWT->CYCCNT to zero
+ *   3. Enables cycle counter via DWT->CTRL (CYCCNTENA bit)
+ *
+ * After init, DWT->CYCCNT increments by 1 each CPU clock cycle (e.g., 170 MHz).
+ * Read via logger_profile_now_cycles() for timing measurements.
+ *
+ * Note: DWT is available on Cortex-M3/M4/M7. No additional HW cost - uses
+ * existing debug registers. Counter wraps at ~25 seconds @ 170 MHz.
+ */
 static void logger_profile_dwt_enable_once(void) {
     static uint8_t inited = 0;
     if (inited) {
@@ -66,9 +81,9 @@ static void logger_profile_dwt_enable_once(void) {
 
     Logger_Profile_Reset();
 
-    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-    DWT->CYCCNT = 0;
-    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;  // Enable trace unit
+    DWT->CYCCNT = 0;                                 // Reset cycle counter
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;             // Enable cycle counter
 
     g_logger_profile.enabled = 1u;
     g_logger_profile.cpu_hz = HAL_RCC_GetHCLKFreq();
@@ -141,6 +156,26 @@ const int16_t* Logger_AdcBuffer_GetBuffer(uint32_t* out_count) {
 
 uint32_t Logger_AdcBuffer_GetFirstTimestamp(void) { return g_adc_buffer.block_timestamp; }
 
+/**
+ * @brief Advance ADC queue read pointer after processing current block (consumer side)
+ *
+ * Called from main loop (Logger_Task) after a frame is built from the ADC block.
+ * Removes the oldest block from the FIFO queue, making room for new DMA blocks.
+ *
+ * Producer-Consumer Pattern:
+ *   - Producer: Logger_AdcBuffer_OnComplete() called from DMA ISR (HAL_ADC_ConvCpltCallback)
+ *   - Consumer: Logger_Task() in main loop reads block, then calls this to release it
+ *
+ * Why __disable_irq() is needed:
+ *   The DMA complete ISR can fire at any time and modify queue state (write_idx, count).
+ *   This function reads and modifies shared variables (read_idx, count, ready, timestamp).
+ *   Without disabling interrupts, a race condition could occur:
+ *     1. Main loop reads count=1
+ *     2. ISR fires, increments count to 2
+ *     3. Main loop decrements count to 0 (wrong! should be 1)
+ *   The critical section ensures atomic read-modify-write of all queue state.
+ *   Duration is very short (~10 cycles), so interrupt latency impact is minimal.
+ */
 void Logger_AdcBuffer_ClearReady(void) {
     __disable_irq();
     if (g_adc_buffer.count > 0) {
@@ -238,7 +273,23 @@ void Logger_ImuOnNewSample(const uint8_t* raw_data) {
 
     uint32_t timestamp = Logger_GetTimestamp();  // 100 kHz tick (10 us), shared timebase with ADC
 
-    // Drop obvious duplicates: same raw bytes received again within a few ticks.
+    // Duplicate sample detection - complements the time-based rearm guard in LSM6DS3.c.
+    //
+    // Two-layer protection against IMU read issues at high ODR (e.g., 6.6 kHz):
+    //
+    //   Layer 1 - Rearm Guard (LSM6DS3.c):
+    //     Prevents the polling state machine from getting stuck when the DRDY low phase
+    //     is missed at high ODR. Uses time-based re-arm (expected_period - 1 ticks) to
+    //     force a new read attempt even if DRDY stays high. This ensures reads continue.
+    //
+    //   Layer 2 - Duplicate Detection (here):
+    //     The rearm guard intentionally triggers slightly early to avoid missed samples.
+    //     This can cause the same IMU output registers to be read twice before the sensor
+    //     updates them. This check filters out such duplicates by comparing:
+    //       - Timestamp delta (dt <= 5 ticks = ~50µs, much faster than any valid ODR)
+    //       - Raw data bytes (identical 12-byte payload = same sensor reading)
+    //
+    // Both layers are needed: rearm keeps reads flowing, duplicate detection keeps data clean.
     // At 3332 Hz ODR the expected delta is ~30 ticks, so dt<=5 strongly suggests a duplicate read.
     if (g_have_last_imu) {
         uint32_t dt = (uint32_t)(timestamp - g_last_imu_ts);
@@ -824,6 +875,7 @@ void Logger_FrameBuilder_Init(void) {
     memset(&loggerStat.frame_ctx, 0, sizeof(loggerStat.frame_ctx));
 
 #if (LOGGER_PROFILING_ENABLE == 1u)
+    // Read comment under method
     logger_profile_dwt_enable_once();
 #endif
 
@@ -867,8 +919,9 @@ void Logger_Init(void) {
     loggerStat.config.reserved[0] = (uint8_t)LOGGER_CHECKSUM_ALGO;  // checksum algorithm id (CRC8/SUM8)
 
 #if (SPI_LOGGER_ENABLE == 1u)
-    // Populate IMU config early so the master can read a meaningful config immediately after reset.
-    // The sensor driver will overwrite this later with the actual hardware-readback values.
+    // TODO: when new sensorr  will be added make abstraction for it  and read settings from sensor object abstraction
+    //  Populate IMU config early so the master can read a meaningful config immediately after reset.
+    //  The sensor driver will overwrite this later with the actual hardware-readback values.
     imu_config_t imu_cfg = {0};
     imu_cfg.accel_odr_hz = (uint16_t)LSM6DS3_SAMPLING_FREQ_HZ;
     imu_cfg.gyro_odr_hz = (uint16_t)LSM6DS3_SAMPLING_FREQ_HZ;
@@ -882,7 +935,6 @@ void Logger_Init(void) {
     imu_cfg.reserved1 = LSM6DS3_CTRL2_G_HIT_VAL;
     imu_cfg.reserved2 = LSM6DS3_CTRL3_C_VAL;
     Logger_OnAccelerometerReady(&imu_cfg);
-
 
     // Initialize SPI2 NVIC for interrupt-driven reception
     Logger_SPI_Init();

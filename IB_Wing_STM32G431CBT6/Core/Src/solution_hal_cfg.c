@@ -48,10 +48,12 @@ static HAL_StatusTypeDef HalConfigure_SysTickTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_HighSidePwmTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_PumpPwmTimer_Init(void);
 static HAL_StatusTypeDef HalConfigure_VusaUart_Init(void);
-
 #endif /* SPI_LOGGER_ENABLE == 0 */
 
+#if (SPI_LOGGER_ENABLE == 1u)
 static HAL_StatusTypeDef HalConfigure_TimestampTimer_Init(void);
+#endif
+
 static HAL_StatusTypeDef HalConfigure_MainUart_Init(void);
 static HAL_StatusTypeDef HalConfigure_AccSpi_Init(void);
 static HAL_StatusTypeDef HalConfigure_Opamp_Init(void);
@@ -120,11 +122,13 @@ void Solution_HalConfigure(void) {
     }
 
 #if (TEST_DAC_ENABLE == 1u)
-    /* Initialize DAC1 (Test Signal Generator) */
+/* Initialize DAC1 (Test Signal Generator) */
+#if (SPI_LOGGER_ENABLE == 1u)
     /* Initialize hardware timestamp timer */
     if (HalConfigure_TimestampTimer_Init() != HAL_OK) {
         Error_Handler();
     }
+#endif
 
     /* Initialize DAC1 (Test Signal Generator) */
     if (HalConfigure_Dac1_Init() != HAL_OK) {

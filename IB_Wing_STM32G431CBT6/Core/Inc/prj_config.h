@@ -13,8 +13,13 @@ extern "C" {
 #include <stdlib.h>
 
 /*-------------------------- LOGGER MACROS -----------------------------------------*/
-#define SPI_LOGGER_ENABLE (1u)        // RELEASE VALUE - 0u
-#define TEST_DAC_ENABLE (1u)          // RELEASE VALUE - 0u
+#define SPI_LOGGER_ENABLE (1u)  // RELEASE VALUE - 0u
+#define TEST_DAC_ENABLE (1u)    // RELEASE VALUE - 0u
+/* Logger profiling uses ARM DWT cycle counter (DWT->CYCCNT) to measure CPU cycles
+ * spent in critical code sections (ADC copy, IMU pop, CRC computation, etc.).
+ * Results stored in g_logger_profile with count, last, max, and sum statistics.
+ * Enable (1u) during development to identify performance bottlenecks.
+ * Disable (0u) in release to eliminate code/RAM overhead. */
 #define LOGGER_PROFILING_ENABLE (0u)  // RELEASE VALUE - 0u
 /*-------------------------- ADC Logger Configuration -----------------------------------------*/
 #define LOGGER_ADC_DMA_BUFFER_SIZE (512u)                          // Total DMA buffer size in samples
@@ -49,7 +54,7 @@ extern "C" {
 #define LOGGER_CHECKSUM_ALGO_SUM8 2u
 #define LOGGER_CHECKSUM_ALGO_CRC8_HW 3u
 // Set to LOGGER_CHECKSUM_ALGO_SUM8 to benchmark checksum overhead.
-#define LOGGER_CHECKSUM_ALGO LOGGER_CHECKSUM_ALGO_SUM8  // LOGGER_CHECKSUM_ALGO_CRC8
+#define LOGGER_CHECKSUM_ALGO LOGGER_CHECKSUM_ALGO_CRC8_HW  // LOGGER_CHECKSUM_ALGO_SUM8  // LOGGER_CHECKSUM_ALGO_CRC8
 
 /* LSM6DS3 ODR Register Values (from datasheet CTRL1_XL[7:4] and CTRL2_G[7:4])
  * 0000 = Off
