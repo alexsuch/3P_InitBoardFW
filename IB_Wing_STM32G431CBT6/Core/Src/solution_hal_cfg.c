@@ -121,8 +121,6 @@ void Solution_HalConfigure(void) {
         Error_Handler();
     }
 
-#if (TEST_DAC_ENABLE == 1u)
-/* Initialize DAC1 (Test Signal Generator) */
 #if (SPI_LOGGER_ENABLE == 1u)
     /* Initialize hardware timestamp timer */
     if (HalConfigure_TimestampTimer_Init() != HAL_OK) {
@@ -130,6 +128,7 @@ void Solution_HalConfigure(void) {
     }
 #endif
 
+#if (TEST_DAC_ENABLE == 1u)
     /* Initialize DAC1 (Test Signal Generator) */
     if (HalConfigure_Dac1_Init() != HAL_OK) {
         Error_Handler();
