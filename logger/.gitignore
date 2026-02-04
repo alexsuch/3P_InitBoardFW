@@ -12,3 +12,4 @@ monitor.bat
 .cache
 build
 CMakeFiles
+web-ui/node_modules

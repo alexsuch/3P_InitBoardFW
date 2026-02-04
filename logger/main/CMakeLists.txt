@@ -32,6 +32,7 @@ set(COMPONENT_REQUIRES
     spiffs
     efuse
     bblanchon__arduinojson
+    json
 )
 
 # Only include esp_tinyusb for ESP32-S3 builds in this project.

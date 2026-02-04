@@ -1,0 +1,67 @@
+@reference "./theme-reference.css";
+
+.rg {
+  @apply flex flex-col;
+}
+
+.gv .oc {
+  @apply flex flex-col gap-3;
+}
+
+.gh .oc {
+  @apply flex flex-row flex-wrap gap-4;
+}
+
+.gl {
+  @apply mb-1;
+  color: color-mix(in srgb, var(--a-txt) 85%, var(--a-txt-mut) 15%);
+}
+
+.gld {
+  color: color-mix(in srgb, var(--a-txt-mut) 60%, transparent);
+}
+
+.r {
+  @apply relative inline-flex items-center cursor-pointer select-none gap-3;
+}
+
+.rd {
+  @apply cursor-not-allowed opacity-50;
+}
+
+.inp {
+  @apply absolute w-px h-px opacity-0;
+}
+
+.ctrl {
+  @apply w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0;
+  @apply border-2 border-secondary;
+  @apply transition-[background-color,border-color] duration-200;
+}
+
+.dot {
+  @apply w-3 h-3 rounded-full bg-inv opacity-0;
+  transform: scale(0.5);
+  @apply transition-[opacity,transform] duration-200;
+}
+
+.inp:checked + .ctrl {
+  @apply bg-primary border-primary;
+}
+
+.inp:checked + .ctrl .dot {
+  @apply opacity-100;
+  transform: scale(1);
+}
+
+.inp:focus + .ctrl {
+  box-shadow: 0 0 0 0.125rem color-mix(in srgb, var(--a-p) 35%, transparent);
+}
+
+.lbl {
+  color: color-mix(in srgb, var(--a-txt) 85%, var(--a-txt-mut) 15%);
+}
+
+.rd .lbl {
+  color: color-mix(in srgb, var(--a-txt-mut) 60%, transparent);
+}

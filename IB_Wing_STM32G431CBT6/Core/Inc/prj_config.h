@@ -46,7 +46,7 @@ extern "C" {
  * Note: These frequencies are used for both accelerometer and gyroscope
  * ODR bits [7:4] in CTRL1_XL and CTRL2_G registers
  */
-#define LSM6DS3_SAMPLING_FREQ_HZ (6664)  // Valid: 26, 52, 104, 208, 416, 833, 1666, 3332, 6664
+#define LSM6DS3_SAMPLING_FREQ_HZ (3332)  // Valid: 26, 52, 104, 208, 416, 833, 1666, 3332, 6664
 
 // Logger checksum algorithm used for LogFrame_t payload integrity.
 // CRC8 is stronger; SUM8 is faster but weaker (good for profiling/perf experiments).

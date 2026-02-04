@@ -1,0 +1,132 @@
+@import 'tailwindcss';
+@reference "./index.css";
+
+:root {
+  color-scheme: dark;
+
+  --a-bg-b: #25272c;
+  --a-bg-p: #1f2227;
+  --a-bg-w: #1e1f22;
+  --a-bg-ov: #262a31;
+
+  --a-txt: #d6d6d6;
+  --a-txt-mut: #a7b0bc;
+  --a-txt-str: #dfdede;
+  --a-txt-inv: #ffffff;
+
+  --a-b: #2d333b;
+  --a-b-str: #3a4048;
+
+  --input-bg: var(--color-gray-800);
+  --input-b: var(--color-gray-600);
+
+  --a-p: #2770ef;
+  --a-b-hov: #155fe4;
+  --a-sec: #374151;
+
+  --a-inf: #2563eb;
+  --a-inf-hov: #1d4ed8;
+  --a-scs: #16a34a;
+  --a-scs-hov: #15803d;
+  --a-warn: #d97706;
+  --a-warn-hov: #b45309;
+  --a-err: #dc2626;
+  --a-err-hov: #b91c1c;
+  --a-dng: #b91c1c;
+  --a-dng-hov: #991b1b;
+
+  --a-sec-bg: #374151;
+  --a-sec-txt: #d1d5db;
+  --a-sec-b: #6b7280;
+  --def-sec-b-hov: #4b5563;
+  --def-ic-b-c: #a8c8f3;
+
+  --a-wh: #ffffff;
+  --a-gr-100: #16171a;
+  --a-gr-800: #1f2227;
+  --a-shd-soft: rgba(8, 11, 15, 0.45);
+  --a-rip: rgba(255, 255, 255, 0.4);
+
+  --a-sp-1: 0.25rem;
+  --a-sp-2: 0.5rem;
+  --a-sp-3: 0.75rem;
+  --a-sp-4: 1rem;
+  --a-sp-5: 1.25rem;
+  --a-sp-6: 1.5rem;
+
+  --a-txt-3xs: 0.75rem;
+  --a-txt-2xs: 0.8125rem;
+  --a-txt-xs: 0.875rem;
+  --a-txt-sm: 0.9375rem;
+  --a-txt-base: 1rem;
+  --a-txt-xl: 1.25rem;
+  --a-txt-2xl: 1.5rem;
+  --a-txt-3xl: 1.875rem;
+  --a-txt-4xl: 2.25rem;
+  --a-txt-5xl: 3rem;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background-color: var(--a-bg-b);
+  color: var(--a-txt);
+}
+
+* {
+  outline: none !important;
+}
+
+body {
+  color: var(--a-txt);
+  font: 1rem 'Roboto', Verdana, Helvetica, Arial, sans-serif;
+  letter-spacing: 0.025em;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, h4, h5, h6, b, th, strong {
+  color: var(--a-txt-str);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot.connected {
+  background-color: var(--a-scs);
+}
+
+.status-dot.disconnected {
+  background-color: var(--a-txt-mut);
+}
+
+.status-dot.scanning {
+  background-color: var(--a-warn);
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Global ripple animation - shared across components */
+.ripple-base {
+  position: absolute;
+  border-radius: 50%;
+  background-color: var(--a-rip);
+  transform: scale(0);
+  animation: ripple-animation 600ms linear;
+  pointer-events: none;
+}
+
+@keyframes ripple-animation {
+  to {
+    transform: scale(4);
+    opacity: 0;
+  }
+}

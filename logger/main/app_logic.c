@@ -27,6 +27,7 @@
 
 #if defined(USE_WIFI)
 #include "wifi/wifi.h"
+#include "modules/rpc_server.h"
 #endif
 #if defined(USE_WEB_FILE_SEREVER)
 #include "modules/web_server.h"
@@ -56,6 +57,7 @@ button_t g_button;
 button_t g_button_external;
 #if defined(USE_WIFI)
 wifi_t g_wifi_module;
+rpc_server_t g_rpc_server;
 #endif
 
 static QueueHandle_t g_command_queue;
@@ -446,12 +448,21 @@ static void button_event_handler(const button_event_t *ev, void *user_data) {
         case BUTTON_EVENT_TYPE_SUPER_LONG_PRESS:
             button_long_press_handler(ev, user_data);
             break;
-        case BUTTON_EVENT_TYPE_TRIPLE_PRESS:
-            // LOG_I(TAG, "Button %d triple press detected - rebooting to boot mode", ev->button->id);
+        case BUTTON_EVENT_TYPE_TRIPLE_PRESS: {
+            // Triple press: Toggle RPC server (WiFi + JSON-RPC)
+            LOG_I(TAG, "Button %d triple press detected - toggling RPC server", ev->button->id);
             app_logic_t *app = (app_logic_t *)user_data;
-            // app_logic_send_command(app, APP_CMD_REBOOT_TO_BOOT);
+            // Toggle RPC server based on current state (logic will be handled in command processor)
+            app_logic_send_command(app, APP_CMD_RPC_SERVER_START);
+            break;
+        }
+        case BUTTON_EVENT_TYPE_QUADRUPLE_PRESS: {
+            // Quadruple press: Reboot device
+            LOG_I(TAG, "Button %d quadruple press detected - rebooting", ev->button->id);
+            app_logic_t *app = (app_logic_t *)user_data;
             app_logic_send_command(app, APP_CMD_REBOOT);
             break;
+        }
         default:
             // Handle other button events if needed
             break;
@@ -1072,6 +1083,108 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
                 LOG_W(TAG, "Web server module not initialized");
             }
             break;
+#endif
+#if defined(USE_WIFI)
+        case APP_CMD_RPC_SERVER_START: {
+            LOG_I(TAG, "RPC server start requested");
+            
+            // Toggle behavior: if running, stop it instead
+            if (rpc_server_is_running(&g_rpc_server)) {
+                LOG_I(TAG, "RPC server already running - stopping it");
+                rpc_server_stop(&g_rpc_server);
+                wifi_stop(app->wifi);
+                LOG_I(TAG, "RPC server and WiFi stopped");
+                break;
+            }
+            
+            // Start WiFi in AP+STA mode
+            if (!app->wifi) {
+                LOG_W(TAG, "WiFi module not initialized");
+                result = APP_ERR_INVALID_STATE;
+                break;
+            }
+            
+            // Initialize WiFi if not already initialized
+            // NOTE: wifi_init does memset on the wifi struct, so we set modes AFTER init
+            esp_err_t wifi_err = wifi_init(app->wifi);
+            if (wifi_err != ESP_OK && wifi_err != ESP_ERR_WIFI_NOT_INIT) {
+                // ESP_ERR_WIFI_NOT_INIT might mean it's already initialized in some edge cases
+                LOG_E(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(wifi_err));
+                result = APP_ERR_GENERIC;
+                break;
+            }
+            
+            // Configure WiFi for AP+STA mode (set AFTER wifi_init to avoid being wiped by memset)
+            app->wifi->ap_enabled = true;
+            app->wifi->sta_enabled = true;  // Enable STA for internet connectivity
+            LOG_I(TAG, "WiFi configured for AP+STA mode");
+            
+            wifi_err = wifi_start(app->wifi);
+            if (wifi_err != ESP_OK) {
+                LOG_E(TAG, "Failed to start WiFi: %s", esp_err_to_name(wifi_err));
+                result = APP_ERR_GENERIC;
+                break;
+            }
+            
+            // Wait for AP to be ready
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            
+            // Initialize and start RPC server
+            rpc_server_config_t rpc_config = {
+                .port = 80,
+                .wifi = app->wifi
+            };
+            
+            esp_err_t rpc_err = rpc_server_init(&g_rpc_server, &rpc_config);
+            if (rpc_err != ESP_OK) {
+                LOG_E(TAG, "Failed to initialize RPC server: %s", esp_err_to_name(rpc_err));
+                result = APP_ERR_GENERIC;
+                break;
+            }
+            
+            rpc_err = rpc_server_start(&g_rpc_server);
+            if (rpc_err != ESP_OK) {
+                LOG_E(TAG, "Failed to start RPC server: %s", esp_err_to_name(rpc_err));
+                result = APP_ERR_GENERIC;
+            } else {
+                LOG_I(TAG, "RPC server started successfully on port 80");
+                
+#if defined(DEV) && defined(WIFI_DEV_SSID) && defined(WIFI_DEV_PASSWORD)
+                // DEV mode: auto-connect to hardcoded dev WiFi
+                LOG_I(TAG, "[DEV] Auto-connecting to dev network: %s", WIFI_DEV_SSID);
+                wifi_config_t wifi_config = {0};
+                strncpy((char *)wifi_config.sta.ssid, WIFI_DEV_SSID, sizeof(wifi_config.sta.ssid) - 1);
+                strncpy((char *)wifi_config.sta.password, WIFI_DEV_PASSWORD, sizeof(wifi_config.sta.password) - 1);
+                wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+                esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+                esp_wifi_connect();
+#else
+                // Try auto-connect to last saved network
+                char last_ssid[64];
+                if (wifi_nvs_get_last_ssid(last_ssid, sizeof(last_ssid)) == ESP_OK) {
+                    char password[64];
+                    if (wifi_nvs_load_credentials(last_ssid, password, sizeof(password)) == ESP_OK) {
+                        LOG_I(TAG, "Auto-connecting to saved network: %s", last_ssid);
+                        wifi_config_t wifi_config = {0};
+                        strncpy((char *)wifi_config.sta.ssid, last_ssid, sizeof(wifi_config.sta.ssid) - 1);
+                        strncpy((char *)wifi_config.sta.password, password, sizeof(wifi_config.sta.password) - 1);
+                        wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+                        esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+                        esp_wifi_connect();
+                    }
+                }
+#endif
+            }
+            break;
+        }
+        case APP_CMD_RPC_SERVER_STOP: {
+            LOG_I(TAG, "RPC server stop requested");
+            if (rpc_server_is_running(&g_rpc_server)) {
+                rpc_server_stop(&g_rpc_server);
+                LOG_I(TAG, "RPC server stopped");
+            }
+            break;
+        }
 #endif
         case APP_CMD_STOP_LOGGING_AND_FREE_MEMORY: {
             // TOTAL MEMORY TRACKING: Track entire cleanup process

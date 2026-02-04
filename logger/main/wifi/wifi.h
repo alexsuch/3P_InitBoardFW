@@ -356,6 +356,40 @@ bool wifi_is_channel_suitable_for_sta(wifi_t *wifi, uint8_t channel);
 // Captive portal HTTP server integration
 void wifi_set_captive_portal_http_server(wifi_t *wifi, void *http_server);
 
+// NVS Credential Storage Functions
+/**
+ * @brief Save WiFi credentials to NVS
+ * @param ssid SSID to save
+ * @param password Password to save
+ * @return ESP_OK on success
+ */
+esp_err_t wifi_nvs_save_credentials(const char *ssid, const char *password);
+
+/**
+ * @brief Load WiFi credentials from NVS
+ * @param ssid Buffer to store SSID
+ * @param ssid_len Size of SSID buffer
+ * @param password Buffer to store password
+ * @param pwd_len Size of password buffer
+ * @return ESP_OK on success
+ */
+esp_err_t wifi_nvs_load_credentials(const char *ssid, char *password, size_t pwd_len);
+
+/**
+ * @brief Forget (delete) WiFi credentials from NVS
+ * @param ssid SSID to forget
+ * @return ESP_OK on success
+ */
+esp_err_t wifi_nvs_forget_credentials(const char *ssid);
+
+/**
+ * @brief Get the last successfully connected SSID
+ * @param ssid Buffer to store SSID
+ * @param len Size of buffer
+ * @return ESP_OK on success
+ */
+esp_err_t wifi_nvs_get_last_ssid(char *ssid, size_t len);
+
 #ifdef __cplusplus
 }
 #endif

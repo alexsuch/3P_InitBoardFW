@@ -3,6 +3,9 @@
 #include "hal/ws2812.h"
 #include "sdkconfig.h"
 
+#define DEV
+#define WIFI_DEV_SSID "902studio"
+#define WIFI_DEV_PASSWORD "Emc902NetWifiNew"
 // This firmware receives binary frames from the STM32 over SPI and writes them to storage.
 // Sensor acquisition and frame generation are performed on the STM32 side.
 #define USE_S3_MINI_BOARD
@@ -23,6 +26,11 @@
 #else
 #define LINK_SPI_HOST SPI2_HOST  // Alternative host option if SPI3 is unavailable
 #endif
+
+// WiFi/RPC Server Feature
+// Enable WiFi and RPC server functionality
+#define USE_WIFI
+
 #define DAC_VREF_MV 3300
 
 #define DEBUG_LOGGER_WRITES 1

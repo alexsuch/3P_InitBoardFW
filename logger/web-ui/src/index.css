@@ -1,0 +1,48 @@
+@import 'tailwindcss';
+@source '../index.html';
+@source './**/*.{js,ts,jsx,tsx,css}';
+@source '../packages/micro-ui/**/*.{js,ts,jsx,tsx,css}';
+
+@theme {
+  --color-base: var(--a-bg-b);
+  --color-panel: var(--a-bg-p);
+  --color-well: var(--a-bg-w);
+  --color-overlay: var(--a-bg-ov);
+
+  /* Tailwind v4 color tokens generate text-*, bg-*, border-* utilities */
+  --color-main: var(--a-txt);
+  --color-muted: var(--a-txt-mut);
+  --color-strong: var(--a-txt-str);
+  --color-inv: var(--a-txt-inv);
+
+  --color-primary: var(--a-p);
+  --color-primary-hover: var(--a-b-hov);
+  --color-secondary: var(--a-sec);
+
+  --color-info: var(--a-inf);
+  --color-success: var(--a-scs);
+  --color-warn: var(--a-warn);
+  --color-error: var(--a-err);
+  --color-danger: var(--a-dng);
+
+  --color-border: var(--a-b);
+  --color-border-strong: var(--a-b-str);
+
+  --spacing-1: var(--a-sp-1);
+  --spacing-2: var(--a-sp-2);
+  --spacing-3: var(--a-sp-3);
+  --spacing-4: var(--a-sp-4);
+  --spacing-5: var(--a-sp-5);
+  --spacing-6: var(--a-sp-6);
+
+  --text-3xs: var(--a-txt-3xs);
+  --text-2xs: var(--a-txt-2xs);
+  --text-xs: var(--a-txt-xs);
+  --text-sm: var(--a-txt-sm);
+  --text-base: var(--a-txt-base);
+  --text-xl: var(--a-txt-xl);
+  --text-2xl: var(--a-txt-2xl);
+  --text-3xl: var(--a-txt-3xl);
+  --text-4xl: var(--a-txt-4xl);
+  --text-5xl: var(--a-txt-5xl);
+}

@@ -535,6 +535,9 @@
       <div id="hoverInfo">
         <div>TIME: <span id="dispTime" style="color: #4dabf7">-</span></div>
         <div id="dispValues" style="display: flex; gap: 15px"></div>
+        <div id="selectionInfo" style="display: none; margin-left: auto; color: #ffa500;">
+          Δ: <span id="dispSelWidth" style="font-weight: bold">-</span>
+        </div>
       </div>
 
       <div id="chart"></div>
@@ -2086,8 +2089,11 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
           axes: axes,
           cursor: { drag: { x: true, y: true, uni: 50 } },
           legend: { show: false },
-          hooks: { setLegend: [updateHoverInfo] },
-          plugins: [wheelZoomPlugin({ factor: 0.75 }), middleClickPanPlugin()],
+          hooks: { 
+            setLegend: [updateHoverInfo],
+            setSelect: [handleSelectionWithCtrl]
+          },
+          plugins: [wheelZoomPlugin({ factor: 0.75 }), middleClickPanPlugin(), ctrlSelectionTrackPlugin()],
         };
 
         uplot = new uPlot(opts, chartData, div);
@@ -2377,6 +2383,90 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
             },
           },
         };
+      }
+      
+      // === CTRL+SELECTION DISPLAY ===
+      let ctrlKeyDown = false;
+      
+      // Track CTRL key state globally
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Control') ctrlKeyDown = true;
+      });
+      document.addEventListener('keyup', (e) => {
+        if (e.key === 'Control') {
+          ctrlKeyDown = false;
+          // Hide selection info when CTRL released
+          document.getElementById('selectionInfo').style.display = 'none';
+        }
+      });
+      
+      // Plugin to track CTRL state during selection and prevent zoom
+      function ctrlSelectionTrackPlugin() {
+        return {
+          hooks: {
+            ready: (u) => {
+              // Store CTRL state and current scale when mouse is pressed on chart
+              u.over.addEventListener('mousedown', (e) => {
+                u._ctrlPressed = e.ctrlKey;
+                if (e.ctrlKey) {
+                  // Save current scale to restore after selection (prevent zoom)
+                  u._savedScale = {
+                    min: u.scales.x.min,
+                    max: u.scales.x.max
+                  };
+                }
+              });
+            }
+          }
+        };
+      }
+      
+      // Handle selection - show time width when CTRL was pressed
+      function handleSelectionWithCtrl(u) {
+        const sel = u.select;
+        const selInfoEl = document.getElementById('selectionInfo');
+        const selWidthEl = document.getElementById('dispSelWidth');
+        
+        // Check if this was a CTRL+selection and has valid width
+        if (u._ctrlPressed && sel && sel.width > 0) {
+          // Convert pixel selection to time values
+          const leftVal = u.posToVal(sel.left, 'x');
+          const rightVal = u.posToVal(sel.left + sel.width, 'x');
+          const widthUs = Math.abs(rightVal - leftVal);
+          
+          // Format the width nicely
+          let displayText;
+          if (widthUs >= 1000000) {
+            displayText = `${(widthUs / 1000000).toFixed(3)} s (${widthUs.toFixed(0)} μs)`;
+          } else if (widthUs >= 1000) {
+            displayText = `${(widthUs / 1000).toFixed(3)} ms (${widthUs.toFixed(0)} μs)`;
+          } else {
+            displayText = `${widthUs.toFixed(2)} μs`;
+          }
+          
+          selWidthEl.innerText = displayText;
+          selInfoEl.style.display = 'block';
+          
+          console.log(`CTRL+Selection: ${displayText}`);
+          
+          // Clear selection to prevent zoom when CTRL is held
+          u.setSelect({left: 0, width: 0, top: 0, height: 0}, false);
+          
+          // Restore the original scale (undo the zoom that uPlot will do)
+          if (u._savedScale) {
+            // Use setTimeout to restore after uPlot's internal zoom completes
+            setTimeout(() => {
+              u.setScale('x', {
+                min: u._savedScale.min,
+                max: u._savedScale.max
+              });
+              u._savedScale = null;
+            }, 0);
+          }
+        }
+        
+        // Reset the CTRL flag
+        u._ctrlPressed = false;
       }
 
       window.addEventListener("resize", () => {

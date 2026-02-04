@@ -1363,7 +1363,8 @@ void Logger_SPI_TxCallback(void) {
     // We only support SPI commands before streaming starts (CONFIG).
     // After acquisition begins, the master clocks raw frame reads and we must not arm RX for "command bytes",
     // otherwise the dummy MOSI bytes would be misinterpreted as commands.
-    if (s_logging_started == 0u) {
+    // Also avoid re-arming RX after config TX completes (s_start_pending set) to prevent BUSY_RX blocking TX DMA.
+    if ((s_logging_started == 0u) && (s_start_pending == 0u)) {
         Logger_SPI_StartListening();
     }
 }

@@ -136,6 +136,15 @@ void app_main() {
     if (app_logic_init_modules(app_logic) == APP_OK) {
         // Start only essential tasks at boot; start heavy tasks on-demand (button events)
         app_logic_start_minimal_tasks(app_logic);
+
+        // TEMPORARY: Auto-start logging on boot for testing purposes.
+        // Remove this block once manual button control is preferred.
+        LOG_I(TAG, "Auto-starting logging mode (temporary)...");
+        if (app_logic_start_all_tasks(app_logic) == ESP_OK) {
+            app_logic_send_command(app_logic, APP_CMD_SET_MODE_LOGGING);
+        } else {
+            LOG_E(TAG, "Failed to start logging tasks for auto-start");
+        }
     } else {
         LOG_E(TAG, "Module initialization failed. Check logs for details. Starting minimal tasks only.");
         app_state_t *state = app_state_get_instance();

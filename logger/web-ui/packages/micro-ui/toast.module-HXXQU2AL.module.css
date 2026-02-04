@@ -1,0 +1,22 @@
+@reference "./theme-reference.css";
+
+.t::before {
+  content: '';
+  @apply absolute top-0 left-0 bottom-0 w-1;
+}
+
+.i::before {
+  background-color: var(--a-inf);
+}
+
+.s::before {
+  background-color: var(--a-scs);
+}
+
+.w::before {
+  background-color: var(--a-warn);
+}
+
+.e::before {
+  background-color: var(--a-err);
+}

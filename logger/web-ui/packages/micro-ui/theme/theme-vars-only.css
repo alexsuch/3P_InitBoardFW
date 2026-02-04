@@ -1,0 +1,56 @@
+/* src/theme/theme-vars-only.css */
+
+/* Базові змінні (мінімальні дефолти; тримайте палітру дуже малою) */
+
+:root {
+  --a-bg-b: #0a0a0a;
+  --a-bg-p: #111214;
+  --a-bg-w: #0f1115;
+  --a-bg-ov: #00000099;
+
+  --a-txt: #e6e6e6;
+  --a-txt-mut: #a0a0a0;
+  --a-txt-str: #ffffff;
+  --a-txt-inv: #0b0b0b;
+
+  --a-p: #6366f1; /* primary */
+  --a-b-hov: #5457e0;
+
+  --a-sec: #2a2f3a; /* secondary base */
+  --a-sec-bg: #1d212b;
+  --a-sec-b: #3b4252;
+  --a-sec-txt: #e5e7eb;
+  --a-def-sec-b-hov: #323949;
+
+  --a-inf: #3b82f6;
+  --a-scs: #22c55e;
+  --a-warn: #f59e0b;
+  --a-err: #ef4444;
+  --a-dng: #dc2626;
+
+  --a-b: #2e3440;
+  --a-b-str: #434c5e;
+
+  --input-bg: var(--a-bg-p);
+  --input-b: var(--a-b);
+
+  --a-shd-soft: rgba(0, 0, 0, 0.25);
+
+  --a-sp-1: 0.25rem;
+  --a-sp-2: 0.5rem;
+  --a-sp-3: 0.75rem;
+  --a-sp-4: 1rem;
+  --a-sp-5: 1.25rem;
+  --a-sp-6: 1.5rem;
+
+  --a-txt-3xs: 0.625rem;
+  --a-txt-2xs: 0.6875rem;
+  --a-txt-xs: 0.75rem;
+  --a-txt-sm: 0.875rem;
+  --a-txt-base: 1rem;
+  --a-txt-xl: 1.25rem;
+  --a-txt-2xl: 1.5rem;
+  --a-txt-3xl: 1.875rem;
+  --a-txt-4xl: 2.25rem;
+  --a-txt-5xl: 3rem;
+}

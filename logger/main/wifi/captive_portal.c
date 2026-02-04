@@ -17,6 +17,14 @@
 
 static const char *TAG = "CAPTIVE";
 
+// Weak stub for when web server module is not compiled
+// The real implementation is in web_server_cpp.cpp
+__attribute__((weak)) void web_server_configure_captive_portal(void *server, bool enabled) {
+    (void)server;
+    (void)enabled;
+    // No-op when web server module is not available
+}
+
 static bool portal_lock(captive_portal_t *portal) {
     if (!portal || !portal->lock) {
         return false;

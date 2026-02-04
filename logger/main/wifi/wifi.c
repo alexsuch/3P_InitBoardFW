@@ -374,6 +374,8 @@ void wifi_load_config(wifi_t *wifi) {
 // WiFi events are routed through a worker task to keep the ESP-IDF callback lean
 // and avoid stack pressure on the system event task.
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    LOG_I(TAG, "[EVENT] Received event: base=%s, id=%ld", event_base, (long)event_id);
+    
     wifi_event_message_t message = {0};
     message.wifi = (wifi_t *)arg;
     message.base = event_base;
@@ -388,11 +390,14 @@ static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_
     }
 
     if (s_wifi_event_queue == NULL) {
+        LOG_E(TAG, "[EVENT] Queue is NULL! Events will be dropped.");
         return;
     }
 
     if (xQueueSend(s_wifi_event_queue, &message, 0) != pdTRUE) {
         LOG_W(TAG, "WiFi event queue full. Dropping event %ld.", (long)event_id);
+    } else {
+        LOG_I(TAG, "[EVENT] Event %ld queued successfully", (long)event_id);
     }
 }
 
@@ -1409,6 +1414,125 @@ void wifi_set_captive_portal_http_server(wifi_t *wifi, void *http_server) {
             wifi->captive_portal.http_endpoints_registered = true;
         }
     }
+}
+
+// =====================================================================
+// NVS Credential Storage Functions
+// =====================================================================
+
+#define WIFI_CREDS_NVS_NAMESPACE "wifi_creds"
+#define WIFI_CREDS_LAST_SSID_KEY "last_ssid"
+#define WIFI_CREDS_MAX_STORED 5
+
+esp_err_t wifi_nvs_save_credentials(const char *ssid, const char *password) {
+    if (!ssid || !password) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(WIFI_CREDS_NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        LOG_E(TAG, "Failed to open NVS: %s", esp_err_to_name(err));
+        return err;
+    }
+    
+    // Save password with SSID as key
+    err = nvs_set_str(handle, ssid, password);
+    if (err != ESP_OK) {
+        LOG_E(TAG, "Failed to save password for SSID %s: %s", ssid, esp_err_to_name(err));
+        nvs_close(handle);
+        return err;
+    }
+    
+    // Save as last connected SSID
+    err = nvs_set_str(handle, WIFI_CREDS_LAST_SSID_KEY, ssid);
+    if (err != ESP_OK) {
+        LOG_E(TAG, "Failed to save last SSID: %s", esp_err_to_name(err));
+    }
+    
+    err = nvs_commit(handle);
+    if (err != ESP_OK) {
+        LOG_E(TAG, "Failed to commit NVS: %s", esp_err_to_name(err));
+    }
+    
+    nvs_close(handle);
+    LOG_I(TAG, "Saved credentials for SSID: %s", ssid);
+    return ESP_OK;
+}
+
+esp_err_t wifi_nvs_load_credentials(const char *ssid, char *password, size_t pwd_len) {
+    if (!ssid || !password || pwd_len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(WIFI_CREDS_NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (err != ESP_OK) {
+        LOG_W(TAG, "Failed to open NVS for reading: %s", esp_err_to_name(err));
+        return err;
+    }
+    
+    size_t required_size = pwd_len;
+    err = nvs_get_str(handle, ssid, password, &required_size);
+    if (err != ESP_OK) {
+        LOG_W(TAG, "No credentials found for SSID %s: %s", ssid, esp_err_to_name(err));
+    }
+    
+    nvs_close(handle);
+    return err;
+}
+
+esp_err_t wifi_nvs_forget_credentials(const char *ssid) {
+    if (!ssid) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(WIFI_CREDS_NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        LOG_E(TAG, "Failed to open NVS: %s", esp_err_to_name(err));
+        return err;
+    }
+    
+    err = nvs_erase_key(handle, ssid);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        LOG_E(TAG, "Failed to erase SSID %s: %s", ssid, esp_err_to_name(err));
+        nvs_close(handle);
+        return err;
+    }
+    
+    // Check if this was the last connected SSID
+    char last_ssid[WIFI_SSID_MAX_LEN];
+    size_t len = sizeof(last_ssid);
+    if (nvs_get_str(handle, WIFI_CREDS_LAST_SSID_KEY, last_ssid, &len) == ESP_OK) {
+        if (strcmp(last_ssid, ssid) == 0) {
+            nvs_erase_key(handle, WIFI_CREDS_LAST_SSID_KEY);
+        }
+    }
+    
+    err = nvs_commit(handle);
+    nvs_close(handle);
+    
+    LOG_I(TAG, "Forgot credentials for SSID: %s", ssid);
+    return ESP_OK;
+}
+
+esp_err_t wifi_nvs_get_last_ssid(char *ssid, size_t len) {
+    if (!ssid || len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(WIFI_CREDS_NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (err != ESP_OK) {
+        return err;
+    }
+    
+    size_t required_size = len;
+    err = nvs_get_str(handle, WIFI_CREDS_LAST_SSID_KEY, ssid, &required_size);
+    
+    nvs_close(handle);
+    return err;
 }
 
 #endif  // defined(USE_WIFI)

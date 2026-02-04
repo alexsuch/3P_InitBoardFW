@@ -99,10 +99,13 @@ void button_update(button_t *button) {
                 // This is a short press - increment click counter
                 button->state.click_num++;
 
-                // Check if this is a triple press
-                if (button->state.click_num == 3) {
-                    button_send_event(button, BUTTON_EVENT_TYPE_TRIPLE_PRESS);
+                // Check for triple or quadruple press
+                if (button->state.click_num == 4) {
+                    button_send_event(button, BUTTON_EVENT_TYPE_QUADRUPLE_PRESS);
                     button->state.click_num = 0;  // Reset counter
+                } else if (button->state.click_num == 3) {
+                    button_send_event(button, BUTTON_EVENT_TYPE_TRIPLE_PRESS);
+                    // Don't reset - continue counting for potential quadruple press
                 } else {
                     // Single or double press - send event after timeout if no additional press
                     // We'll handle this in the timeout logic below

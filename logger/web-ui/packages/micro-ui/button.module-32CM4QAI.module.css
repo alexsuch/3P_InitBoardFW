@@ -1,0 +1,252 @@
+/* Base button styles */
+.b {
+  border-radius: 100vh;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease-in-out;
+  position: relative;
+  overflow: hidden;
+  padding: var(--p);
+  font-size: var(--fs);
+
+  /* Icons inherit color from button */
+  svg,
+  svg path {
+    fill: currentColor !important;
+    stroke: currentColor !important;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+    color: var(--a-txt-mut) !important;
+
+    &.vf,
+    &.ve {
+      background-color: var(--a-bg-ov) !important;
+    }
+
+    &.vo,
+    &.vt,
+    &.vg {
+      background-color: transparent !important;
+    }
+
+    &.vf {
+      border: 1px solid var(--a-b) !important;
+    }
+    &.vo {
+      border-color: var(--a-b) !important;
+    }
+  }
+}
+
+.b:active {
+  transform: translateY(0.0625rem);
+}
+
+/* Size variants using CSS variables */
+.s-xs {
+  --p: 0.25rem 0.75rem;
+  --fs: 0.75rem;
+}
+.s-s {
+  --p: 0.375rem 1rem;
+  --fs: 0.875rem;
+}
+.s-m {
+  --p: 0.5rem 1.5rem;
+  --fs: 1rem;
+}
+.s-l {
+  --p: 0.75rem 2rem;
+  --fs: 1.125rem;
+}
+.s-xl {
+  --p: 1rem 3rem;
+  --fs: 1.25rem;
+}
+
+/* Color classes - define CSS variables only */
+.cp {
+  --fg: var(--a-txt-inv);
+  --bg: var(--a-p);
+  --bgH: var(--a-b-hov);
+  --bd: var(--a-p);
+}
+
+.cs {
+  --fg: var(--a-sec-txt);
+  --bg: var(--a-sec-bg);
+  --bgH: var(--a-def-sec-b-hov);
+  --bd: var(--a-sec-b);
+}
+
+.cw {
+  --fg: var(--a-txt-inv);
+  --bg: var(--a-warn);
+  --bgH: var(--a-warn-hov);
+  --bd: var(--a-warn);
+}
+
+.csu {
+  --fg: var(--a-txt-inv);
+  --bg: var(--a-scs);
+  --bgH: var(--a-scs-hov);
+  --bd: var(--a-scs);
+}
+
+.ce {
+  --fg: var(--a-txt-inv);
+  --bg: var(--a-err);
+  --bgH: var(--a-err-hov);
+  --bd: var(--a-err);
+}
+
+.ci {
+  --fg: inherit;
+  --bg: inherit;
+  --bgH: color-mix(in srgb, var(--a-rip) 25%, transparent);
+  --bd: currentColor;
+}
+
+/* Variant styles using CSS variables */
+.vf {
+  color: var(--fg);
+  background: var(--bg);
+
+  &:not([disabled]):hover {
+    background: var(--bgH);
+  }
+
+  &.cs {
+    color: var(--a-sec-txt);
+  }
+}
+
+.ve {
+  background-color: var(--a-bg-p);
+  box-shadow:
+    0 3px 1px -2px var(--a-shd-soft),
+    0 2px 2px 0 var(--a-shd-soft),
+    0 1px 5px 0 var(--a-shd-soft);
+  transition: box-shadow 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  color: var(--bd);
+
+  &:not([disabled]):hover {
+    box-shadow:
+      0 2px 4px -1px var(--a-shd-soft),
+      0 4px 5px 0 var(--a-shd-soft),
+      0 1px 10px 0 var(--a-shd-soft);
+  }
+
+  /* For primary/warning/success/error colors - use colored background */
+  &.cp,
+  &.cw,
+  &.csu,
+  &.ce {
+    background-color: var(--bg);
+    color: var(--fg);
+
+    &:not([disabled]):hover {
+      background-color: var(--bgH);
+    }
+  }
+
+  /* For secondary - use secondary bg */
+  &.cs {
+    background-color: var(--bg);
+    color: var(--fg);
+
+    &:not([disabled]):hover {
+      background-color: var(--bgH);
+    }
+  }
+}
+
+.vo {
+  background-color: transparent;
+  border: 0.125rem solid var(--bd);
+  color: var(--bd);
+
+  &:not([disabled]):hover {
+    background-color: var(--bd);
+    color: var(--fg);
+  }
+
+  &.cs:not([disabled]):hover {
+    background-color: var(--bg);
+    color: var(--fg);
+  }
+
+  &.ci:not([disabled]):hover {
+    background-color: currentColor;
+    color: var(--a-txt-inv);
+  }
+}
+
+.vt {
+  background-color: transparent;
+  border: none;
+  color: var(--bd);
+
+  &:not([disabled]):hover {
+    background-color: color-mix(in srgb, var(--bd) 10%, transparent);
+  }
+
+  &.cs:not([disabled]):hover {
+    background-color: var(--bg);
+  }
+
+  &.ci:not([disabled]):hover {
+    background-color: color-mix(in srgb, var(--a-rip) 25%, transparent);
+  }
+}
+
+.vg {
+  background-color: transparent;
+  border: none;
+  color: var(--bd);
+
+  &:not([disabled]):hover {
+    background-color: color-mix(in srgb, var(--bd) 15%, transparent);
+  }
+
+  &.cs:not([disabled]):hover {
+    background-color: var(--bg);
+  }
+
+  &.ci:not([disabled]):hover {
+    background-color: color-mix(in srgb, var(--a-rip) 35%, transparent);
+  }
+
+  &.io {
+    border-radius: 50%;
+  }
+}
+
+/* Icon-only variant */
+.io {
+  padding: 0.375rem !important;
+  min-width: auto;
+  min-height: auto;
+
+  &.s-xs {
+    padding: 0.25rem !important;
+  }
+  &.s-s {
+    padding: 0.375rem !important;
+  }
+  &.s-m {
+    padding: 0.5rem !important;
+  }
+  &.s-l {
+    padding: 0.625rem !important;
+  }
+  &.s-xl {
+    padding: 0.75rem !important;
+  }
+}
+
+/* Ripple animation removed - use global 'ripple-base' class directly */

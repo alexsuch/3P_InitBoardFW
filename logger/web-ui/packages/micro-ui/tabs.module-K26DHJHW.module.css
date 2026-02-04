@@ -1,0 +1,44 @@
+@reference "./theme-reference.css";
+
+.tl {
+  @apply flex border-b border-border;
+}
+
+.tab {
+  @apply px-4 py-3 text-base font-medium bg-transparent cursor-pointer;
+  @apply text-muted border-b-2 border-transparent -mb-px;
+  @apply transition-all duration-200 relative;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+}
+
+.tab:hover:not(:disabled) {
+  @apply text-primary-hover;
+}
+
+.tab.active {
+  @apply text-primary;
+  border-bottom: 2px solid var(--color-primary);
+}
+
+.tab:disabled {
+  @apply opacity-50 cursor-not-allowed;
+}
+
+.tab:focus {
+  @apply outline-none;
+}
+
+.tab:focus::after {
+  content: '';
+  @apply absolute left-2 right-2 bottom-1 h-0.5 bg-primary opacity-50 rounded-sm;
+}
+
+.tab.active:focus::after {
+  @apply opacity-0;
+}
+
+.tp {
+  @apply p-4;
+}
