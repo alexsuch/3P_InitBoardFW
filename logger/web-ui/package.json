@@ -1,0 +1,24 @@
+{
+  "name": "logger-web-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build --mode development",
+    "build:prod": "vite build --mode single",
+    "embed": "python scripts/update-embed-files.py"
+  },
+  "dependencies": {
+    "micro-ui": "file:./packages/micro-ui"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.2",
+    "@preact/signals": "^2.3.2",
+    "@tailwindcss/vite": "^4.1.17",
+    "preact": "^10.27.2",
+    "tailwindcss": "^4.1.17",
+    "vite": "^7.2.1",
+    "vite-plugin-compression2": "2.3.1",
+    "vite-plugin-singlefile": "^2.3.0"
+  }
+}

@@ -11,13 +11,15 @@
       "servertype": "stlink",
       "interface": "swd",
       "runToEntryPoint": "main",
-      // "svdFile": "${workspaceFolder}/svd/STM32G431.svd",
+
+      "svdFile": "${workspaceFolder}/svd/STM32G431.svd",
+
       // Все через PATH:
       "gdbPath": "arm-none-eabi-gdb.exe",
       "serverpath": "ST-LINK_gdbserver.exe",
       "preLaunchTask": "Build Debug + Generate HEX",
       "serverArgs": [],
-      "showDevDebugOutput": "raw",
+      "showDevDebugOutput": "parsed",
       "swoConfig": {
         "enabled": false
       },

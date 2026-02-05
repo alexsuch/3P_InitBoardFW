@@ -1,0 +1,25 @@
+{
+  "folders": [
+	{
+		"path": "IB_Wing_STM32G431CBT6"
+	},
+	{
+		"path": "logger"
+	},
+	{
+		"path": "shared"
+	},
+	{
+		"path": "docs"
+	},
+	{
+		"path": "log-converter"
+	}
+],
+  "settings": {
+    "files.associations": {
+      "*.h": "c"
+    },
+    "cortex-debug.stm32cubeprogrammer.windows": "c:/ST/STM32CubeCLT_1.20.0/STM32CubeProgrammer/bin"
+  }
+}

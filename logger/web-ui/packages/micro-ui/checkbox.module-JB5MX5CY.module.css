@@ -1,0 +1,87 @@
+@reference "./theme-reference.css";
+
+.cb {
+  @apply relative inline-flex items-center cursor-pointer select-none gap-3;
+
+  &:is(.cb--disabled) {
+    @apply cursor-not-allowed opacity-50;
+  }
+}
+
+.inp {
+  @apply absolute w-px h-px opacity-0;
+}
+
+.box {
+  @apply border-2 border-secondary rounded flex items-center justify-center flex-shrink-0;
+  @apply transition-[background-color,border-color] duration-200;
+}
+
+.cm {
+  @apply stroke-inv opacity-0;
+  stroke-width: 3;
+  transform: scale(0.5);
+  @apply transition-[opacity,transform] duration-200;
+}
+
+.inp:checked + .box {
+  @apply bg-primary border-primary;
+}
+
+.inp:checked + .box .cm {
+  @apply opacity-100;
+  transform: scale(1);
+}
+
+.s-xs .box {
+  @apply w-4 h-4;
+}
+
+.s-xs .cm {
+  width: calc(1rem * 0.8);
+  height: calc(1rem * 0.8);
+}
+
+.s-s .box {
+  @apply w-5 h-5;
+}
+
+.s-s .cm {
+  width: calc(1.25rem * 0.8);
+  height: calc(1.25rem * 0.8);
+}
+
+.s-m .box {
+  @apply w-6 h-6;
+}
+
+.s-m .cm {
+  width: calc(1.5rem * 0.8);
+  height: calc(1.5rem * 0.8);
+}
+
+.s-l .box {
+  @apply w-7 h-7;
+}
+
+.s-l .cm {
+  width: calc(1.75rem * 0.8);
+  height: calc(1.75rem * 0.8);
+}
+
+.s-xl .box {
+  @apply w-8 h-8;
+}
+
+.s-xl .cm {
+  width: calc(2rem * 0.8);
+  height: calc(2rem * 0.8);
+}
+
+.lbl {
+  color: color-mix(in srgb, var(--a-txt) 85%, var(--a-txt-mut) 15%);
+}
+
+.cb--disabled .lbl {
+  color: color-mix(in srgb, var(--a-txt-mut) 60%, transparent);
+}

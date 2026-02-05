@@ -1,0 +1,133 @@
+{
+  "name": "micro-ui",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "types": "./index.d.ts"
+    },
+    "./widgets/alert": {
+      "import": "./widgets/alert.js",
+      "types": "./widgets/alert.d.ts"
+    },
+    "./widgets/alert-dialog": {
+      "import": "./widgets/alert-dialog.js",
+      "types": "./widgets/alert-dialog.d.ts"
+    },
+    "./widgets/alert-service": {
+      "import": "./widgets/alert-service.js",
+      "types": "./widgets/alert-service.d.ts"
+    },
+    "./widgets/button": {
+      "import": "./widgets/button/button.js",
+      "types": "./widgets/button/button.d.ts"
+    },
+    "./widgets/checkbox": {
+      "import": "./widgets/checkbox/checkbox.js",
+      "types": "./widgets/checkbox/checkbox.d.ts"
+    },
+    "./widgets/collapsible-panel": {
+      "import": "./widgets/collapsible-panel/collapsible-panel.js",
+      "types": "./widgets/collapsible-panel/collapsible-panel.d.ts"
+    },
+    "./widgets/confirmation": {
+      "import": "./widgets/confirmation/confirmation.js",
+      "types": "./widgets/confirmation/confirmation.d.ts"
+    },
+    "./widgets/icon": {
+      "import": "./widgets/icon/icon.js",
+      "types": "./widgets/icon/icon.d.ts"
+    },
+    "./widgets/input": {
+      "import": "./widgets/input/input.js",
+      "types": "./widgets/input/input.d.ts"
+    },
+    "./widgets/pagination": {
+      "import": "./widgets/pagination/pagination.js",
+      "types": "./widgets/pagination/pagination.d.ts"
+    },
+    "./widgets/modal": {
+      "import": "./widgets/modal/modal.js",
+      "types": "./widgets/modal/modal.d.ts"
+    },
+    "./widgets/modal-service": {
+      "import": "./widgets/modal-service.js",
+      "types": "./widgets/modal-service.d.ts"
+    },
+    "./widgets/progress-bar": {
+      "import": "./widgets/progress-bar/progress-bar.js",
+      "types": "./widgets/progress-bar/progress-bar.d.ts"
+    },
+    "./widgets/radio": {
+      "import": "./widgets/radio/radio-group.js",
+      "types": "./widgets/radio/radio-group.d.ts"
+    },
+    "./widgets/select": {
+      "import": "./widgets/select/select.js",
+      "types": "./widgets/select/select.d.ts"
+    },
+    "./widgets/select-modal-list": {
+      "import": "./widgets/select/select-modal-list.js",
+      "types": "./widgets/select/select-modal-list.d.ts"
+    },
+    "./widgets/slider": {
+      "import": "./widgets/slider/slider.js",
+      "types": "./widgets/slider/slider.d.ts"
+    },
+    "./widgets/spinner": {
+      "import": "./widgets/spinner.js",
+      "types": "./widgets/spinner.d.ts"
+    },
+    "./widgets/switch": {
+      "import": "./widgets/switch/switch.js",
+      "types": "./widgets/switch/switch.d.ts"
+    },
+    "./widgets/tabs": {
+      "import": "./widgets/tabs/tabs.js",
+      "types": "./widgets/tabs/tabs.d.ts"
+    },
+    "./widgets/toast": {
+      "import": "./widgets/toast/toast.js",
+      "types": "./widgets/toast/toast.d.ts"
+    },
+    "./widgets/toast-provider": {
+      "import": "./widgets/toast-provider.js",
+      "types": "./widgets/toast-provider.d.ts"
+    },
+    "./widgets/toast-service": {
+      "import": "./widgets/toast-service.js",
+      "types": "./widgets/toast-service.d.ts"
+    },
+    "./widgets/sliding-panel": {
+      "import": "./widgets/sliding-panel/sliding-panel.js",
+      "types": "./widgets/sliding-panel/sliding-panel.d.ts"
+    },
+    "./widgets/mobile-view-service": {
+      "import": "./widgets/mobile-view-service.js",
+      "types": "./widgets/mobile-view-service.d.ts"
+    },
+    "./inject-sprite": {
+      "import": "./inject-sprite.js",
+      "types": "./inject-sprite.d.ts"
+    },
+    "./utils/cx": {
+      "import": "./utils/cx.js",
+      "types": "./utils/cx.d.ts"
+    },
+    "./theme.css": "./theme/theme-default.css",
+    "./theme-vars.css": "./theme/theme-vars-only.css",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "dependencies": {
+    "svgo": "^4.0.0"
+  },
+  "bin": {
+    "micro-ui-icons": "./scripts/build-icon-sprite.mjs"
+  }
+}

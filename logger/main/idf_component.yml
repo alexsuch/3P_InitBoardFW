@@ -1,0 +1,6 @@
+version: "1.0.0"
+dependencies:
+  idf: ">=5.5"
+  esp_tinyusb: "~2.0.1"
+  # This project targets ESP32-S3 and uses TinyUSB (USB-CDC / file server).
+  bblanchon/arduinojson: "^7.4.2"

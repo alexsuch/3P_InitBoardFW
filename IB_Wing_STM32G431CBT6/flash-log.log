@@ -1,0 +1,46 @@
+16:25:03:604 : MASS ERASE ... 
+16:25:03:607 : Flash erase...
+16:25:03:609 : halt ap 0 
+16:25:03:629 : Init flashloader...
+16:25:03:630 : halt ap 0 
+16:25:03:639 : run ap 0 
+16:25:03:641 : halt ap 0 
+16:25:03:641 : Loader mass erase...
+16:25:03:654 : run ap 0 
+16:25:03:674 : halt ap 0 
+16:25:03:674 : Mass erase successfully achieved
+16:25:03:842 : UPLOADING ...
+16:25:03:842 :   Size          : 1024 Bytes
+16:25:03:842 :   Address       : 0x8000000
+16:25:03:842 : Read progress:
+16:25:03:847 : Data read successfully
+16:25:03:847 : Time elapsed during the read operation is: 00:00:00.007
+16:25:07:250 : Opening and parsing file: IB_Wing_STM32G431CBT6.hex
+16:25:07:250 : Memory Programming ...
+16:25:07:250 :   File          : IB_Wing_STM32G431CBT6.hex
+16:25:07:251 :   Size          : 59.29 KB 
+16:25:07:251 :   Address       : 0x08000000
+16:25:07:252 : Erasing memory corresponding to segment 0:
+16:25:07:252 : Memory Erase via FlashLoader!
+16:25:07:252 : Memory erase...
+16:25:07:254 : halt ap 0 
+16:25:07:274 : Erasing internal memory sectors [0 29]
+16:25:07:275 : Init flashloader...
+16:25:07:275 : halt ap 0 
+16:25:07:285 : run ap 0 
+16:25:07:286 : halt ap 0 
+16:25:07:286 : Loader sector erase...
+16:25:07:299 : run ap 0 
+16:25:07:357 : Error: failed to erase memory
+16:25:07:370 : Error: failed to erase memory
+16:25:07:372 : halt ap 0 
+16:25:07:385 : Init flashloader...
+16:25:07:386 : halt ap 0 
+16:25:07:396 : run ap 0 
+16:25:07:397 : halt ap 0 
+16:25:07:407 : run ap 0 
+16:25:07:490 : Memory [0x08000000 : 0x08020000] - Checksum : 0x01FE0000
+16:25:07:490 : RUNNING Program ... 
+16:25:07:490 :   Address:      : 0x08000000
+16:25:07:499 : Warning: The core is locked up
+16:25:07:513 : Start operation achieved successfully

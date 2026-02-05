@@ -1,0 +1,8 @@
+BasedOnStyle: Google
+UseTab: Never
+TabWidth: 4
+IndentWidth: 4
+ColumnLimit: 160
+SortIncludes: true
+BreakBeforeBraces: Attach
+AllowAllParametersOfDeclarationOnNextLine: true

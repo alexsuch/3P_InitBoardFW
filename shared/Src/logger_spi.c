@@ -4,7 +4,7 @@
  *
  * Role:
  *   1. Frame Assembly: Merge ADC samples (256 @ 100kHz) + IMU samples (0-50 @ ~104Hz) into
- *      fixed-size LogFrame_t structures with CRC16 validation
+ *      fixed-size LogFrame_t structures with checksum validation
  *   2. Frame Queue: Maintain circular FIFO for frames awaiting SPI transmission
  *   3. SPI Slave: Handle CMD 42 (0x2A) to transmit logger_config_t to master (ESP32)
  *   4. Auto-Streaming: After config handshake, automatically stream queued frames via DMA
@@ -12,32 +12,99 @@
  * Frame Assembly Path:
  *   - Wait for ADC block (256 samples @ 100kHz = ~2.56ms)
  *   - Collect available IMU samples (0-50) from ring buffer
- *   - Assemble frame with CRC16 (reflected polynomial)
+ *   - Assemble frame with checksum (CRC8 or SUM8, selected at build time)
  *   - Queue for transmission (circular FIFO: up to LOGGER_FRAME_QUEUE_SIZE frames)
  *
  * SPI Protocol (Master: ESP32, Slave: STM32):
  *   - Master sends CMD 42 at startup to request config
- *   - Slave responds with logger_config_t (32B) via DMA
+ *   - Slave responds with logger_config_t (64B) via DMA
  *   - After config TX: Frames auto-stream from queue
  *   - GPIO_READY signals data availability during transmission
  *
  * Frame Layout (LOGGER_FRAME_SIZE_BYTES bytes):
  *   - magic (2B): 0x5A5A (frame marker)
- *   - n_imu (2B): 0-50 valid IMU samples in frame
+ *   - n_imu (2B): 0-20 valid IMU samples in frame
  *   - adc[256] (512B): ADC int16_t samples
- *   - imu[50] (600B): IMU samples (12B each, only n_imu valid)
- *   - crc16 (2B): CRC16 over payload
- *   Total: ~1118 bytes
+ *   - imu[20] (320B): IMU samples (16B each incl. timestamp, only n_imu valid)
+ *   - mavlink_log (10B): MAVLink event flags + telemetry
+ *   - checksum8 (1B): checksum (CRC8 or SUM8)
+ *   - checksum_pad (1B): reserved (0)
+ *   Total: 852 bytes
  */
 
+#include "LSM6DS3.h"
 #include "logger.h"
 #include "mavlink_uart.h"
 #include "prj_config.h"
 #include "solution_wrapper.h"
 
+#if (LOGGER_CHECKSUM_ALGO == LOGGER_CHECKSUM_ALGO_CRC8_HW)
+#include "stm32g4xx.h"
+#include "stm32g4xx_hal_rcc.h"
+#endif
+
+#if (LOGGER_PROFILING_ENABLE == 1u)
+#include "stm32g4xx.h"
+#include "stm32g4xx_hal_rcc.h"
+#endif
+
 #define LOGGER_FRAME_SIZE_BYTES sizeof(LogFrame_t)  // Auto-calculated from LogFrame_t structure
 
 static logger_status_t loggerStat = {0};
+static uint8_t s_logging_started = 0;
+static volatile uint8_t s_start_pending = 0;
+
+volatile logger_profile_t g_logger_profile = {0};
+
+#if (LOGGER_PROFILING_ENABLE == 1u)
+/**
+ * @brief Initialize ARM DWT (Data Watchpoint and Trace) cycle counter
+ *
+ * Called once on first Logger_Task() invocation when profiling is enabled.
+ * Configures the Cortex-M debug hardware for CPU cycle counting:
+ *   1. Enables trace unit via CoreDebug->DEMCR (TRCENA bit)
+ *   2. Resets cycle counter DWT->CYCCNT to zero
+ *   3. Enables cycle counter via DWT->CTRL (CYCCNTENA bit)
+ *
+ * After init, DWT->CYCCNT increments by 1 each CPU clock cycle (e.g., 170 MHz).
+ * Read via logger_profile_now_cycles() for timing measurements.
+ *
+ * Note: DWT is available on Cortex-M3/M4/M7. No additional HW cost - uses
+ * existing debug registers. Counter wraps at ~25 seconds @ 170 MHz.
+ */
+static void logger_profile_dwt_enable_once(void) {
+    static uint8_t inited = 0;
+    if (inited) {
+        return;
+    }
+    inited = 1;
+
+    Logger_Profile_Reset();
+
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;  // Enable trace unit
+    DWT->CYCCNT = 0;                                 // Reset cycle counter
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;             // Enable cycle counter
+
+    g_logger_profile.enabled = 1u;
+    g_logger_profile.cpu_hz = HAL_RCC_GetHCLKFreq();
+}
+
+static inline uint32_t logger_profile_now_cycles(void) { return DWT->CYCCNT; }
+
+static inline void logger_profile_update_counter(volatile logger_prof_counter_t* counter, uint32_t delta_cycles) {
+    counter->count++;
+    counter->last_cycles = delta_cycles;
+    counter->sum_cycles += (uint64_t)delta_cycles;
+    if (delta_cycles > counter->max_cycles) {
+        counter->max_cycles = delta_cycles;
+    }
+}
+#endif
+
+void Logger_Profile_Reset(void) { memset((void*)&g_logger_profile, 0, sizeof(g_logger_profile)); }
+
+volatile uint32_t g_logger_frames_built = 0;
+volatile uint32_t g_logger_frames_dropped = 0;
 
 /* ADC buffer is initialized via static storage class (zero-initialized by default) */
 static AdcBuffer_t g_adc_buffer = {0};
@@ -45,33 +112,37 @@ static AdcBuffer_t g_adc_buffer = {0};
 /* IMU buffer is initialized via static storage class (zero-initialized by default) */
 static ImuBuffer_t g_imu_buffer = {0};
 
+// Some builds can observe occasional duplicate IMU reads (same 12 raw bytes)
+// within a few TIM1 ticks, typically caused by polling the DRDY/INT level
+// and re-reading while the sensor data hasn't advanced yet.
+// De-duplicate at the logger ingestion point to keep frame IMU blocks clean.
+static uint8_t g_last_imu_raw[IMU_RAW_DATA_SIZE] = {0};
+static uint32_t g_last_imu_ts = 0;
+static uint8_t g_have_last_imu = 0;
+
 /* ============================================================================
  * ADC BUFFER API
  * ============================================================================
  */
 
-/* ADC buffer is initialized via static storage class (zero-initialized by default) */
+volatile uint32_t g_logger_adc_overruns = 0;
 
 /**
- * @brief Get pointer to ready ADC buffer (LOGGER_ADC_BLOCK_SIZE samples)
+ * @brief Get pointer to the oldest queued ADC block (LOGGER_ADC_BLOCK_SIZE samples)
  *
  * @param out_count: Pointer to uint32_t to receive sample count (always LOGGER_ADC_BLOCK_SIZE)
  *
- * Returns: Pointer to int16_t array (LOGGER_ADC_BLOCK_SIZE samples), or NULL if not ready
+ * Returns: Pointer to int16_t array (LOGGER_ADC_BLOCK_SIZE samples), or NULL if no block queued
  *
- * Note: Must call Logger_AdcBuffer_IsReady() first to check readiness.
- *       Buffer remains valid until next DMA_COMPLETE interrupt.
+ * Note: The returned pointer stays valid until Logger_AdcBuffer_ClearReady() is called.
  *
  * Usage:
- *   if (Logger_AdcBuffer_IsReady()) {
- *       uint32_t count = 0;
- *       const int16_t *samples = Logger_AdcBuffer_GetBuffer(&count);
- *       // samples[0..LOGGER_ADC_BLOCK_SIZE-1] contain ADC values
- *       // count == LOGGER_ADC_BLOCK_SIZE
- *   }
+ *   uint32_t count = 0;
+ *   const int16_t* samples = Logger_AdcBuffer_GetBuffer(&count);
+ *   if (samples) { ...; Logger_AdcBuffer_ClearReady(); }
  */
 const int16_t* Logger_AdcBuffer_GetBuffer(uint32_t* out_count) {
-    if (!g_adc_buffer.ready) {
+    if (g_adc_buffer.count == 0) {
         if (out_count) *out_count = 0;
         return NULL;
     }
@@ -80,7 +151,44 @@ const int16_t* Logger_AdcBuffer_GetBuffer(uint32_t* out_count) {
         *out_count = ADC_BUFFER_SIZE;
     }
 
-    return g_adc_buffer.samples;
+    return g_adc_buffer.samples[g_adc_buffer.read_idx];
+}
+
+uint32_t Logger_AdcBuffer_GetFirstTimestamp(void) { return g_adc_buffer.block_timestamp; }
+
+/**
+ * @brief Advance ADC queue read pointer after processing current block (consumer side)
+ *
+ * Called from main loop (Logger_Task) after a frame is built from the ADC block.
+ * Removes the oldest block from the FIFO queue, making room for new DMA blocks.
+ *
+ * Producer-Consumer Pattern:
+ *   - Producer: Logger_AdcBuffer_OnComplete() called from DMA ISR (HAL_ADC_ConvCpltCallback)
+ *   - Consumer: Logger_Task() in main loop reads block, then calls this to release it
+ *
+ * Why __disable_irq() is needed:
+ *   The DMA complete ISR can fire at any time and modify queue state (write_idx, count).
+ *   This function reads and modifies shared variables (read_idx, count, ready, timestamp).
+ *   Without disabling interrupts, a race condition could occur:
+ *     1. Main loop reads count=1
+ *     2. ISR fires, increments count to 2
+ *     3. Main loop decrements count to 0 (wrong! should be 1)
+ *   The critical section ensures atomic read-modify-write of all queue state.
+ *   Duration is very short (~10 cycles), so interrupt latency impact is minimal.
+ */
+void Logger_AdcBuffer_ClearReady(void) {
+    __disable_irq();
+    if (g_adc_buffer.count > 0) {
+        g_adc_buffer.read_idx = (g_adc_buffer.read_idx + 1u) % ADC_BLOCK_QUEUE_DEPTH;
+        g_adc_buffer.count--;
+        g_adc_buffer.ready = (g_adc_buffer.count > 0u) ? ADC_FRAME_READY_FLAG : ADC_FRAME_EMPTY_FLAG;
+        if (g_adc_buffer.count > 0u) {
+            g_adc_buffer.block_timestamp = g_adc_buffer.block_timestamps[g_adc_buffer.read_idx];
+        } else {
+            g_adc_buffer.block_timestamp = 0;
+        }
+    }
+    __enable_irq();
 }
 
 /**
@@ -106,14 +214,32 @@ void Logger_AdcBuffer_OnComplete(const uint16_t* dma_buffer, uint32_t count) {
         return;
     }
 
-    // Copy LOGGER_ADC_BLOCK_SIZE samples from DMA buffer to internal storage using memcpy
-    memcpy(g_adc_buffer.samples, dma_buffer, LOGGER_ADC_BLOCK_SIZE * sizeof(int16_t));
+    // Store reference timestamp for this ADC block as the timestamp of the *first* sample.
+    // We capture the tick in the DMA callback (after the block completes) and back-calculate
+    // the first-sample timestamp using the known block size.
+    uint32_t ts_end = Logger_GetTimestamp();
+    uint32_t ts_first = ts_end - LOGGER_ADC_BLOCK_SIZE;
 
-    // Store reference timestamp (first sample of this block)
-    g_adc_buffer.block_timestamp = Logger_GetTimestamp();
+    // Queue the block; if the queue is full we drop the newest block (and count an overrun).
+    uint32_t w = g_adc_buffer.write_idx;
+    if (g_adc_buffer.count >= ADC_BLOCK_QUEUE_DEPTH) {
+        g_adc_buffer.overruns++;
+        g_logger_adc_overruns = g_adc_buffer.overruns;
+        return;
+    }
+
+    // Copy LOGGER_ADC_BLOCK_SIZE samples from DMA buffer to queued storage.
+    memcpy(g_adc_buffer.samples[w], dma_buffer, LOGGER_ADC_BLOCK_SIZE * sizeof(int16_t));
+    g_adc_buffer.block_timestamps[w] = ts_first;
+    g_adc_buffer.write_idx = (w + 1u) % ADC_BLOCK_QUEUE_DEPTH;
+    g_adc_buffer.count++;
 
     // Set ready flag
     g_adc_buffer.ready = ADC_FRAME_READY_FLAG;
+    if (g_adc_buffer.count == 1u) {
+        g_adc_buffer.read_idx = w;
+        g_adc_buffer.block_timestamp = ts_first;
+    }
 }
 
 /* ============================================================================
@@ -132,56 +258,117 @@ void Logger_AdcBuffer_OnComplete(const uint16_t* dma_buffer, uint32_t count) {
  *
  * Effects:
  *   - Copies 12 bytes directly into buffer (zero ISR overhead)
- *   - Captures and stores precise timestamp (TIM6 @ 100 kHz)
+ *   - Captures and stores timestamp (100 kHz tick counter)
  *   - Increments count
  *   - If count > 50, discards oldest sample and keeps newest
  *
  * Returns: void
  */
 void Logger_ImuOnNewSample(const uint8_t* raw_data) {
+    // Test1Toggle();  // T1 DEBUG: Toggle on each IMU sample (should be ~6664 Hz)
+
     if (!raw_data) {
         return;
     }
 
-    uint32_t timestamp = Logger_GetTimestamp();  // Get TIM6 counter @ 100 kHz
+    uint32_t timestamp = Logger_GetTimestamp();  // 100 kHz tick (10 us), shared timebase with ADC
+
+    // Duplicate sample detection - complements the time-based rearm guard in LSM6DS3.c.
+    //
+    // Two-layer protection against IMU read issues at high ODR (e.g., 6.6 kHz):
+    //
+    //   Layer 1 - Rearm Guard (LSM6DS3.c):
+    //     Prevents the polling state machine from getting stuck when the DRDY low phase
+    //     is missed at high ODR. Uses time-based re-arm (expected_period - 1 ticks) to
+    //     force a new read attempt even if DRDY stays high. This ensures reads continue.
+    //
+    //   Layer 2 - Duplicate Detection (here):
+    //     The rearm guard intentionally triggers slightly early to avoid missed samples.
+    //     This can cause the same IMU output registers to be read twice before the sensor
+    //     updates them. This check filters out such duplicates by comparing:
+    //       - Timestamp delta (dt <= 5 ticks = ~50µs, much faster than any valid ODR)
+    //       - Raw data bytes (identical 12-byte payload = same sensor reading)
+    //
+    // Both layers are needed: rearm keeps reads flowing, duplicate detection keeps data clean.
+    // At 3332 Hz ODR the expected delta is ~30 ticks, so dt<=5 strongly suggests a duplicate read.
+    if (g_have_last_imu) {
+        uint32_t dt = (uint32_t)(timestamp - g_last_imu_ts);
+        if ((dt <= 5u) && (memcmp(raw_data, g_last_imu_raw, IMU_RAW_DATA_SIZE) == 0)) {
+            return;
+        }
+    }
+    memcpy(g_last_imu_raw, raw_data, IMU_RAW_DATA_SIZE);
+    g_last_imu_ts = timestamp;
+    g_have_last_imu = 1u;
+
+    uint32_t head = g_imu_buffer.head;
+
+    // Write sample to head position (O(1) operation)
+    memcpy(&g_imu_buffer.samples[head].data[0], raw_data, IMU_RAW_DATA_SIZE);
+    g_imu_buffer.samples[head].timestamp = timestamp;
+
+    // Advance head with wrap-around
+    g_imu_buffer.head = (head + 1) % IMU_BUFFER_MAX_SAMPLES;
 
     if (g_imu_buffer.count < IMU_BUFFER_MAX_SAMPLES) {
-        // Buffer not full, add new sample
-        memcpy(&g_imu_buffer.samples[g_imu_buffer.count].data[0], raw_data, IMU_RAW_DATA_SIZE);
-        g_imu_buffer.samples[g_imu_buffer.count].timestamp = timestamp;
+        // Buffer not full yet
         g_imu_buffer.count++;
     } else {
-        // Buffer full, shift left and add new sample at end
-        memmove(&g_imu_buffer.samples[0], &g_imu_buffer.samples[1], ((IMU_BUFFER_MAX_SAMPLES - 1) * sizeof(ImuRawSample_t)));
-        memcpy(&g_imu_buffer.samples[IMU_BUFFER_MAX_SAMPLES - 1].data[0], raw_data, IMU_RAW_DATA_SIZE);
-        g_imu_buffer.samples[IMU_BUFFER_MAX_SAMPLES - 1].timestamp = timestamp;
+        // Buffer full - advance tail to discard oldest sample (no memmove!)
+        g_imu_buffer.tail = (g_imu_buffer.tail + 1) % IMU_BUFFER_MAX_SAMPLES;
     }
 }
 
 /**
- * @brief Get pointer to IMU buffer data
+ * @brief Pop IMU samples from ring buffer (consumer function)
  *
- * @param out_count: Pointer to uint32_t to receive actual sample count
+ * Copies up to max_count most recent samples from ring buffer to output buffer.
+ * Uses critical section for thread-safe access between ISR producer and main loop consumer.
+ * Clears the ring buffer after copying.
  *
- * Returns: Pointer to ImuRawSample_t array (up to 50 samples),
- *          or NULL if buffer empty
+ * @param out_buf: Destination buffer for samples (must be at least max_count * sizeof(ImuRawSample_t))
+ * @param max_count: Maximum number of samples to copy (typically LOGGER_IMU_BLOCK_SIZE = 20)
  *
- * Note: Buffer ownership remains in logger; caller should copy if keeping data.
+ * @return Number of samples actually copied (0..max_count)
  */
-const ImuRawSample_t* Logger_ImuRing_GetBuffer(uint32_t* out_count) {
-    if (g_imu_buffer.count == 0) {
-        if (out_count) *out_count = 0;
-        return NULL;
+uint32_t Logger_ImuRing_PopSamples(ImuRawSample_t* out_buf, uint32_t max_count) {
+    if (!out_buf || max_count == 0) {
+        return 0;
     }
 
-    if (out_count) {
-        *out_count = g_imu_buffer.count;
+    // Critical section to prevent race with Logger_ImuOnNewSample (ISR context)
+    __disable_irq();
+
+    uint32_t count = g_imu_buffer.count;
+    if (count == 0) {
+        __enable_irq();
+        return 0;
     }
 
-    return g_imu_buffer.samples;
+    // Calculate how many samples to copy (clamp to max_count, keep most recent)
+    uint32_t to_copy = (count > max_count) ? max_count : count;
+    uint32_t skip = count - to_copy;  // Skip oldest samples if buffer has more than max_count
+
+    // Calculate starting read position (tail + skip, with wrap-around)
+    uint32_t read_idx = (g_imu_buffer.tail + skip) % IMU_BUFFER_MAX_SAMPLES;
+
+    // Copy samples to output buffer
+    for (uint32_t i = 0; i < to_copy; i++) {
+        out_buf[i] = g_imu_buffer.samples[read_idx];
+        read_idx = (read_idx + 1) % IMU_BUFFER_MAX_SAMPLES;
+    }
+
+    // Clear ring buffer (reset to empty state)
+    g_imu_buffer.head = 0;
+    g_imu_buffer.tail = 0;
+    g_imu_buffer.count = 0;
+
+    __enable_irq();
+
+    return to_copy;
 }
 
-/* IMU buffer clear via direct access: g_imu_buffer.count = 0 */
+/* IMU buffer clear via Logger_ImuRing_PopSamples or direct reset of head/tail/count */
 
 /* ============================================================================
  * CRC8 CALCULATION (Table-based - Fast)
@@ -190,7 +377,8 @@ const ImuRawSample_t* Logger_ImuRing_GetBuffer(uint32_t* out_count) {
 
 /* Pre-computed CRC8 lookup table (CRC8_TABLE_SIZE entries) */
 /* Polynomial: CRC8_POLYNOMIAL (CRC-8-ATM / CRC-8-CCITT) */
-static const uint8_t CRC8_TABLE[CRC8_TABLE_SIZE] = {0x00,
+/* Note: Placed in RAM (non-const) to avoid flash wait-states on each lookup in Debug builds. */
+static uint8_t CRC8_TABLE[CRC8_TABLE_SIZE] = {0x00,
     0x07,
     0x0E,
     0x09,
@@ -458,14 +646,64 @@ static const uint8_t CRC8_TABLE[CRC8_TABLE_SIZE] = {0x00,
  * @param len: Length of chunk in bytes
  * @return Updated CRC8 value
  */
-static uint8_t crc8_update_chunk(uint8_t crc, const uint8_t* data, uint32_t len) {
+static inline uint8_t crc8_update_chunk(uint8_t crc, const uint8_t* data, uint32_t len) {
+    const uint8_t* table = CRC8_TABLE;
     for (uint32_t i = 0; i < len; i++) {
-        crc = CRC8_TABLE[crc ^ data[i]];
+        crc = table[crc ^ data[i]];
     }
     return crc;
 }
 
-#if 0
+static inline uint8_t sum8_update_chunk(uint8_t sum, const uint8_t* data, uint32_t len) {
+    for (uint32_t i = 0; i < len; i++) {
+        sum = (uint8_t)(sum + data[i]);
+    }
+    return sum;
+}
+
+#if (LOGGER_CHECKSUM_ALGO == LOGGER_CHECKSUM_ALGO_CRC8_HW)
+static void crc8_hw_init_once(void) {
+    static uint8_t inited = 0;
+    if (inited) {
+        return;
+    }
+    inited = 1;
+
+    __HAL_RCC_CRC_CLK_ENABLE();
+
+    // Configure CRC peripheral for CRC-8/ATM: poly=0x07, init=0x00, refin/refout=0, xorout=0.
+    CRC->CR &= ~(CRC_CR_POLYSIZE | CRC_CR_REV_IN | CRC_CR_REV_OUT);
+    CRC->CR |= CRC_CR_POLYSIZE_1;  // 0b10 => 8-bit polynomial
+    CRC->POL = (uint32_t)CRC8_POLYNOMIAL;
+}
+
+static inline uint8_t crc8_hw_update_chunk(uint8_t state, const uint8_t* data, uint32_t len) {
+    crc8_hw_init_once();
+
+    // Load initial value into CRC->DR via INIT + RESET.
+    CRC->INIT = (uint32_t)state;
+    CRC->CR |= CRC_CR_RESET;
+
+    // Feed bytes in order to match the existing software CRC8 (table) behavior.
+    volatile uint8_t* dr8 = (volatile uint8_t*)&CRC->DR;
+    for (uint32_t i = 0; i < len; i++) {
+        dr8[0] = data[i];
+    }
+
+    return (uint8_t)(CRC->DR & 0xFFu);
+}
+#endif
+
+static inline uint8_t checksum8_update_chunk(uint8_t state, const uint8_t* data, uint32_t len) {
+#if (LOGGER_CHECKSUM_ALGO == LOGGER_CHECKSUM_ALGO_SUM8)
+    return sum8_update_chunk(state, data, len);
+#elif (LOGGER_CHECKSUM_ALGO == LOGGER_CHECKSUM_ALGO_CRC8_HW)
+    return crc8_hw_update_chunk(state, data, len);
+#else
+    return crc8_update_chunk(state, data, len);
+#endif
+}
+
 /**
  * @brief Fast table-based CRC8 calculation (full buffer)
  *
@@ -473,9 +711,8 @@ static uint8_t crc8_update_chunk(uint8_t crc, const uint8_t* data, uint32_t len)
  * Polynomial: 0x07 (CRC-8-ATM / CRC-8-CCITT)
  *
  * Performance:
- *   - 1116 bytes @ 168 MHz: ~25 μs (vs 50 μs for CRC16, 300+ μs for bit-by-bit)
- *   - ~2 cycles per byte (lookup + XOR)
- *   - 50% faster than CRC16, uses 4× less ROM (256B vs 1KB)
+ *   - Payload length is 850 bytes (frame excluding checksum8+pad).
+ *   - Table-based CRC8 is O(n) with one lookup per byte.
  *
  * @param data: Pointer to data buffer
  * @param len: Length in bytes
@@ -516,53 +753,53 @@ static uint8_t crc8_compute_full(const uint8_t* data, uint32_t len) {
 }
 
 /**
- * @brief Validate CRC computation: compare full vs incremental methods
+ * @brief Validate checksum computation: compare full vs incremental methods
  *
- * Computes CRC8 using both methods:
- *   1. Full single-pass method (crc8_compute_full)
+ * Computes the selected 8-bit checksum using both methods:
+ *   1. Full single-pass method
  *   2. Incremental 4-part state machine method (simulated)
  *
  * Useful for unit testing and verifying that both approaches produce identical results.
  *
  * @param frame: Pointer to LogFrame_t structure to validate
- * @return 1 if both methods produce same CRC, 0 if mismatch (indicates bug)
+ * @return 1 if both methods match, 0 if mismatch (indicates bug)
  *
  * Usage:
  *   LogFrame_t my_frame = {...};
- *   if (!crc8_validate_methods(&my_frame)) {
- *       // ERROR: CRC methods diverged!
+ *   if (!checksum8_validate_methods(&my_frame)) {
+ *       // ERROR: checksum methods diverged!
  *   }
  */
-static uint32_t crc8_validate_methods(const LogFrame_t* frame) {
+static uint32_t checksum8_validate_methods(const LogFrame_t* frame) {
     if (!frame) {
         return 0;
     }
 
     const uint8_t* frame_data = (const uint8_t*)frame;
-    uint32_t data_len = sizeof(LogFrame_t) - sizeof(uint16_t);  // Exclude crc16 field (2 bytes)
+    uint32_t data_len = sizeof(LogFrame_t) - sizeof(uint16_t);  // Exclude checksum field (checksum8 + pad = 2 bytes)
 
     // ===== METHOD 1: Full single-pass =====
-    uint8_t crc_full = crc8_compute_full(frame_data, data_len);
+    uint8_t checksum_full = checksum8_update_chunk(0, frame_data, data_len);
 
     // ===== METHOD 2: Incremental 4-part (simulate what Logger_Task does) =====
-    uint8_t crc_incremental = CRC8_INIT;
+    uint8_t checksum_incremental = 0;
 
     // Part 1: header + first quarter of ADC
-    crc_incremental = crc8_update_chunk(crc_incremental, &frame_data[CRC_PART1_OFFSET], CRC_PART1_SIZE);
+    checksum_incremental = checksum8_update_chunk(checksum_incremental, &frame_data[CRC_PART1_OFFSET], CRC_PART1_SIZE);
 
     // Part 2: second quarter of ADC
-    crc_incremental = crc8_update_chunk(crc_incremental, &frame_data[CRC_PART2_OFFSET], CRC_PART2_SIZE);
+    checksum_incremental = checksum8_update_chunk(checksum_incremental, &frame_data[CRC_PART2_OFFSET], CRC_PART2_SIZE);
 
     // Part 3: third quarter of ADC + first quarter IMU
-    crc_incremental = crc8_update_chunk(crc_incremental, &frame_data[CRC_PART3_OFFSET], CRC_PART3_SIZE);
+    checksum_incremental = checksum8_update_chunk(checksum_incremental, &frame_data[CRC_PART3_OFFSET], CRC_PART3_SIZE);
 
     // Part 4: fourth quarter ADC + remaining IMU
     uint32_t part4_size = data_len - CRC_PART4_OFFSET;
-    crc_incremental = crc8_update_chunk(crc_incremental, &frame_data[CRC_PART4_OFFSET], part4_size);
+    checksum_incremental = checksum8_update_chunk(checksum_incremental, &frame_data[CRC_PART4_OFFSET], part4_size);
 
     // ===== COMPARE RESULTS =====
-    if (crc_full != crc_incremental) {
-        // CRC MISMATCH - indicates bug in either method!
+    if (checksum_full != checksum_incremental) {
+        // Mismatch indicates a bug in either method.
         return 0;  // Validation FAILED
     } else {
         Test2Toggle();
@@ -571,7 +808,6 @@ static uint32_t crc8_validate_methods(const LogFrame_t* frame) {
 
     return 1;  // Validation PASSED - both methods identical
 }
-#endif
 
 /**
  * @brief Initialize CRC state machine for frame at given offset
@@ -580,7 +816,7 @@ static uint32_t crc8_validate_methods(const LogFrame_t* frame) {
  *   Part 1: header + 1st quarter ADC (0..133 bytes)
  *   Part 2: 2nd quarter ADC (134..261 bytes)
  *   Part 3: 3rd quarter ADC + 1st quarter IMU (262..419 bytes)
- *   Part 4: 2nd-4th quarter IMU (420..517 bytes, excl. crc16 field)
+ *   Part 4: remainder of payload (from CRC_PART4_OFFSET to end, excl. CRC field)
  *
  * @param crc_state: Pointer to CrcState_t to initialize
  * @param state_step: Which step (0=part1, 1=part2, 2=part3, 3=part4)
@@ -601,7 +837,7 @@ static void crc_state_init_step(CrcState_t* crc_state, uint32_t state_step) {
             break;
         case 3: /* Part 4: 4th quarter ADC + remaining IMU */
             crc_state->crc_offset = CRC_PART4_OFFSET;
-            crc_state->crc_chunk_size = CRC_PART3_SIZE;
+            crc_state->crc_chunk_size = 0;
             break;
     }
 }
@@ -622,7 +858,7 @@ static uint32_t crc_state_process_step(FrameBuilder_t* builder) {
 
     LogFrame_t* frame = builder->current_frame;
     uint8_t* frame_data = (uint8_t*)frame;
-    uint32_t data_len = sizeof(LogFrame_t) - sizeof(uint8_t);  // Exclude crc16 field
+    uint32_t data_len = sizeof(LogFrame_t) - sizeof(uint16_t);  // Exclude checksum field (checksum8 + pad = 2 bytes)
 
     // Ensure we don't process past the end
     if (builder->crc_state.crc_offset + builder->crc_state.crc_chunk_size > data_len) {
@@ -631,18 +867,26 @@ static uint32_t crc_state_process_step(FrameBuilder_t* builder) {
 
     // Process this chunk
     uint8_t* chunk_ptr = &frame_data[builder->crc_state.crc_offset];
-    builder->crc_state.crc_current = crc8_update_chunk(builder->crc_state.crc_current, chunk_ptr, builder->crc_state.crc_chunk_size);
+    builder->crc_state.crc_current = checksum8_update_chunk(builder->crc_state.crc_current, chunk_ptr, builder->crc_state.crc_chunk_size);
 
     return 1;  // Step complete
 }
 void Logger_FrameBuilder_Init(void) {
     memset(&loggerStat.frame_ctx, 0, sizeof(loggerStat.frame_ctx));
 
+#if (LOGGER_PROFILING_ENABLE == 1u)
+    // Read comment under method
+    logger_profile_dwt_enable_once();
+#endif
+
     /* Initialize logger ADC buffer (Phase 2) */
     memset(&g_adc_buffer, 0, sizeof(AdcBuffer_t));
 
     /* Initialize logger IMU ring buffer (Phase 3) */
     memset(&g_imu_buffer, 0, sizeof(ImuBuffer_t));
+    memset(g_last_imu_raw, 0, sizeof(g_last_imu_raw));
+    g_last_imu_ts = 0;
+    g_have_last_imu = 0u;
 
     /* Initialize MAVLink fields */
     loggerStat.frame_ctx.builder.mavlink_events = 0;
@@ -658,7 +902,7 @@ void Logger_FrameBuilder_Init(void) {
  * Called once from App_InitRun() to set up SPI slave communication:
  *   - Sets configuration (magic=LOGGER_CONFIG_MAGIC, version=1, ADC params)
  *   - Initializes SPI2 peripheral for interrupt-driven command reception
- *   - Starts listening for master (ESP32) command byte (CMD 42 only)
+ *   - Starts listening for master (ESP32) command byte (CMD 42)
  *   - Initializes GPIO_READY signal (low = no data available)
  *   - Sets SPI state machine to IDLE
  *
@@ -672,8 +916,26 @@ void Logger_Init(void) {
     loggerStat.config.adc_sample_rate_khz = ADC_SAMPLING_FREQ_KHZ;  // 100 kHz sampling
     loggerStat.config.adc_block_size = LOGGER_ADC_BLOCK_SIZE;       // 256 samples per frame
     loggerStat.config.mavlink_logging_enabled = 1;                  // MAVLink logging enabled
+    loggerStat.config.reserved[0] = (uint8_t)LOGGER_CHECKSUM_ALGO;  // checksum algorithm id (CRC8/SUM8)
 
 #if (SPI_LOGGER_ENABLE == 1u)
+    // TODO: when new sensorr  will be added make abstraction for it  and read settings from sensor object abstraction
+    //  Populate IMU config early so the master can read a meaningful config immediately after reset.
+    //  The sensor driver will overwrite this later with the actual hardware-readback values.
+    imu_config_t imu_cfg = {0};
+    imu_cfg.accel_odr_hz = (uint16_t)LSM6DS3_SAMPLING_FREQ_HZ;
+    imu_cfg.gyro_odr_hz = (uint16_t)LSM6DS3_SAMPLING_FREQ_HZ;
+    imu_cfg.accel_present = (imu_cfg.accel_odr_hz > 0) ? 1u : 0u;
+    imu_cfg.gyro_present = (imu_cfg.gyro_odr_hz > 0) ? 1u : 0u;
+    imu_cfg.chip_id = LSM6DS3_ID;
+    imu_cfg.accel_range_g = 16u;
+    imu_cfg.reserved_align = 0u;
+    imu_cfg.gyro_range_dps = 2000u;
+    imu_cfg.reserved0 = LSM6DS3_CTRL1_XL_HIT_VAL;
+    imu_cfg.reserved1 = LSM6DS3_CTRL2_G_HIT_VAL;
+    imu_cfg.reserved2 = LSM6DS3_CTRL3_C_VAL;
+    Logger_OnAccelerometerReady(&imu_cfg);
+
     // Initialize SPI2 NVIC for interrupt-driven reception
     Logger_SPI_Init();
 
@@ -686,6 +948,11 @@ void Logger_Init(void) {
 #endif
     // Initialize SPI state machine
     loggerStat.frame_ctx.spi_state = SPI_STATE_IDLE;
+    s_logging_started = 0;
+
+    g_logger_adc_overruns = 0;
+    g_logger_frames_built = 0;
+    g_logger_frames_dropped = 0;
 }
 
 /**
@@ -693,7 +960,7 @@ void Logger_Init(void) {
  *
  * High-level queue draining function that manages post-config frame streaming:
  *   1. Checks config_sent flag (set by Logger_SPI_RxCallback after config TX complete)
- *   2. If config_sent=1: Marks transition complete, calls Solution_LoggingStart() to enable ADC/IMU
+ *   2. If config_sent=1: Marks transition complete (config phase complete)
  *   3. Dequeues next frame from circular FIFO queue
  *   4. Copies frame to TX buffer (loggerStat.tx_frame)
  *   5. Initiates DMA transmission via Logger_SPI_Transmit()
@@ -709,11 +976,8 @@ void Logger_Init(void) {
  *   - Logger_SPI_TxCallback() indirectly (via Logger_Task state check)
  */
 int Logger_DrainQueue(void) {
-    // If we just finished sending config, skip this cycle and reset flag
+    // If we just finished sending config, reset flag (actual start handled by Logger_Task via s_start_pending)
     if (loggerStat.config_sent == 1) {
-        Solution_LoggingStart();  // Start logging after config sent
-        Test2Toggle();
-        Test2Toggle();
         loggerStat.config_sent = 0;  // Reset for next cycle
     }
 
@@ -738,7 +1002,7 @@ int Logger_DrainQueue(void) {
  *   - Monitors ADC buffer ready flag
  *   - Collects 256 ADC samples when ready
  *   - Retrieves available IMU samples (0-50) from ring buffer
- *   - Assembles LogFrame_t with CRC16
+ *   - Assembles LogFrame_t with CRC8
  *   - Adds to queue (circular FIFO)
  *   - Auto-drains queued frames to SPI DMA when idle
  *
@@ -755,6 +1019,19 @@ int Logger_DrainQueue(void) {
  */
 uint32_t Logger_Task(void) {
     uint32_t frames_queued = 0;
+
+#if (LOGGER_PROFILING_ENABLE == 1u)
+    logger_profile_dwt_enable_once();
+    uint32_t task_start = logger_profile_now_cycles();
+#endif
+
+    // Start acquisition once, after the config transfer completed.
+    // The config TX completion is observed in Logger_DrainQueue() via loggerStat.config_sent.
+    if (s_start_pending != 0u && s_logging_started == 0u) {
+        s_start_pending = 0u;
+        s_logging_started = 1u;
+        Solution_LoggingStart();
+    }
 
     // Check if previous SPI transmission completed and queue needs draining
     // This allows continuous streaming without waiting for ADC block
@@ -775,29 +1052,30 @@ uint32_t Logger_Task(void) {
                 const int16_t* adc_data = Logger_AdcBuffer_GetBuffer(&adc_count);
 
                 if (adc_data && adc_count == LOGGER_ADC_BLOCK_SIZE) {
-                    // Copy ADC data to builder
+                    // Test2Toggle();  // T2 DEBUG: Toggle on each ADC block ready (should be ~390 Hz)
+                    //  Copy ADC data to builder
+#if (LOGGER_PROFILING_ENABLE == 1u)
+                    uint32_t t0 = logger_profile_now_cycles();
+#endif
                     memcpy(loggerStat.frame_ctx.builder.adc, adc_data, LOGGER_ADC_BLOCK_SIZE * sizeof(int16_t));
+#if (LOGGER_PROFILING_ENABLE == 1u)
+                    logger_profile_update_counter(&g_logger_profile.adc_builder_copy, logger_profile_now_cycles() - t0);
+#endif
                     loggerStat.frame_ctx.builder.adc_count = LOGGER_ADC_BLOCK_SIZE;
-                    loggerStat.frame_ctx.builder.adc_ts_first = g_adc_buffer.block_timestamp;
+                    loggerStat.frame_ctx.builder.adc_ts_first = Logger_AdcBuffer_GetFirstTimestamp();
 
                     // Clear ADC buffer for next block
-                    g_adc_buffer.ready = ADC_FRAME_EMPTY_FLAG;
+                    Logger_AdcBuffer_ClearReady();
 
-                    // Get IMU samples from linear buffer (0..50 samples)
-                    uint32_t imu_count = 0;
-                    const ImuRawSample_t* imu_data = Logger_ImuRing_GetBuffer(&imu_count);
-
-                    if (imu_data && imu_count > 0) {
-                        // Copy IMU data
-                        memcpy(loggerStat.frame_ctx.builder.imu, imu_data, imu_count * sizeof(ImuRawSample_t));
-                        loggerStat.frame_ctx.builder.imu_count = imu_count;
-
-                        // Clear IMU buffer for next batch
-                        g_imu_buffer.count = 0;
-                    } else {
-                        // No IMU data, proceed with ADC-only frame
-                        loggerStat.frame_ctx.builder.imu_count = 0;
-                    }
+                    // Pop IMU samples from ring buffer (thread-safe, handles clamping)
+#if (LOGGER_PROFILING_ENABLE == 1u)
+                    t0 = logger_profile_now_cycles();
+#endif
+                    uint32_t imu_count = Logger_ImuRing_PopSamples(loggerStat.frame_ctx.builder.imu, LOGGER_IMU_BLOCK_SIZE);
+#if (LOGGER_PROFILING_ENABLE == 1u)
+                    logger_profile_update_counter(&g_logger_profile.imu_pop, logger_profile_now_cycles() - t0);
+#endif
+                    loggerStat.frame_ctx.builder.imu_count = imu_count;
 
                     // Now assemble and queue the frame
                     loggerStat.frame_ctx.builder.state = FRAME_STATE_BUILD;
@@ -808,7 +1086,9 @@ uint32_t Logger_Task(void) {
 
         case FRAME_STATE_BUILD: {
             // Check if frame queue has space
-            uint32_t queue_size = (loggerStat.frame_ctx.queue_write_idx - loggerStat.frame_ctx.queue_read_idx) % LOGGER_FRAME_QUEUE_SIZE;
+            // Pending frames in queue (do NOT use modulo here; it breaks full/empty detection when the
+            // difference becomes a multiple of LOGGER_FRAME_QUEUE_SIZE).
+            uint32_t queue_size = (uint32_t)(loggerStat.frame_ctx.queue_write_idx - loggerStat.frame_ctx.queue_read_idx);
 
             if (queue_size < (LOGGER_FRAME_QUEUE_SIZE - 1)) {
                 // Get pointer to next frame slot in queue
@@ -821,21 +1101,45 @@ uint32_t Logger_Task(void) {
                 frame->adc_timestamp = loggerStat.frame_ctx.builder.adc_ts_first;
 
                 // Copy ADC block (LOGGER_ADC_BLOCK_SIZE samples, fixed)
+#if (LOGGER_PROFILING_ENABLE == 1u)
+                uint32_t t0 = logger_profile_now_cycles();
+#endif
                 memcpy(frame->adc, loggerStat.frame_ctx.builder.adc, LOGGER_ADC_BLOCK_SIZE * sizeof(int16_t));
+#if (LOGGER_PROFILING_ENABLE == 1u)
+                logger_profile_update_counter(&g_logger_profile.adc_frame_copy, logger_profile_now_cycles() - t0);
+#endif
 
                 // Copy IMU block (only first n_imu samples are valid)
                 if (loggerStat.frame_ctx.builder.imu_count > 0) {
+#if (LOGGER_PROFILING_ENABLE == 1u)
+                    t0 = logger_profile_now_cycles();
+#endif
                     memcpy(frame->imu, loggerStat.frame_ctx.builder.imu, loggerStat.frame_ctx.builder.imu_count * sizeof(ImuRawSample_t));
+#if (LOGGER_PROFILING_ENABLE == 1u)
+                    logger_profile_update_counter(&g_logger_profile.imu_frame_copy, logger_profile_now_cycles() - t0);
+#endif
 
                     // Zero out remaining IMU slots
                     if (loggerStat.frame_ctx.builder.imu_count < LOGGER_IMU_BLOCK_SIZE) {
+#if (LOGGER_PROFILING_ENABLE == 1u)
+                        t0 = logger_profile_now_cycles();
+#endif
                         memset(&frame->imu[loggerStat.frame_ctx.builder.imu_count],
                             0,
                             (LOGGER_IMU_BLOCK_SIZE - loggerStat.frame_ctx.builder.imu_count) * sizeof(ImuRawSample_t));
+#if (LOGGER_PROFILING_ENABLE == 1u)
+                        logger_profile_update_counter(&g_logger_profile.imu_frame_zero, logger_profile_now_cycles() - t0);
+#endif
                     }
                 } else {
                     // No IMU data, zero entire IMU block
+#if (LOGGER_PROFILING_ENABLE == 1u)
+                    t0 = logger_profile_now_cycles();
+#endif
                     memset(frame->imu, 0, LOGGER_IMU_BLOCK_SIZE * sizeof(ImuRawSample_t));
+#if (LOGGER_PROFILING_ENABLE == 1u)
+                    logger_profile_update_counter(&g_logger_profile.imu_frame_zero, logger_profile_now_cycles() - t0);
+#endif
                 }
 
                 // Copy MAVLink event data
@@ -862,6 +1166,7 @@ uint32_t Logger_Task(void) {
                 loggerStat.frame_ctx.builder.state = FRAME_STATE_CRC_PART1;
             } else {
                 loggerStat.frame_ctx.stats_frames_dropped++;
+                g_logger_frames_dropped = loggerStat.frame_ctx.stats_frames_dropped;
                 memset(&loggerStat.frame_ctx.builder, 0, sizeof(FrameBuilder_t));
                 loggerStat.frame_ctx.builder.state = FRAME_STATE_IDLE;
             }
@@ -869,28 +1174,46 @@ uint32_t Logger_Task(void) {
 
         case FRAME_STATE_CRC_PART1: {
             // Process CRC Part 1 (~134 bytes)
+#if (LOGGER_PROFILING_ENABLE == 1u)
+            uint32_t t0 = logger_profile_now_cycles();
+#endif
             crc_state_process_step(&loggerStat.frame_ctx.builder);
+#if (LOGGER_PROFILING_ENABLE == 1u)
+            logger_profile_update_counter(&g_logger_profile.crc_part1, logger_profile_now_cycles() - t0);
+#endif
             loggerStat.frame_ctx.builder.state = FRAME_STATE_CRC_PART2;
         } break;
 
         case FRAME_STATE_CRC_PART2: {
             // Process CRC Part 2 (~128 bytes)
             crc_state_init_step(&loggerStat.frame_ctx.builder.crc_state, 1);
+#if (LOGGER_PROFILING_ENABLE == 1u)
+            uint32_t t0 = logger_profile_now_cycles();
+#endif
             crc_state_process_step(&loggerStat.frame_ctx.builder);
+#if (LOGGER_PROFILING_ENABLE == 1u)
+            logger_profile_update_counter(&g_logger_profile.crc_part2, logger_profile_now_cycles() - t0);
+#endif
             loggerStat.frame_ctx.builder.state = FRAME_STATE_CRC_PART3;
         } break;
 
         case FRAME_STATE_CRC_PART3: {
             // Process CRC Part 3 (~128 bytes)
             crc_state_init_step(&loggerStat.frame_ctx.builder.crc_state, 2);
+#if (LOGGER_PROFILING_ENABLE == 1u)
+            uint32_t t0 = logger_profile_now_cycles();
+#endif
             crc_state_process_step(&loggerStat.frame_ctx.builder);
+#if (LOGGER_PROFILING_ENABLE == 1u)
+            logger_profile_update_counter(&g_logger_profile.crc_part3, logger_profile_now_cycles() - t0);
+#endif
             loggerStat.frame_ctx.builder.state = FRAME_STATE_CRC_PART4;
         } break;
 
         case FRAME_STATE_CRC_PART4: {
             // Process CRC Part 4 (remaining ~248 bytes) and finalize
             crc_state_init_step(&loggerStat.frame_ctx.builder.crc_state, 3);
-            uint32_t data_len = sizeof(LogFrame_t) - sizeof(uint8_t);
+            uint32_t data_len = sizeof(LogFrame_t) - sizeof(uint16_t);
             uint32_t chunk_start = loggerStat.frame_ctx.builder.crc_state.crc_offset;
             uint32_t chunk_size = data_len - chunk_start;  // Remaining bytes
 
@@ -898,21 +1221,30 @@ uint32_t Logger_Task(void) {
             uint8_t* frame_data = (uint8_t*)frame;
             uint8_t* chunk_ptr = &frame_data[chunk_start];
 
-            loggerStat.frame_ctx.builder.crc_state.crc_current = crc8_update_chunk(loggerStat.frame_ctx.builder.crc_state.crc_current, chunk_ptr, chunk_size);
+#if (LOGGER_PROFILING_ENABLE == 1u)
+            uint32_t t0 = logger_profile_now_cycles();
+#endif
+            loggerStat.frame_ctx.builder.crc_state.crc_current =
+                checksum8_update_chunk(loggerStat.frame_ctx.builder.crc_state.crc_current, chunk_ptr, chunk_size);
+#if (LOGGER_PROFILING_ENABLE == 1u)
+            logger_profile_update_counter(&g_logger_profile.crc_part4, logger_profile_now_cycles() - t0);
+#endif
 
             // CRC computation complete - write result to frame
-            frame->crc16 = loggerStat.frame_ctx.builder.crc_state.crc_current;
+            frame->checksum8 = loggerStat.frame_ctx.builder.crc_state.crc_current;
+            frame->checksum_pad = 0;
 
-            // ===== VALIDATION: Compare full vs incremental CRC methods =====
+            // ===== VALIDATION: Compare full vs incremental checksum methods =====
 #if (LOGGER_CRC_VALIDATION_ENABLE == 1u)
-            if (!crc8_validate_methods(frame)) {
-                // CRC MISMATCH - indicates bug in either method!
+            if (!checksum8_validate_methods(frame)) {
+                // Mismatch indicates a bug in either method.
                 loggerStat.frame_ctx.stats_crc_mismatches++;
             }
 #endif
 
             loggerStat.frame_ctx.queue_write_idx++;
             loggerStat.frame_ctx.stats_frames_built++;
+            g_logger_frames_built = loggerStat.frame_ctx.stats_frames_built;
 
             // Drain queue: try to start transmitting frames via DMA
             // Only drain if SPI is currently IDLE (no transmission in progress)
@@ -923,7 +1255,13 @@ uint32_t Logger_Task(void) {
             frames_queued = 1;
 
             // Reset builder for next frame
+#if (LOGGER_PROFILING_ENABLE == 1u)
+            t0 = logger_profile_now_cycles();
+#endif
             memset(&loggerStat.frame_ctx.builder, 0, sizeof(FrameBuilder_t));
+#if (LOGGER_PROFILING_ENABLE == 1u)
+            logger_profile_update_counter(&g_logger_profile.builder_reset, logger_profile_now_cycles() - t0);
+#endif
             loggerStat.frame_ctx.builder.state = FRAME_STATE_IDLE;
         } break;
 
@@ -931,6 +1269,10 @@ uint32_t Logger_Task(void) {
             loggerStat.frame_ctx.builder.state = FRAME_STATE_IDLE;
             break;
     }
+
+#if (LOGGER_PROFILING_ENABLE == 1u)
+    logger_profile_update_counter(&g_logger_profile.task_total, logger_profile_now_cycles() - task_start);
+#endif
 
     return frames_queued;
 }
@@ -949,7 +1291,7 @@ uint32_t Logger_Task(void) {
  *       // frame.magic == 0x5A5A
  *       // frame.adc[LOGGER_ADC_BLOCK_SIZE] has ADC samples
  *       // frame.imu[frame.n_imu] has IMU samples
- *       // frame.crc16 has CRC value
+ *       // frame.checksum8 has checksum value
  *   }
  */
 int Logger_GetNextFrame(LogFrame_t* out_frame) {
@@ -957,7 +1299,7 @@ int Logger_GetNextFrame(LogFrame_t* out_frame) {
         return 0;
     }
 
-    uint32_t queue_size = (loggerStat.frame_ctx.queue_write_idx - loggerStat.frame_ctx.queue_read_idx) % LOGGER_FRAME_QUEUE_SIZE;
+    uint32_t queue_size = (uint32_t)(loggerStat.frame_ctx.queue_write_idx - loggerStat.frame_ctx.queue_read_idx);
 
     if (queue_size == 0) {
         return 0;  // Queue empty
@@ -967,7 +1309,13 @@ int Logger_GetNextFrame(LogFrame_t* out_frame) {
     LogFrame_t* frame = &loggerStat.frame_ctx.frame_queue[read_idx];
 
     // Copy entire frame (LOGGER_FRAME_SIZE_BYTES bytes)
+#if (LOGGER_PROFILING_ENABLE == 1u)
+    uint32_t t0 = logger_profile_now_cycles();
+#endif
     memcpy(out_frame, frame, LOGGER_FRAME_SIZE_BYTES);
+#if (LOGGER_PROFILING_ENABLE == 1u)
+    logger_profile_update_counter(&g_logger_profile.frame_dequeue_copy, logger_profile_now_cycles() - t0);
+#endif
     loggerStat.frame_ctx.queue_read_idx++;
 
     return 1;  // Frame retrieved
@@ -1005,6 +1353,20 @@ void Logger_SPI_TxCallback(void) {
     // Signal that transmission is complete
     // Logger_Task() will check this state and drain queue on next invocation
     loggerStat.frame_ctx.spi_state = SPI_STATE_PACKET_SENT_COMPLETE;
+
+    // Config has been transmitted; start acquisition from task context.
+    // (Solution_LoggingStart() is not ISR-safe.)
+    if (loggerStat.config_sent == 1u) {
+        s_start_pending = 1u;
+    }
+
+    // We only support SPI commands before streaming starts (CONFIG).
+    // After acquisition begins, the master clocks raw frame reads and we must not arm RX for "command bytes",
+    // otherwise the dummy MOSI bytes would be misinterpreted as commands.
+    // Also avoid re-arming RX after config TX completes (s_start_pending set) to prevent BUSY_RX blocking TX DMA.
+    if ((s_logging_started == 0u) && (s_start_pending == 0u)) {
+        Logger_SPI_StartListening();
+    }
 }
 
 /**
@@ -1014,9 +1376,9 @@ void Logger_SPI_TxCallback(void) {
  * sends a command byte via dedicated CMD channel (CMD 42 only supported).
  *
  * SPI Protocol (Auto-Streaming):
- *   - Master initiates with single CMD 42 (0x2A) at startup
- *   - Slave responds by transmitting logger_config_t (32 bytes) via DMA
- *   - After config TX complete: Logger_Task() automatically streams queued frames
+ *   - Master initiates with CMD 42 (0x2A) at startup to read config
+ *   - Slave responds by transmitting logger_config_t (64 bytes) via DMA
+ *   - After config TX completes: STM32 starts acquisition and Logger_Task() streams queued frames
  *   - No manual READ commands needed - frames auto-send when available
  *
  * CMD 42 (LOGGER_SPI_CMD_CONFIG) Protocol Flow:
@@ -1026,9 +1388,6 @@ void Logger_SPI_TxCallback(void) {
  *   4. Initiates DMA transmission of config data
  *   5. Raises GPIO_READY to signal data available
  *   6. After DMA completes: Logger_SPI_TxCallback() lowers GPIO
- *   7. Logger_Task() drain detects config_sent=1 and transitions to frame streaming mode
- *   8. ADC/IMU logging enabled via Solution_LoggingStart() (called from Logger_DrainQueue)\n *   9. Subsequent Logger_Task() cycles automatically drain frame
- * queue
  *
  * Unknown Commands: If command != LOGGER_SPI_CMD_CONFIG, GPIO is lowered and no transmission occurs
  *
@@ -1054,6 +1413,9 @@ void Logger_SPI_RxCallback(const uint8_t* rx_buffer) {
         // Mark that config is being sent (one-time transition marker)
         // Next drain cycle will skip, then transition to frame mode
         loggerStat.config_sent = 1;
+
+        // Test1Toggle();
+        // Test1Toggle();
 
         // Start DMA transmission of config and mark state
         Logger_SPI_Transmit((uint8_t*)&loggerStat.tx_frame, sizeof(logger_config_t));

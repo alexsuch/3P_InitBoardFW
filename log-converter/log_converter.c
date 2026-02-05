@@ -1,0 +1,523 @@
+/**
+ * @file log_converter.c
+ * @brief Logger Binary to CSV Converter - Main Application
+ *
+ * Converts binary log files from 3P Logger to human-readable CSV format.
+ *
+ * Usage:
+ *   log_converter <input> <output_folder>
+ *
+ * Arguments:
+ *   input          - Binary log file (.dat) OR folder containing .dat files
+ *   output_folder  - Destination folder for converted CSV files
+ *
+ * Output Structure:
+ *   For each input .dat file, creates: <output>/<filename>/
+ *     - config.csv       - Logger configuration
+ *     - adc_data.csv     - ADC piezo sensor data
+ *     - imu_data.csv     - IMU gyro/accel data
+ *     - mavlink_events.csv - MAVLink telemetry events
+ */
+
+#include "csv_writer.h"
+#include "log_parser.h"
+#include <dirent.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+
+#define CHECKSUM_ALGO_CRC8_SW_ID 1u
+#define CHECKSUM_ALGO_SUM8_ID 2u
+#define CHECKSUM_ALGO_CRC8_HW_ID 3u
+
+#define LOG_FRAME_PAYLOAD_BYTES (sizeof(log_frame_t) - 2u) // excluding checksum8+pad
+
+static uint8_t crc8_table[256];
+static int crc8_table_inited = 0;
+
+static void crc8_init_table(void) {
+  if (crc8_table_inited) {
+    return;
+  }
+  crc8_table_inited = 1;
+
+  for (int i = 0; i < 256; i++) {
+    uint8_t crc = (uint8_t)i;
+    for (int b = 0; b < 8; b++) {
+      if (crc & 0x80) {
+        crc = (uint8_t)((crc << 1) ^ 0x07);
+      } else {
+        crc = (uint8_t)(crc << 1);
+      }
+    }
+    crc8_table[i] = crc;
+  }
+}
+
+static uint8_t checksum8_calc(uint8_t algo_id, const uint8_t *data,
+                              size_t len) {
+  if (!data || len == 0) {
+    return 0;
+  }
+
+  if (algo_id == CHECKSUM_ALGO_SUM8_ID) {
+    uint8_t sum = 0;
+    for (size_t i = 0; i < len; i++) {
+      sum = (uint8_t)(sum + data[i]);
+    }
+    return sum;
+  }
+
+  // CRC8 (SW or HW on firmware side produce the same 8-bit result)
+  crc8_init_table();
+  uint8_t crc = 0;
+  for (size_t i = 0; i < len; i++) {
+    crc = crc8_table[crc ^ data[i]];
+  }
+  return crc;
+}
+
+#ifdef _WIN32
+#include <direct.h>
+#include <windows.h>
+#define PATH_SEPARATOR '\\'
+#define mkdir(path, mode) _mkdir(path)
+#else
+#include <unistd.h>
+#define PATH_SEPARATOR '/'
+#endif
+
+/* ============================================================================
+ * CONFIGURATION
+ * ============================================================================
+ */
+
+#define MAX_PATH_LEN 1024
+#define MAX_FRAMES 100000 // Max frames to process per file
+
+/* ============================================================================
+ * HELPER FUNCTIONS
+ * ============================================================================
+ */
+
+/**
+ * @brief Check if path is a directory
+ */
+static int is_directory(const char *path) {
+  struct stat st;
+  if (stat(path, &st) != 0) {
+    return 0;
+  }
+  return S_ISDIR(st.st_mode);
+}
+
+/**
+ * @brief Check if path is a file
+ */
+static int is_file(const char *path) {
+  struct stat st;
+  if (stat(path, &st) != 0) {
+    return 0;
+  }
+  return S_ISREG(st.st_mode);
+}
+
+/**
+ * @brief Extract filename without extension from path
+ */
+static void get_basename(const char *path, char *basename, size_t size) {
+  const char *filename = strrchr(path, PATH_SEPARATOR);
+  if (!filename) {
+    filename = strrchr(path, '/'); // Handle mixed separators
+  }
+  if (!filename) {
+    filename = path;
+  } else {
+    filename++; // Skip separator
+  }
+
+  strncpy(basename, filename, size - 1);
+  basename[size - 1] = '\0';
+
+  // Remove extension
+  char *dot = strrchr(basename, '.');
+  if (dot) {
+    *dot = '\0';
+  }
+}
+
+/**
+ * @brief Check if filename ends with .dat (case insensitive)
+ */
+static int is_dat_file(const char *filename) {
+  size_t len = strlen(filename);
+  if (len < 4)
+    return 0;
+
+  const char *ext = filename + len - 4;
+  return (strcasecmp(ext, ".dat") == 0);
+}
+
+/**
+ * @brief Create nested directories
+ */
+static int create_directories(const char *path) {
+  char tmp[MAX_PATH_LEN];
+  char *p = NULL;
+  size_t len;
+
+  snprintf(tmp, sizeof(tmp), "%s", path);
+  len = strlen(tmp);
+
+  // Remove trailing separator
+  if (tmp[len - 1] == PATH_SEPARATOR || tmp[len - 1] == '/') {
+    tmp[len - 1] = '\0';
+  }
+
+  // Create each directory in path
+  for (p = tmp + 1; *p; p++) {
+    if (*p == PATH_SEPARATOR || *p == '/') {
+      *p = '\0';
+      create_directory(tmp);
+      *p = PATH_SEPARATOR;
+    }
+  }
+
+  return create_directory(tmp);
+}
+
+/* ============================================================================
+ * CONVERSION LOGIC
+ * ============================================================================
+ */
+
+/**
+ * @brief Convert a single binary log file to CSV files
+ */
+static int convert_file(const char *input_path, const char *output_dir) {
+  printf("Converting: %s\n", input_path);
+
+  // Open input file
+  FILE *fp = fopen(input_path, "rb");
+  if (!fp) {
+    fprintf(stderr, "Error: Cannot open file: %s\n", input_path);
+    return -1;
+  }
+
+  // Get file size and calculate frame count
+  long file_size = get_file_size(fp);
+  if (file_size < 0) {
+    fprintf(stderr, "Error: Cannot get file size\n");
+    fclose(fp);
+    return -1;
+  }
+
+  size_t expected_frames = calculate_frame_count(file_size);
+  printf("  File size: %ld bytes, expected frames: %zu\n", file_size,
+         expected_frames);
+
+  // Read configuration
+  log_config_t config;
+  parse_result_t result = parse_config(fp, &config);
+  if (result != PARSE_OK) {
+    fprintf(stderr, "Error: Failed to parse config (error %d)\n", result);
+    fclose(fp);
+    return -1;
+  }
+
+  printf("  Config: magic=0x%04X, version=%u.%u, ADC=%ukHz, block=%u\n",
+         config.magic, config.version_major, config.version_minor,
+         config.adc_sample_rate_khz, config.adc_block_size);
+
+  // Allocate frame buffer
+  size_t frame_count = expected_frames;
+  if (frame_count > MAX_FRAMES) {
+    fprintf(stderr, "Warning: Limiting to %d frames\n", MAX_FRAMES);
+    frame_count = MAX_FRAMES;
+  }
+
+  log_frame_t *frames =
+      (log_frame_t *)malloc(frame_count * sizeof(log_frame_t));
+  if (!frames) {
+    fprintf(stderr, "Error: Out of memory (need %zu bytes)\n",
+            frame_count * sizeof(log_frame_t));
+    fclose(fp);
+    return -1;
+  }
+
+  uint8_t *frame_magic_ok = (uint8_t *)calloc(frame_count, sizeof(uint8_t));
+  uint8_t *frame_checksum_ok = (uint8_t *)calloc(frame_count, sizeof(uint8_t));
+  uint8_t *frame_checksum_calc = (uint8_t *)calloc(frame_count, sizeof(uint8_t));
+  uint8_t *frame_ok = (uint8_t *)calloc(frame_count, sizeof(uint8_t));
+  if (!frame_magic_ok || !frame_checksum_ok || !frame_checksum_calc ||
+      !frame_ok) {
+    fprintf(stderr, "Error: Out of memory (status arrays)\n");
+    free(frame_magic_ok);
+    free(frame_checksum_ok);
+    free(frame_checksum_calc);
+    free(frame_ok);
+    free(frames);
+    fclose(fp);
+    return -1;
+  }
+
+  // Read all frames (do not drop invalid ones)
+  size_t frames_read = 0;
+  size_t frames_invalid = 0;
+  const uint8_t algo_id = config.reserved[0];
+  for (size_t i = 0; i < frame_count; i++) {
+    size_t read = fread(&frames[i], 1, sizeof(log_frame_t), fp);
+    if (read == 0) {
+      break;
+    }
+    if (read != sizeof(log_frame_t)) {
+      frames_invalid++;
+      frames_read++;
+      break;
+    }
+
+    frames_read++;
+
+    const uint8_t magic_ok = (frames[i].magic == LOG_FRAME_MAGIC) ? 1u : 0u;
+    frame_magic_ok[i] = magic_ok;
+
+    const uint8_t calc = checksum8_calc(
+        algo_id, (const uint8_t *)&frames[i], LOG_FRAME_PAYLOAD_BYTES);
+    frame_checksum_calc[i] = calc;
+
+    const uint8_t checksum_ok =
+        ((calc == frames[i].checksum8) && (frames[i].checksum_pad == 0)) ? 1u
+                                                                         : 0u;
+    frame_checksum_ok[i] = checksum_ok;
+
+    const uint8_t ok = (magic_ok && checksum_ok) ? 1u : 0u;
+    frame_ok[i] = ok;
+    if (!ok) {
+      frames_invalid++;
+    }
+  }
+
+  fclose(fp);
+
+  printf("  Frames read: %zu, invalid: %zu\n", frames_read, frames_invalid);
+
+  if (frames_read == 0) {
+    fprintf(stderr, "Error: No valid frames found\n");
+    free(frames);
+    return -1;
+  }
+
+  // Create output directory
+  char basename[256];
+  get_basename(input_path, basename, sizeof(basename));
+
+  char output_path[MAX_PATH_LEN];
+  snprintf(output_path, sizeof(output_path), "%s%c%s", output_dir,
+           PATH_SEPARATOR, basename);
+
+  if (create_directories(output_path) != 0) {
+    fprintf(stderr, "Error: Cannot create output directory: %s\n", output_path);
+    free(frames);
+    return -1;
+  }
+
+  // Write CSV files - use larger buffer to avoid truncation warning
+  // MAX_PATH_LEN for output_path + 1 for separator + up to 20 for filename
+  char filepath[MAX_PATH_LEN + 32];
+  csv_result_t csv_result;
+
+  // config.csv
+  snprintf(filepath, sizeof(filepath), "%s%cconfig.csv", output_path,
+           PATH_SEPARATOR);
+  csv_result = write_config_csv(filepath, &config);
+  if (csv_result != CSV_OK) {
+    fprintf(stderr, "Error: Failed to write config.csv\n");
+  } else {
+    printf("  Written: config.csv\n");
+  }
+
+  // frame_status.csv
+  snprintf(filepath, sizeof(filepath), "%s%cframe_status.csv", output_path,
+           PATH_SEPARATOR);
+  csv_result = write_frame_status_csv(filepath, frames, frame_magic_ok,
+                                       frame_checksum_ok, frame_checksum_calc,
+                                       frames_read, config.adc_sample_rate_khz,
+                                       config.reserved[0]);
+  if (csv_result != CSV_OK) {
+    fprintf(stderr, "Error: Failed to write frame_status.csv\n");
+  } else {
+    if (is_file(filepath)) {
+      printf("  Written: frame_status.csv\n");
+    } else {
+      printf("  Skipped: frame_status.csv (no bad frames)\n");
+    }
+  }
+
+  // timestamp_anomalies.csv
+  snprintf(filepath, sizeof(filepath), "%s%ctimestamp_anomalies.csv",
+           output_path, PATH_SEPARATOR);
+  size_t anomaly_count = 0;
+  csv_result = write_timestamp_anomalies_csv(
+      filepath, frames, frames_read, config.adc_sample_rate_khz,
+      config.adc_block_size, frame_magic_ok, frame_checksum_ok,
+      &anomaly_count);
+  if (csv_result != CSV_OK) {
+    fprintf(stderr, "Error: Failed to write timestamp_anomalies.csv\n");
+  } else {
+    printf("  Written: timestamp_anomalies.csv (%zu anomalies)\n",
+           anomaly_count);
+  }
+
+  // adc_data.csv
+  snprintf(filepath, sizeof(filepath), "%s%cadc_data.csv", output_path,
+           PATH_SEPARATOR);
+  csv_result =
+      write_adc_csv(filepath, frames, frames_read, config.adc_sample_rate_khz,
+                    frame_ok);
+  if (csv_result != CSV_OK) {
+    fprintf(stderr, "Error: Failed to write adc_data.csv\n");
+  } else {
+    printf("  Written: adc_data.csv (%zu samples)\n",
+           frames_read * LOG_ADC_BLOCK_SIZE);
+  }
+
+  // imu_data.csv
+  snprintf(filepath, sizeof(filepath), "%s%cimu_data.csv", output_path,
+           PATH_SEPARATOR);
+  csv_result = write_imu_csv(filepath, frames, frames_read,
+                             config.adc_sample_rate_khz, frame_ok);
+  if (csv_result != CSV_OK) {
+    fprintf(stderr, "Error: Failed to write imu_data.csv\n");
+  } else {
+    // Count total IMU samples
+    size_t imu_count = 0;
+    for (size_t i = 0; i < frames_read; i++) {
+      imu_count += frames[i].n_imu;
+    }
+    printf("  Written: imu_data.csv (%zu samples)\n", imu_count);
+  }
+
+  // imu_anomalies.csv
+  snprintf(filepath, sizeof(filepath), "%s%cimu_anomalies.csv", output_path,
+           PATH_SEPARATOR);
+  size_t imu_anomaly_count = 0;
+  // Prefer accel ODR for expected period estimation; fall back to gyro ODR.
+  uint16_t imu_odr_hz = config.imu_config.accel_odr_hz;
+  if (imu_odr_hz == 0) {
+    imu_odr_hz = config.imu_config.gyro_odr_hz;
+  }
+  csv_result = write_imu_anomalies_csv(filepath, frames, frames_read,
+                                       config.adc_sample_rate_khz, imu_odr_hz,
+                                       frame_ok, &imu_anomaly_count);
+  if (csv_result != CSV_OK) {
+    fprintf(stderr, "Error: Failed to write imu_anomalies.csv\n");
+  } else {
+    printf("  Written: imu_anomalies.csv (%zu anomalies)\n", imu_anomaly_count);
+  }
+
+  // mavlink_events.csv
+  snprintf(filepath, sizeof(filepath), "%s%cmavlink_events.csv", output_path,
+           PATH_SEPARATOR);
+  csv_result = write_mavlink_csv(filepath, frames, frames_read,
+                                 config.adc_sample_rate_khz, frame_ok);
+  if (csv_result != CSV_OK) {
+    fprintf(stderr, "Error: Failed to write mavlink_events.csv\n");
+  } else {
+    printf("  Written: mavlink_events.csv\n");
+  }
+
+  free(frame_magic_ok);
+  free(frame_checksum_ok);
+  free(frame_checksum_calc);
+  free(frame_ok);
+  free(frames);
+  printf("  Conversion complete: %s\n\n", output_path);
+
+  return 0;
+}
+
+/**
+ * @brief Process all .dat files in a directory
+ */
+static int convert_directory(const char *input_dir, const char *output_dir) {
+  DIR *dir = opendir(input_dir);
+  if (!dir) {
+    fprintf(stderr, "Error: Cannot open directory: %s\n", input_dir);
+    return -1;
+  }
+
+  int files_converted = 0;
+  int files_failed = 0;
+  struct dirent *entry;
+
+  while ((entry = readdir(dir)) != NULL) {
+    if (!is_dat_file(entry->d_name)) {
+      continue;
+    }
+
+    char filepath[MAX_PATH_LEN];
+    snprintf(filepath, sizeof(filepath), "%s%c%s", input_dir, PATH_SEPARATOR,
+             entry->d_name);
+
+    if (convert_file(filepath, output_dir) == 0) {
+      files_converted++;
+    } else {
+      files_failed++;
+    }
+  }
+
+  closedir(dir);
+
+  printf("Summary: %d files converted, %d failed\n", files_converted,
+         files_failed);
+  return (files_failed > 0) ? -1 : 0;
+}
+
+/* ============================================================================
+ * MAIN
+ * ============================================================================
+ */
+
+static void print_usage(const char *program) {
+  printf("Usage: %s <input> <output_folder>\n\n", program);
+  printf("Arguments:\n");
+  printf("  input          - Binary log file (.dat) OR folder containing .dat "
+         "files\n");
+  printf("  output_folder  - Destination folder for converted CSV files\n\n");
+  printf("Examples:\n");
+  printf("  %s data_0.dat ./output\n", program);
+  printf("  %s ./logs ./output\n", program);
+}
+
+int main(int argc, char *argv[]) {
+  printf("3P Logger Binary to CSV Converter v1.0\n");
+  printf("======================================\n\n");
+
+  if (argc != 3) {
+    print_usage(argv[0]);
+    return 1;
+  }
+
+  const char *input_path = argv[1];
+  const char *output_dir = argv[2];
+
+  // Create output directory
+  if (create_directories(output_dir) != 0) {
+    fprintf(stderr, "Error: Cannot create output directory: %s\n", output_dir);
+    return 1;
+  }
+
+  int result;
+  if (is_directory(input_path)) {
+    printf("Processing directory: %s\n\n", input_path);
+    result = convert_directory(input_path, output_dir);
+  } else if (is_file(input_path)) {
+    result = convert_file(input_path, output_dir);
+  } else {
+    fprintf(stderr, "Error: Input path does not exist: %s\n", input_path);
+    return 1;
+  }
+
+  return (result == 0) ? 0 : 1;
+}

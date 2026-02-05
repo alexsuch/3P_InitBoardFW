@@ -9,7 +9,7 @@
  *   - UART communication (main and VUSA)
  *   - SPI accelerometer (LIS2DH12 / LSM6DS3) data acquisition
  *   - ADC2 sampling for logging (100 kHz DMA)
- *   - Timer callbacks for system tick and logger timestamp
+ *   - Timer callbacks for system tick (logger timestamp is hardware-based)
  *
  * When SPI_LOGGER_ENABLE is defined, additional logger SPI slave support is enabled:
  *   - Logger frame assembly and SPI transmission to ESP32 master
@@ -560,6 +560,9 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc_ptr) {
  */
 static uint8_t logger_spi_rx_cmd_buffer[LOGGER_SPI_RX_COMMAND_SIZE] = {0};
 
+// Upper 16 bits for the 32-bit logger timestamp (extended from TIM7->CNT).
+static volatile uint32_t g_timestamp_hi = 0u;
+
 /* Logger SPI Slave Support - Enabled when SPI_LOGGER_ENABLE is defined */
 
 /**
@@ -581,44 +584,82 @@ void Solution_LoggingStart(void) {
     /* Initialize logger frame builder (Phase 4) */
     Logger_FrameBuilder_Init();
 
-    /* Start LSM6DS3 IMU data polling */
-    Lsm6ds3_StartReadData();
-
-    /* Start ADC tick timer (100 kHz) */
-    if (HAL_TIM_Base_Start_IT(&ADC_TICK_TIMER_HANDLE) != HAL_OK) {
-        Error_Handler();
-    }
-
     /* 1. Calibrate ADC2 for best SNR */
     if (HAL_ADCEx_Calibration_Start(&ADC_PIEZO_HANDLE, ADC_SINGLE_ENDED) != HAL_OK) {
         Error_Handler();
     }
 
+    /*
+     * Reset/start timestamp counter so each logging session starts from 0 ticks.
+     * Do this after calibration to avoid an artificial "gap" at the beginning of the log.
+     */
+    g_timestamp_hi = 0u;
+    TIM7->CR1 &= ~TIM_CR1_CEN;
+    TIM7->CNT = 0u;
+    TIM7->SR &= ~TIM_SR_UIF;
+    TIM7->CR1 |= TIM_CR1_CEN;
+
     /* 2. Start ADC2 DMA circular buffer for synchronized configurable kHz sampling */
     if (HAL_ADC_Start_DMA(&ADC_PIEZO_HANDLE, (uint32_t*)adc2_dma_buffer, LOGGER_ADC_DMA_BUFFER_SIZE) != HAL_OK) {
         Error_Handler();
     }
+
+    /* 3. Start ADC tick timer (100 kHz TRGO) - no IRQ needed */
+    if (HAL_TIM_Base_Start(&ADC_TICK_TIMER_HANDLE) != HAL_OK) {
+        Error_Handler();
+    }
+
+    /* 4. Start LSM6DS3 IMU data polling */
+    Lsm6ds3_StartReadData();
 }
 
 // ============================================================================
-// Software 32-bit timestamp counter (TIM6 @ 100 kHz)
+// Hardware 32-bit timestamp counter (TIM7 @ ADC tick rate)
 // ============================================================================
 /*
- * TIM6 increments this counter in interrupt every 10 µs @ 100 kHz
- * Provides 32-bit microsecond timestamp (overcomes 16-bit TIM3 hardware limit)
- * Overflows after ~12 hours (acceptable for logging sessions)
+ * TIM7 runs as a free-running 16-bit counter ticking at ADC_SAMPLING_FREQ_KHZ (e.g. 100 kHz).
+ * Logger_GetTimestamp() extends it to 32 bits by tracking overflows via UIF polling.
+ *
+ * Units: 1 tick = 1 / (ADC_SAMPLING_FREQ_KHZ * 1000) seconds (e.g. 10 us @ 100 kHz).
+ * Rollover: ~42.9 s for the 32-bit tick counter @ 100 kHz.
  */
-static volatile uint32_t g_timestamp = 0;
+// TIM7 is configured in solution_hal_cfg.c to tick at ADC_SAMPLING_FREQ_KHZ.
 
 /* Called from TIM6_DAC_IRQHandler in stm32g4xx_it.c
- * Increments software timestamp counter (one increment = 10 µs)
+ * Deprecated: legacy software timestamp hook (do not enable TIM6 IRQ for logging).
  */
-void Logger_TIM6_UpdateCallback(void) { g_timestamp++; }
+void Logger_TIM6_UpdateCallback(void) {
+    // Deprecated: timestamp is hardware-based; keep symbol for API compatibility.
+}
 
-/* Returns current 32-bit software timestamp value
- * Called by Logger_FrameBuilder to timestamp ADC samples
+/* Returns current 32-bit timestamp value
+ * Shared timebase for ADC/IMU logging.
  */
-uint32_t Logger_GetTimestamp(void) { return g_timestamp; }
+uint32_t Logger_GetTimestamp(void) {
+    // Extend TIM7 16-bit counter to 32 bits by tracking overflows via UIF polling.
+    //
+    // This function is called from both task context and ISR callbacks (ADC DMA, SPI, IMU).
+    // To avoid missing an overflow due to concurrent callers clearing UIF, we perform the
+    // read/clear/update sequence atomically under PRIMASK.
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+
+    uint32_t hi = g_timestamp_hi;
+    uint16_t lo = (uint16_t)TIM7->CNT;
+
+    if (TIM7->SR & TIM_SR_UIF) {
+        TIM7->SR &= ~TIM_SR_UIF;
+        hi += 0x10000u;
+        g_timestamp_hi = hi;
+        lo = (uint16_t)TIM7->CNT;
+    }
+
+    uint32_t ts = (hi | (uint32_t)lo);
+    if (primask == 0u) {
+        __enable_irq();
+    }
+    return ts;
+}
 
 /**
  * @brief Control SPI_DATA_RDY GPIO pin (ready signal to master)
@@ -665,7 +706,8 @@ void Logger_SPI_Init(void) {
  */
 void Logger_SPI_StartListening(void) {
     // Arm RX for LOGGER_SPI_RX_COMMAND_SIZE bytes from master (command + padding bytes)
-    HAL_SPI_Receive_IT(&LOGGER_SPI_HANDLE, logger_spi_rx_cmd_buffer, LOGGER_SPI_RX_COMMAND_SIZE);
+    volatile HAL_StatusTypeDef spi_result = HAL_SPI_Receive_IT(&LOGGER_SPI_HANDLE, logger_spi_rx_cmd_buffer, LOGGER_SPI_RX_COMMAND_SIZE);
+    (void)spi_result;  // Breakpoint here to inspect result
 }
 
 #endif /* SPI_LOGGER_ENABLE */

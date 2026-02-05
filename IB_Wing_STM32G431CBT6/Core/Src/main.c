@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include "app.h"
 #include "hal_cfg.h"
+#include "prj_config.h"
 #include "solution_wrapper.h"
 /* USER CODE END Includes */
 
@@ -65,6 +66,7 @@ static void MX_ADC2_Init(void);
 static void MX_OPAMP2_Init(void);
 static void MX_SPI2_Init(void);
 static void MX_TIM6_Init(void);
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -108,7 +110,9 @@ int main(void) {
     MX_ADC1_Init();
     MX_ADC2_Init();
     MX_OPAMP2_Init();
-    MX_SPI2_Init();
+#if (SPI_LOGGER_ENABLE == 1u)
+    MX_SPI2_Init(); /* Logger SPI2 slave - only needed when logger is enabled */
+#endif
     MX_TIM6_Init();
     /* USER CODE BEGIN 2 */
     /* Configure Solution HAL peripherals */

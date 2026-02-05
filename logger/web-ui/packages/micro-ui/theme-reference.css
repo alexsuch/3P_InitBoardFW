@@ -1,0 +1,4 @@
+@reference "tailwindcss";
+@reference "./theme/theme-default.css";
+/* optional: for apps that provide their own tokens in index.css */
+/* @reference "../../../../src/index.css"; */

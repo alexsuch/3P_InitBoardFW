@@ -1,0 +1,54 @@
+# Exclude library files
+lib/
+lib/PsychiHttp/
+lib/hal-*/
+lib/hal-common/
+lib/hal-esp32/
+
+# Exclude documentation and configuration
+docs/
+memory-bank/
+web-ui/
+managed_components/
+data/
+
+# Exclude test files
+test/
+tests/
+
+# Exclude build and configuration files
+*.md
+*.txt
+*.json
+*.xml
+*.yml
+*.yaml
+platformio.ini
+CMakeLists.txt
+sdkconfig*
+package*.json
+*.webmanifest
+
+# Exclude web assets
+*.css
+*.scss
+*.ts
+*.tsx
+*.js
+*.jsx
+*.html
+*.svg
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.gz
+*.csv
+
+# Exclude specific directories that might contain generated code
+.vscode/
+.idea/
+node_modules/
+dist/
+build/ 

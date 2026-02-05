@@ -1,0 +1,31 @@
+@reference "./theme-reference.css";
+
+.b {
+  @apply fixed inset-0 flex justify-center items-center z-[9999];
+  @apply bg-black/70 opacity-0 invisible;
+  @apply transition-[visibility,opacity] duration-300;
+}
+
+.b.open {
+  @apply opacity-100 visible;
+}
+
+.c {
+  @apply bg-base rounded-lg shadow-2xl w-[28.75rem] max-w-full p-4 relative z-[10000] mx-4;
+}
+
+.x {
+  @apply absolute top-2 right-2 text-muted bg-transparent border-none text-3xl leading-none cursor-pointer;
+  @apply transition-colors duration-200;
+}
+
+.x:hover {
+  @apply text-strong;
+}
+
+.t {
+  @apply text-xl font-bold text-strong;
+}
+
+.mb {
+}
