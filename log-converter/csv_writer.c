@@ -59,21 +59,51 @@ csv_result_t write_config_csv(const char* filepath, const log_config_t* config) 
     fprintf(fp, "adc_sample_rate_khz,%u\n", config->adc_sample_rate_khz);
     fprintf(fp, "adc_block_size,%u\n", config->adc_block_size);
 
-    // IMU configuration
-    fprintf(fp, "accel_present,%u\n", config->imu_config.accel_present);
-    fprintf(fp, "gyro_present,%u\n", config->imu_config.gyro_present);
-    fprintf(fp, "chip_id,0x%02X\n", config->imu_config.chip_id);
-    fprintf(fp, "accel_odr_hz,%u\n", config->imu_config.accel_odr_hz);
-    fprintf(fp, "gyro_odr_hz,%u\n", config->imu_config.gyro_odr_hz);
-    fprintf(fp, "accel_range_g,%u\n", config->imu_config.accel_range_g);
-    fprintf(fp, "gyro_range_dps,%u\n", config->imu_config.gyro_range_dps);
+    // Accelerometer configuration
+    fprintf(fp, "accel_enable,%u\n", config->accel_enable);
+    fprintf(fp, "accel_range_g,%u\n", config->accel_range_g);
+    fprintf(fp, "accel_odr_hz,%u\n", config->accel_odr_hz);
+    fprintf(fp, "accel_bw_hz,%u\n", config->accel_bw_hz);
+    fprintf(fp, "accel_lpf2_en,%u\n", config->accel_lpf2_en);
+    fprintf(fp, "accel_hp_en,%u\n", config->accel_hp_en);
+    fprintf(fp, "accel_hp_cutoff,%u\n", config->accel_hp_cutoff);
+    fprintf(fp, "accel_hm_mode,%u\n", config->accel_hm_mode);
 
-    // MAVLink
+    // Gyroscope configuration
+    fprintf(fp, "gyro_enable,%u\n", config->gyro_enable);
+    fprintf(fp, "gyro_range_dps,%u\n", config->gyro_range_dps);
+    fprintf(fp, "gyro_odr_hz,%u\n", config->gyro_odr_hz);
+    fprintf(fp, "gyro_hp_en,%u\n", config->gyro_hp_en);
+    fprintf(fp, "gyro_hp_cutoff,%u\n", config->gyro_hp_cutoff);
+    fprintf(fp, "gyro_lpf1_en,%u\n", config->gyro_lpf1_en);
+    fprintf(fp, "gyro_lpf1_bw,%u\n", config->gyro_lpf1_bw);
+    fprintf(fp, "gyro_hm_mode,%u\n", config->gyro_hm_mode);
+
+    // Runtime/system info
+    fprintf(fp, "logging_active,%u\n", config->logging_active);
+    fprintf(fp, "config_source,%u\n", config->config_source);
+    fprintf(fp, "chip_id,0x%02X\n", config->chip_id);
     fprintf(fp, "mavlink_logging_enabled,%u\n", config->mavlink_logging_enabled);
 
-    // Checksum algorithm id (exported by firmware in reserved[0])
-    fprintf(fp, "checksum_algo_id,%u\n", config->reserved[0]);
-    fprintf(fp, "checksum_algo_name,%s\n", checksum_algo_name(config->reserved[0]));
+    // Register snapshots
+    fprintf(fp, "ctrl1_xl,0x%02X\n", config->ctrl1_xl);
+    fprintf(fp, "ctrl2_g,0x%02X\n", config->ctrl2_g);
+    fprintf(fp, "ctrl3_c,0x%02X\n", config->ctrl3_c);
+    fprintf(fp, "ctrl4_c,0x%02X\n", config->ctrl4_c);
+    fprintf(fp, "ctrl6_c,0x%02X\n", config->ctrl6_c);
+    fprintf(fp, "ctrl7_g,0x%02X\n", config->ctrl7_g);
+    fprintf(fp, "ctrl8_xl,0x%02X\n", config->ctrl8_xl);
+    fprintf(fp, "ctrl9_xl,0x%02X\n", config->ctrl9_xl);
+    fprintf(fp, "ctrl10_c,0x%02X\n", config->ctrl10_c);
+
+    // Checksum algorithm id (explicit field in current firmware layout)
+    fprintf(fp, "checksum_algo_id,%u\n", config->checksum_algo);
+    fprintf(fp, "checksum_algo_name,%s\n", checksum_algo_name(config->checksum_algo));
+
+    // Dump all reserved bytes so no configuration information is lost.
+    for (size_t i = 0; i < sizeof(config->reserved); i++) {
+        fprintf(fp, "reserved_%u,%u\n", (unsigned)i, (unsigned)config->reserved[i]);
+    }
 
     fclose(fp);
     return CSV_OK;

@@ -24,6 +24,7 @@
 #include "modules/led_module.h"
 #include "modules/logger_module.h"
 #include "modules/remote_accel_reader.h"
+#include "util/bootlog.h"
 
 #if defined(USE_WIFI)
 #include "wifi/wifi.h"
@@ -62,6 +63,69 @@ rpc_server_t g_rpc_server;
 
 static QueueHandle_t g_command_queue;
 static app_logic_t *g_app_logic_instance = NULL;
+static uint8_t s_stm_cfg_mismatch_retries = 0u;
+
+static bool app_logic_cfg_version_is_less(uint8_t lhs_major, uint8_t lhs_minor, uint8_t rhs_major, uint8_t rhs_minor) {
+    if (lhs_major < rhs_major) {
+        return true;
+    }
+    if (lhs_major > rhs_major) {
+        return false;
+    }
+    return (lhs_minor < rhs_minor);
+}
+
+static void app_logic_log_writable_cfg_diffs(const logger_config_t *nvs_cfg, const logger_config_t *stm_cfg) {
+    if (!nvs_cfg || !stm_cfg) {
+        return;
+    }
+
+    uint32_t diff_count = 0u;
+    LOG_W(TAG, "Config mismatch details (writable fields):");
+
+#define LOG_CFG_DIFF_U8(field_name)                                                                                                             \
+    do {                                                                                                                                        \
+        if (nvs_cfg->field_name != stm_cfg->field_name) {                                                                                      \
+            LOG_W(TAG, "  - " #field_name ": NVS=%u STM=%u", (unsigned)nvs_cfg->field_name, (unsigned)stm_cfg->field_name);                  \
+            diff_count++;                                                                                                                       \
+        }                                                                                                                                       \
+    } while (0)
+
+#define LOG_CFG_DIFF_U16(field_name)                                                                                                            \
+    do {                                                                                                                                        \
+        if (nvs_cfg->field_name != stm_cfg->field_name) {                                                                                      \
+            LOG_W(TAG, "  - " #field_name ": NVS=%u STM=%u", (unsigned)nvs_cfg->field_name, (unsigned)stm_cfg->field_name);                  \
+            diff_count++;                                                                                                                       \
+        }                                                                                                                                       \
+    } while (0)
+
+    LOG_CFG_DIFF_U8(accel_enable);
+    LOG_CFG_DIFF_U8(accel_range_g);
+    LOG_CFG_DIFF_U16(accel_odr_hz);
+    LOG_CFG_DIFF_U16(accel_bw_hz);
+    LOG_CFG_DIFF_U8(accel_lpf2_en);
+    LOG_CFG_DIFF_U8(accel_hp_en);
+    LOG_CFG_DIFF_U8(accel_hp_cutoff);
+    LOG_CFG_DIFF_U8(accel_hm_mode);
+
+    LOG_CFG_DIFF_U8(gyro_enable);
+    LOG_CFG_DIFF_U8(gyro_lpf1_en);
+    LOG_CFG_DIFF_U16(gyro_odr_hz);
+    LOG_CFG_DIFF_U16(gyro_range_dps);
+    LOG_CFG_DIFF_U8(gyro_lpf1_bw);
+    LOG_CFG_DIFF_U8(gyro_hp_en);
+    LOG_CFG_DIFF_U8(gyro_hp_cutoff);
+    LOG_CFG_DIFF_U8(gyro_hm_mode);
+
+    LOG_CFG_DIFF_U8(mavlink_logging_enabled);
+
+#undef LOG_CFG_DIFF_U8
+#undef LOG_CFG_DIFF_U16
+
+    if (diff_count == 0u) {
+        LOG_W(TAG, "  - none (unexpected)");
+    }
+}
 
 static void app_logic_turn_off_leds_for_reboot(void) {
 #if defined(USE_LED_OUT)
@@ -90,6 +154,9 @@ static void app_logic_reboot_with_leds_off(app_logic_t *app) {
         vTaskSuspend(app->led_task_handle);
     }
     app_logic_turn_off_leds_for_reboot();
+
+    // Best-effort: persist last logs before reboot (survives power-cycle).
+    bootlog_nvs_flush_now();
     vTaskDelay(pdMS_TO_TICKS(50));
     system_reboot();
 }
@@ -99,6 +166,9 @@ static void app_logic_reboot_to_boot_mode_with_leds_off(app_logic_t *app) {
         vTaskSuspend(app->led_task_handle);
     }
     app_logic_turn_off_leds_for_reboot();
+
+    // Best-effort: persist last logs before reboot (survives power-cycle).
+    bootlog_nvs_flush_now();
     vTaskDelay(pdMS_TO_TICKS(50));
     system_reboot_to_boot_mode();
 }
@@ -225,6 +295,7 @@ extern const size_t g_usb_string_desc_count;
 
 static app_err_t usb_file_server_start(void) {
     LOG_I(TAG, "USB file server start requested");
+    bootlog_nvs_flush_now();
 
     // Check if already running
     if (g_usb_file_server_running) {
@@ -246,10 +317,19 @@ static app_err_t usb_file_server_start(void) {
 
         // Install MSC driver first (required before creating storage)
         const tinyusb_msc_driver_config_t msc_driver_cfg = {
+            // Prevent esp_tinyusb from automatically switching the SD card between USB/App ownership
+            // (e.g., on Windows "eject" it may attempt to remount to the app and make MSC disappear).
+            .user_flags = {.auto_mount_off = 1},
             .callback = NULL,
             .callback_arg = NULL,
         };
-        ESP_ERROR_CHECK(tinyusb_msc_install_driver(&msc_driver_cfg));
+        esp_err_t msc_install_err = tinyusb_msc_install_driver(&msc_driver_cfg);
+        if (msc_install_err != ESP_OK) {
+            LOG_E(TAG, "Failed to install TinyUSB MSC driver: %s", esp_err_to_name(msc_install_err));
+            sdcard_unmount_raw();
+            sdcard_mount();
+            return APP_ERR_GENERIC;
+        }
 
         tinyusb_log_compiled_config();
 
@@ -314,12 +394,14 @@ static app_err_t usb_file_server_start(void) {
     // Mark as running
     g_usb_file_server_running = true;
     LOG_I(TAG, "USB file server started successfully");
+    bootlog_nvs_flush_now();
 
     return APP_OK;
 }
 
 static app_err_t usb_file_server_stop(void) {
     LOG_I(TAG, "USB file server stop requested");
+    bootlog_nvs_flush_now();
 
     if (!g_usb_file_server_running) {
         LOG_W(TAG, "USB file server is not running");
@@ -366,6 +448,7 @@ static app_err_t usb_file_server_stop(void) {
     // Mark as stopped
     g_usb_file_server_running = false;
     LOG_I(TAG, "USB file server stopped successfully");
+    bootlog_nvs_flush_now();
 
     return APP_OK;
 }
@@ -395,7 +478,19 @@ static void button_long_press_handler(const button_event_t *ev, void *user_data)
     app_logic_t *app = (app_logic_t *)user_data;
     app_state_t *state = app_state_get_instance();
 
-#if defined(USE_WEB_FILE_SEREVER)
+#if defined(USE_USB_FILE_SERVER)
+    if (usb_file_server_is_running()) {
+        LOG_I(TAG, "USB file server is active. Sending command to stop.");
+        app_logic_send_command(app, APP_CMD_STOP_USB_FILE_SERVER);
+    } else {
+        LOG_I(TAG, "USB file server is inactive. Sending command to start.");
+        // First stop logging only if active, then start USB file server
+        if (state->current_mode == APP_MODE_LOGGING) {
+            app_logic_send_command(app, APP_CMD_STOP_LOGGING_AND_FREE_MEMORY);
+        }
+        app_logic_send_command(app, APP_CMD_START_USB_FILE_SERVER);
+    }
+#elif defined(USE_WEB_FILE_SEREVER)
     const bool web_server_active = app->web_server && web_server_is_running(app->web_server);
     const bool wifi_up = state->wifi_sta_active || state->wifi_ap_active;
 
@@ -424,18 +519,6 @@ static void button_long_press_handler(const button_event_t *ev, void *user_data)
         }
         app_logic_send_command(app, APP_CMD_ONLINE_MODE_START);
     }
-#elif defined(USE_USB_FILE_SERVER)
-    if (usb_file_server_is_running()) {
-        LOG_I(TAG, "USB file server is active. Sending command to stop.");
-        app_logic_send_command(app, APP_CMD_STOP_USB_FILE_SERVER);
-    } else {
-        LOG_I(TAG, "USB file server is inactive. Sending command to start.");
-        // First stop logging only if active, then start USB file server
-        if (state->current_mode == APP_MODE_LOGGING) {
-            app_logic_send_command(app, APP_CMD_STOP_LOGGING_AND_FREE_MEMORY);
-        }
-        app_logic_send_command(app, APP_CMD_START_USB_FILE_SERVER);
-    }
 #endif
 }
 
@@ -445,8 +528,11 @@ static void button_event_handler(const button_event_t *ev, void *user_data) {
         case BUTTON_EVENT_TYPE_DOUBLE_PRESS:
             button_double_press_handler(ev, user_data);
             break;
-        case BUTTON_EVENT_TYPE_SUPER_LONG_PRESS:
+        case BUTTON_EVENT_TYPE_LONG_PRESS:
             button_long_press_handler(ev, user_data);
+            break;
+        case BUTTON_EVENT_TYPE_SUPER_LONG_PRESS:
+             // Ignore super long press to avoid double-toggling
             break;
         case BUTTON_EVENT_TYPE_TRIPLE_PRESS: {
             // Triple press: Toggle RPC server (WiFi + JSON-RPC)
@@ -457,9 +543,22 @@ static void button_event_handler(const button_event_t *ev, void *user_data) {
             break;
         }
         case BUTTON_EVENT_TYPE_QUADRUPLE_PRESS: {
+             app_logic_t *app = (app_logic_t *)user_data;
+            app_state_t *state = app_state_get_instance();
+
+            // SENSITIVE: Only allow reboot from the primary ENTER button, and only in IDLE mode.
+            // This prevents noise-induced resets (GPIO0/12 are especially sensitive during SD/USB/WiFi activity).
+            if (ev->button->id != BUTTON_ID_ENTER) {
+                LOG_W(TAG, "Ignored Quadruple Press (Reboot) on non-ENTER button %d", ev->button->id);
+                return;
+            }
+            if (state->current_mode != APP_MODE_IDLE) {
+                LOG_W(TAG, "Ignored Quadruple Press (Reboot) outside IDLE (mode=%d)", state->current_mode);
+                return;
+            }
+
             // Quadruple press: Reboot device
             LOG_I(TAG, "Button %d quadruple press detected - rebooting", ev->button->id);
-            app_logic_t *app = (app_logic_t *)user_data;
             app_logic_send_command(app, APP_CMD_REBOOT);
             break;
         }
@@ -771,9 +870,96 @@ void app_logic_on_event(const es_event_t *ev, void *user) {
             LOG_I(TAG, "Event received: WiFi AP stopped");
             break;
         default:
-            // This is not a warning, as app_logic may not need to react to every event.
             // LOG_D(TAG, "Received unhandled event: %d", ev->id);
             break;
+        case APP_EVENT_LOGGER_CONFIG_RECEIVED: {
+            LOG_I(TAG, "Event received: STM32 config received");
+             
+            // Check if we have a saved config in NVS
+            logger_config_t nvs_cfg;
+            if (config_manager_load_stm_config(&nvs_cfg)) {
+                const logger_config_t *stm_cfg = &g_logger_module.stm_config;
+
+                // If NVS config has no version (legacy blob) or is older than STM firmware config,
+                // discard NVS and accept STM configuration as source of truth.
+                const bool nvs_missing_version = (nvs_cfg.version_major == 0u) && (nvs_cfg.version_minor == 0u);
+                const bool nvs_older_than_stm =
+                    app_logic_cfg_version_is_less(nvs_cfg.version_major, nvs_cfg.version_minor, stm_cfg->version_major, stm_cfg->version_minor);
+
+                if (nvs_missing_version || nvs_older_than_stm) {
+                    LOG_W(TAG,
+                          "NVS logger config is legacy/older (NVS v%u.%u, STM v%u.%u). Clearing NVS and prioritizing STM config.",
+                          (unsigned)nvs_cfg.version_major, (unsigned)nvs_cfg.version_minor, (unsigned)stm_cfg->version_major,
+                          (unsigned)stm_cfg->version_minor);
+
+                    if (!config_manager_clear_stm_config()) {
+                        LOG_W(TAG, "Failed to erase legacy STM config from NVS (will overwrite).");
+                    }
+
+                    if (config_manager_save_stm_config(stm_cfg)) {
+                        LOG_I(TAG, "STM32 config saved to NVS as new baseline.");
+                    } else {
+                        LOG_E(TAG, "Failed to save STM32 config to NVS.");
+                    }
+                    s_stm_cfg_mismatch_retries = 0u;
+                    break;
+                }
+
+                // We have a saved config. Compare only the writable fields.
+                // Fields like chip_id, runtime state, register snapshots, and config_source can legitimately differ.
+                const bool writable_match =
+                    (nvs_cfg.accel_enable == stm_cfg->accel_enable) &&
+                    (nvs_cfg.accel_range_g == stm_cfg->accel_range_g) &&
+                    (nvs_cfg.accel_odr_hz == stm_cfg->accel_odr_hz) &&
+                    (nvs_cfg.accel_bw_hz == stm_cfg->accel_bw_hz) &&
+                    (nvs_cfg.accel_lpf2_en == stm_cfg->accel_lpf2_en) &&
+                    (nvs_cfg.accel_hp_en == stm_cfg->accel_hp_en) &&
+                    (nvs_cfg.accel_hp_cutoff == stm_cfg->accel_hp_cutoff) &&
+                    (nvs_cfg.accel_hm_mode == stm_cfg->accel_hm_mode) &&
+                    (nvs_cfg.gyro_enable == stm_cfg->gyro_enable) &&
+                    (nvs_cfg.gyro_lpf1_en == stm_cfg->gyro_lpf1_en) &&
+                    (nvs_cfg.gyro_odr_hz == stm_cfg->gyro_odr_hz) &&
+                    (nvs_cfg.gyro_range_dps == stm_cfg->gyro_range_dps) &&
+                    (nvs_cfg.gyro_lpf1_bw == stm_cfg->gyro_lpf1_bw) &&
+                    (nvs_cfg.gyro_hp_en == stm_cfg->gyro_hp_en) &&
+                    (nvs_cfg.gyro_hp_cutoff == stm_cfg->gyro_hp_cutoff) &&
+                    (nvs_cfg.gyro_hm_mode == stm_cfg->gyro_hm_mode) &&
+                    (nvs_cfg.mavlink_logging_enabled == stm_cfg->mavlink_logging_enabled);
+
+                if (!writable_match) {
+                    app_logic_log_writable_cfg_diffs(&nvs_cfg, stm_cfg);
+                    s_stm_cfg_mismatch_retries++;
+                    if (s_stm_cfg_mismatch_retries >= 3u) {
+                        LOG_W(TAG,
+                              "Config mismatch persisted for %u attempts. Marking NVS config stale and prioritizing STM config.",
+                              (unsigned)s_stm_cfg_mismatch_retries);
+                        if (config_manager_clear_stm_config() && config_manager_save_stm_config(stm_cfg)) {
+                            LOG_I(TAG, "STM32 config saved to NVS as new baseline after repeated mismatch.");
+                        } else {
+                            LOG_E(TAG, "Failed to refresh NVS config from STM32 after repeated mismatch.");
+                        }
+                        s_stm_cfg_mismatch_retries = 0u;
+                    } else {
+                        LOG_I(TAG, "Config mismatch (NVS != STM) in writable fields. Sending NVS config to STM32 (attempt %u/3).",
+                              (unsigned)s_stm_cfg_mismatch_retries);
+                        // Trigger command to send config back to STM
+                        app_logic_send_command(app, APP_CMD_SEND_CONFIG_TO_STM);
+                    }
+                } else {
+                    LOG_I(TAG, "Config synchronized: STM32 matches NVS (writable fields).");
+                    s_stm_cfg_mismatch_retries = 0u;
+                }
+            } else {
+                LOG_I(TAG, "No NVS config found. Saving received STM32 config as new default.");
+                if (config_manager_save_stm_config(&g_logger_module.stm_config)) {
+                    LOG_I(TAG, "STM32 config saved to NVS.");
+                } else {
+                    LOG_E(TAG, "Failed to save STM32 config to NVS.");
+                }
+                s_stm_cfg_mismatch_retries = 0u;
+            }
+            break;
+        }
     }
 #endif
 }
@@ -790,7 +976,15 @@ void app_logic_task(void *arg) {
 
     LOG_I(TAG, "App Logic Task started.");
 
+    // Persist last logs to NVS periodically so they survive power-cycle
+    // (useful when USB serial disappears in MSC mode).
+    // Keep interval reasonable to preserve "last lines before crash" while limiting flash wear.
+    // We also force-flush on MSC start/stop and before controlled reboot.
+    bootlog_nvs_enable(60000);
+
     while (1) {
+        bootlog_nvs_poll();
+
         // Update button state
         button_update(app->button);
         button_update(app->button_external);
@@ -837,8 +1031,11 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
         case APP_CMD_SET_MODE_LOGGING: {
             // Do not allow starting logging if the app is already in ERROR state.
             // Otherwise UI may show "LOGGING" (green LED) while nothing is actually recorded.
-            if (state->current_mode == APP_MODE_ERROR || state->system_error_code != APP_OK) {
-                LOG_W(TAG, "Ignoring LOGGING start request: app is in ERROR state (error=%ld, mode=%d)",
+            // Also block if in DOWNLOAD mode (USB MSC) to prevent SD card corruption.
+            if (state->current_mode == APP_MODE_ERROR || 
+                state->system_error_code != APP_OK || 
+                state->current_mode == APP_MODE_DOWNLOAD) {
+                LOG_W(TAG, "Ignoring LOGGING start request: invalid state (error=%ld, mode=%d)",
                       state->system_error_code, state->current_mode);
                 result = APP_ERR_INVALID_STATE;
                 break;
@@ -853,6 +1050,12 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
 
             if (app->logger_module) {
                 logger_module_reset_stats(app->logger_module);
+                // Start new logging session - creates folder and opens log file
+                if (logger_module_start_session(app->logger_module) != HAL_ERR_NONE) {
+                    LOG_E(TAG, "Failed to start logging session");
+                    result = APP_ERR_GENERIC;
+                    break;
+                }
             }
 
             // Start a new logging session by restarting STM32 and re-reading the logger config.
@@ -1093,6 +1296,9 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
                 LOG_I(TAG, "RPC server already running - stopping it");
                 rpc_server_stop(&g_rpc_server);
                 wifi_stop(app->wifi);
+                app_state_begin_update();
+                app_state_set_u8(APP_STATE_FIELD_CURRENT_MODE, (uint8_t *)&state->current_mode, APP_MODE_IDLE);
+                app_state_end_update();
                 LOG_I(TAG, "RPC server and WiFi stopped");
                 break;
             }
@@ -1148,6 +1354,10 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
                 result = APP_ERR_GENERIC;
             } else {
                 LOG_I(TAG, "RPC server started successfully on port 80");
+
+                app_state_begin_update();
+                app_state_set_u8(APP_STATE_FIELD_CURRENT_MODE, (uint8_t *)&state->current_mode, APP_MODE_ONLINE);
+                app_state_end_update();
                 
 #if defined(DEV) && defined(WIFI_DEV_SSID) && defined(WIFI_DEV_PASSWORD)
                 // DEV mode: auto-connect to hardcoded dev WiFi
@@ -1183,6 +1393,9 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
                 rpc_server_stop(&g_rpc_server);
                 LOG_I(TAG, "RPC server stopped");
             }
+            app_state_begin_update();
+            app_state_set_u8(APP_STATE_FIELD_CURRENT_MODE, (uint8_t *)&state->current_mode, APP_MODE_IDLE);
+            app_state_end_update();
             break;
         }
 #endif
@@ -1300,6 +1513,74 @@ static app_err_t _app_logic_handle_command(app_logic_t *app, app_command_t *cmd)
             }
             break;
 #endif
+        case APP_CMD_SEND_CONFIG_TO_STM: {
+            LOG_I(TAG, "Sending config to STM32 requested...");
+            logger_config_t cfg;
+            if (config_manager_load_stm_config(&cfg)) {
+                const bool sent_ok = remote_accel_reader_send_config(&cfg);
+                if (!sent_ok) {
+                    LOG_W(TAG, "STM32 rejected/ignored SET_CONFIG handshake; keeping current STM config and skipping refresh.");
+                    break;
+                }
+
+                remote_accel_reader_request_config_refresh();
+                // We don't save to NVS here because we loaded FROM NVS.
+                // Update the log file header to reflect the user-selected configuration.
+                // We preserve read-only fields (chip_id, runtime, register snapshots) from the
+                // last STM32-reported config, but override writable fields from NVS/Web.
+                logger_config_t merged = g_logger_module.stm_config;
+                merged.accel_enable = cfg.accel_enable;
+                merged.accel_range_g = cfg.accel_range_g;
+                merged.accel_odr_hz = cfg.accel_odr_hz;
+                merged.accel_bw_hz = cfg.accel_bw_hz;
+                merged.accel_lpf2_en = cfg.accel_lpf2_en;
+                merged.accel_hp_en = cfg.accel_hp_en;
+                merged.accel_hp_cutoff = cfg.accel_hp_cutoff;
+                merged.accel_hm_mode = cfg.accel_hm_mode;
+
+                merged.gyro_enable = cfg.gyro_enable;
+                merged.gyro_lpf1_en = cfg.gyro_lpf1_en;
+                merged.gyro_odr_hz = cfg.gyro_odr_hz;
+                merged.gyro_range_dps = cfg.gyro_range_dps;
+                merged.gyro_lpf1_bw = cfg.gyro_lpf1_bw;
+                merged.gyro_hp_en = cfg.gyro_hp_en;
+                merged.gyro_hp_cutoff = cfg.gyro_hp_cutoff;
+                merged.gyro_hm_mode = cfg.gyro_hm_mode;
+
+                merged.mavlink_logging_enabled = cfg.mavlink_logging_enabled;
+                merged.config_source = cfg.config_source;
+
+                logger_module_write_config_header(&g_logger_module, &merged);
+
+                // Keep in-memory config aligned with what we just applied (writable fields),
+                // but do not overwrite read-only fields.
+                g_logger_module.stm_config.accel_enable = merged.accel_enable;
+                g_logger_module.stm_config.accel_range_g = merged.accel_range_g;
+                g_logger_module.stm_config.accel_odr_hz = merged.accel_odr_hz;
+                g_logger_module.stm_config.accel_bw_hz = merged.accel_bw_hz;
+                g_logger_module.stm_config.accel_lpf2_en = merged.accel_lpf2_en;
+                g_logger_module.stm_config.accel_hp_en = merged.accel_hp_en;
+                g_logger_module.stm_config.accel_hp_cutoff = merged.accel_hp_cutoff;
+                g_logger_module.stm_config.accel_hm_mode = merged.accel_hm_mode;
+
+                g_logger_module.stm_config.gyro_enable = merged.gyro_enable;
+                g_logger_module.stm_config.gyro_lpf1_en = merged.gyro_lpf1_en;
+                g_logger_module.stm_config.gyro_odr_hz = merged.gyro_odr_hz;
+                g_logger_module.stm_config.gyro_range_dps = merged.gyro_range_dps;
+                g_logger_module.stm_config.gyro_lpf1_bw = merged.gyro_lpf1_bw;
+                g_logger_module.stm_config.gyro_hp_en = merged.gyro_hp_en;
+                g_logger_module.stm_config.gyro_hp_cutoff = merged.gyro_hp_cutoff;
+                g_logger_module.stm_config.gyro_hm_mode = merged.gyro_hm_mode;
+
+                g_logger_module.stm_config.mavlink_logging_enabled = merged.mavlink_logging_enabled;
+                g_logger_module.stm_config.config_source = merged.config_source;
+            } else {
+                LOG_W(TAG, "Cannot send config to STM32: No NVS config found");
+                // Optional: We could try to use g_logger_module.stm_config if valid?
+                // But normally this command is called when NVS mismatch is detected.
+            }
+            break;
+        }
         default:
             LOG_W(TAG, "Received unhandled application command: %d", cmd->id);
             result = APP_ERR_UNKNOWN_COMMAND;

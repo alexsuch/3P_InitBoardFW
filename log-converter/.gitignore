@@ -94,7 +94,7 @@ TEMP/
 
 # Keep workspace files
 !**/*.code-workspace
-logs/
-output/
+logs_/
+output_/
 output_*/
 log_converter_new.exe

@@ -3,6 +3,27 @@
 This firmware runs on ESP32-S3 and records binary `logger_frame_t` frames produced by the STM32 firmware over an SPI link.
 It does **not** talk to the IMU directly and does not perform any sensor processing.
 
+## Control & Indication
+
+### Button Commands
+
+| Press Type          | Action                                  |
+| :------------------ | :-------------------------------------- |
+| **Double Press**    | Toggle **Logging** (Start/Stop)         |
+| **Triple Press**    | Toggle **RPC Server** (WiFi + JSON-RPC) |
+| **Quadruple Press** | **Reboot** Device                       |
+| **Long Press** (1s) | Toggle **Online Mode** (WiFi / USB MSC) |
+
+### Indication Legend
+
+| Mode              | RGB LED        | External LED     | Description                             |
+| :---------------- | :------------- | :--------------- | :-------------------------------------- |
+| **Idle**          | Green (Solid)  | On (Solid)       | System ready, waiting for commands      |
+| **Logging**       | Orange (Solid) | Blink (1 Hz)     | Recording data to SD card               |
+| **Online (WiFi)** | Deep Violet    | 3 Blinks + Pause | WiFi Access Point / Station active      |
+| **Download**      | Blue (Solid)   | 2 Blinks + Pause | USB File Download / Web Download active |
+| **Error**         | Red (Solid)    | Fast Blink       | System error (check logs)               |
+
 ## Key Settings
 
 - STM32 link SPI clock: `logger/include/target.h` -> `LINK_SPI_FREQ_HZ`

@@ -13,6 +13,7 @@
 
 #include "app_state.h"
 #include "build_info.h"
+#include "app_commands.h"
 #include "config_manager.h"
 #include "log.h"
 #include "platform/system.h"
@@ -561,27 +562,77 @@ hal_err_t logger_module_init(logger_module_t *module, bool is_sd_card_ok) {
     module->sd_card_ok = is_sd_card_ok;
     module->shutdown_requested = false;
     if (!module->sd_card_ok) {
-        LOG_E(TAG, "SD card not available. Logger disabled.");
+        LOG_W(TAG, "SD card not available. Logger writes disabled, but monitoring active.");
+        // Do not fail here - allow module to initialize so STM32 config can be received
+    } else {
+        // Allocate buffers dynamically only if SD card is present
+        hal_err_t buffer_err = logger_module_allocate_buffers(module, LOGGER_BUFFER_SIZE);
+        if (buffer_err != HAL_ERR_NONE) {
+            LOG_E(TAG, "Failed to allocate logger buffers");
+            return buffer_err;
+        }
+
+        // Queue for chunks to write to SD - create now so tasks can be started
+        log_memory_status("before buffer queue creation");
+        if (!check_queue_creation_requirements(LOGGER_BUFFER_QUEUE_LENGTH, sizeof(logger_chunk_t), "buffer queue")) {
+            LOG_E(TAG, "Buffer queue creation requirements not met. Logger disabled.");
+            module->sd_card_ok = false;
+            // Continue initialization without SD features
+        } else {
+            module->buffer_queue = xQueueCreate(LOGGER_BUFFER_QUEUE_LENGTH, sizeof(logger_chunk_t));
+            if (module->buffer_queue == NULL) {
+                LOG_E(TAG, "Failed to create buffer queue (%u items, %zu bytes each). Logger disabled.", (unsigned)LOGGER_BUFFER_QUEUE_LENGTH, sizeof(logger_chunk_t));
+                log_memory_status("after buffer queue creation failure");
+                module->sd_card_ok = false;
+                // Continue initialization without SD features
+            } else {
+                LOG_I(TAG, "Buffer queue created successfully (%u items, %zu bytes each)", (unsigned)LOGGER_BUFFER_QUEUE_LENGTH, sizeof(logger_chunk_t));
+            }
+        }
+    }
+
+    if (module->sd_card_ok) {
+        module->active_buffer = module->ping_buffer;
+        module->active_buffer_idx = 0;
+    }
+
+    module->last_drop_stats_time_us = esp_timer_get_time();
+
+    // NOTE: Folder and file are NOT created here.
+    // Call logger_module_start_session() when logging actually starts.
+    LOG_I(TAG, "Logger module initialized (buffers ready: %s, session: none).", module->sd_card_ok ? "YES" : "NO");
+    module->initialized = true;
+    return HAL_ERR_NONE;
+}
+
+hal_err_t logger_module_start_session(logger_module_t *module) {
+    if (!module) {
+        LOG_E(TAG, "Invalid module pointer");
         return HAL_ERR_FAILED;
     }
-
-    // Allocate buffers dynamically
-    hal_err_t buffer_err = logger_module_allocate_buffers(module, LOGGER_BUFFER_SIZE);
-    if (buffer_err != HAL_ERR_NONE) {
-        LOG_E(TAG, "Failed to allocate logger buffers");
-        return buffer_err;
+    if (!module->initialized) {
+        LOG_E(TAG, "Logger module not initialized");
+        return HAL_ERR_FAILED;
+    }
+    if (!module->sd_card_ok) {
+        LOG_E(TAG, "SD card not available");
+        return HAL_ERR_FAILED;
+    }
+    // If a session is already active (file open), do nothing
+    if (module->log_file != NULL) {
+        LOG_W(TAG, "Logging session already active, file: %s", module->log_file_path);
+        return HAL_ERR_NONE;
     }
 
-    // Temporary string buffers used during initialization only
+    // Temporary string buffers used during session start
     char log_dir_path[64];
     char config_path[96];
     char log_file_path[96];
 
-    // Папка /N з першим вільним індексом
+    // Find first free folder index: /N
     int log_num = 0;
     struct stat st;
     while (1) {
-        // Use snprintf instead of sprintf for safety
         snprintf(log_dir_path, sizeof(log_dir_path), SD_MOUNT_PATH "/%d", log_num);
         if (stat(log_dir_path, &st) != 0) break;
         log_num++;
@@ -589,51 +640,26 @@ hal_err_t logger_module_init(logger_module_t *module, bool is_sd_card_ok) {
 
     if (mkdir(log_dir_path, 0755) != 0) {
         LOG_E(TAG, "Failed to create log directory %s", log_dir_path);
-        module->sd_card_ok = false;
         return HAL_ERR_FAILED;
     }
 
-    // Скопіювати конфіг у лог-папку (як є)
+    // Copy config file to log folder
     snprintf(config_path, sizeof(config_path), "%s/configuration.ini", log_dir_path);
     copy_config_file(config_path);
 
     snprintf(log_file_path, sizeof(log_file_path), "%s/data_%d.dat", log_dir_path, log_num);
     strncpy(module->log_file_path, log_file_path, sizeof(module->log_file_path) - 1);
     module->log_file_path[sizeof(module->log_file_path) - 1] = '\0';
+
     hal_err_t err = sdcard_open_file(log_file_path, "wb", &module->log_file);
     if (err != HAL_ERR_NONE) {
         LOG_E(TAG, "Failed to create log file %s", log_file_path);
-        module->sd_card_ok = false;
         return err;
     }
 
     setvbuf((FILE *)module->log_file, NULL, _IONBF, 0);
 
-
-    // Queue for chunks to write to SD
-    log_memory_status("before buffer queue creation");
-    if (!check_queue_creation_requirements(LOGGER_BUFFER_QUEUE_LENGTH, sizeof(logger_chunk_t), "buffer queue")) {
-        LOG_E(TAG, "Buffer queue creation requirements not met. Logger disabled.");
-        module->sd_card_ok = false;
-        return HAL_ERR_FAILED;
-    }
-
-    module->buffer_queue = xQueueCreate(LOGGER_BUFFER_QUEUE_LENGTH, sizeof(logger_chunk_t));
-    if (module->buffer_queue == NULL) {
-        LOG_E(TAG, "Failed to create buffer queue (%u items, %zu bytes each). Logger disabled.", (unsigned)LOGGER_BUFFER_QUEUE_LENGTH, sizeof(logger_chunk_t));
-        log_memory_status("after buffer queue creation failure");
-        module->sd_card_ok = false;
-        return HAL_ERR_FAILED;
-    }
-    LOG_I(TAG, "Buffer queue created successfully (%u items, %zu bytes each)", (unsigned)LOGGER_BUFFER_QUEUE_LENGTH, sizeof(logger_chunk_t));
-
-    module->active_buffer = module->ping_buffer;
-    module->active_buffer_idx = 0;
-
-    module->last_drop_stats_time_us = esp_timer_get_time();
-
-    LOG_I(TAG, "Logger initialized. Binary data to %s", log_file_path);
-    module->initialized = true;
+    LOG_I(TAG, "Logging session started. Binary data to %s", log_file_path);
     return HAL_ERR_NONE;
 }
 
@@ -850,6 +876,55 @@ esp_err_t logger_module_create_task_static(void) { return logger_module_create_t
 
 hal_err_t logger_module_stop_and_free_memory_static(void) { return logger_module_stop_and_free_memory(&g_logger_module); }
 
+static void logger_module_write_config_header_internal(logger_module_t *module, const logger_config_t *config) {
+    if (!module || !config) {
+        return;
+    }
+
+    if (!(module->sd_card_ok && module->log_file)) {
+        return;
+    }
+
+    // Avoid concurrent writes to the same FILE* from the SD writer task.
+    // This is especially important during session start/config sync when frames may already be streaming.
+    const bool had_writer_task = (module->writer_task_handle != NULL);
+    if (had_writer_task) {
+        vTaskSuspend(module->writer_task_handle);
+    }
+
+    // Seek to the beginning of the file
+    FILE *fp = (FILE *)module->log_file;
+    long current_pos = ftell(fp);
+
+    if (fseek(fp, 0, SEEK_SET) != 0) {
+        LOG_E(TAG, "Failed to seek to beginning of log file");
+        if (had_writer_task) {
+            vTaskResume(module->writer_task_handle);
+        }
+        return;
+    }
+
+    size_t written = fwrite(config, 1, sizeof(logger_config_t), fp);
+    if (written != sizeof(logger_config_t)) {
+        LOG_E(TAG, "Failed to write config header: wrote %zu of %zu bytes", written, sizeof(logger_config_t));
+    } else {
+        LOG_I(TAG, "Wrote %zu-byte config header to log file (magic=0x%04X, v%u.%u)", sizeof(logger_config_t), config->magic,
+              config->version_major, config->version_minor);
+    }
+    fflush(fp);
+
+    // Seek back to original position (or to end of header if file was empty)
+    if (current_pos < (long)sizeof(logger_config_t)) {
+        fseek(fp, sizeof(logger_config_t), SEEK_SET);
+    } else {
+        fseek(fp, current_pos, SEEK_SET);
+    }
+
+    if (had_writer_task) {
+        vTaskResume(module->writer_task_handle);
+    }
+}
+
 void logger_module_set_stm_config(logger_module_t *module, const logger_config_t *config) {
     if (!module || !config) {
         LOG_E(TAG, "Invalid arguments to logger_module_set_stm_config");
@@ -861,33 +936,18 @@ void logger_module_set_stm_config(logger_module_t *module, const logger_config_t
     module->stm_config_received = true;
 
     // Write the 64-byte config header to the beginning of the log file
-    if (module->sd_card_ok && module->log_file) {
-        // Seek to the beginning of the file
-        FILE *fp = (FILE *)module->log_file;
-        long current_pos = ftell(fp);
-        
-        if (fseek(fp, 0, SEEK_SET) == 0) {
-            size_t written = fwrite(&module->stm_config, 1, sizeof(logger_config_t), fp);
-            if (written != sizeof(logger_config_t)) {
-                LOG_E(TAG, "Failed to write config header: wrote %zu of %zu bytes", written, sizeof(logger_config_t));
-            } else {
-                LOG_I(TAG, "Wrote %zu-byte config header to log file (magic=0x%04X, v%u.%u)", 
-                      sizeof(logger_config_t), config->magic, config->version_major, config->version_minor);
-            }
-            fflush(fp);
-            
-            // Seek back to original position (or to end of header if file was empty)
-            if (current_pos < (long)sizeof(logger_config_t)) {
-                fseek(fp, sizeof(logger_config_t), SEEK_SET);
-            } else {
-                fseek(fp, current_pos, SEEK_SET);
-            }
-        } else {
-            LOG_E(TAG, "Failed to seek to beginning of log file");
-        }
-    } else {
-        LOG_W(TAG, "Cannot write config header: SD card not ready or file not open");
+    logger_module_write_config_header_internal(module, &module->stm_config);
+
+    // Publish event that config has been received
+    es_t *es = app_state_get_event_sender();
+    if (es) {
+        es_event_t ev = {.id = APP_EVENT_LOGGER_CONFIG_RECEIVED};
+        es_emit(es, &ev);
     }
+}
+
+void logger_module_write_config_header(logger_module_t *module, const logger_config_t *config) {
+    logger_module_write_config_header_internal(module, config);
 }
 
 void IRAM_ATTR logger_module_write_frame(logger_module_t *module, const logger_frame_t *frame) {

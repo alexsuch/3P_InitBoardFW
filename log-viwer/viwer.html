@@ -2,7 +2,7 @@
 <html lang="uk">
   <head>
     <meta charset="UTF-8" />
-    <title>Pro CSV Viewer v6 (High Contrast Selection)</title>
+    <title>3-P Log viewer</title>
     <link rel="stylesheet" href="uPlot.min.css" />
     <script src="uPlot.iife.min.js"></script>
 
@@ -153,6 +153,28 @@
         font-size: 10px;
         color: #aaa;
         margin-top: 2px;
+      }
+      .ds-config-panel {
+        margin-top: 6px;
+        padding: 6px 7px;
+        border-radius: 4px;
+        background: #1b1b1b;
+        border: 1px solid #2f2f2f;
+        font-size: 10px;
+        line-height: 1.35;
+        color: #b8b8b8;
+      }
+      .ds-config-title {
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #7fb4ff;
+        margin-bottom: 3px;
+      }
+      .ds-config-line {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       /* --- MAIN AREA --- */
@@ -506,7 +528,7 @@
     </div>
 
     <div class="sidebar">
-      <div class="logo">⚡ CSV <span>Pro v6</span></div>
+      <div class="logo">⚡ 3-P Log viwer <span>v7</span></div>
 
       <button
         class="btn btn-primary"
@@ -845,6 +867,79 @@
               M._free(outAdcCountPtr);
               M._free(outImuCountPtr);
           }
+      }
+
+      function parseDatConfigHeader(buffer) {
+          const HEADER_SIZE = 64;
+          const LOG_CONFIG_MAGIC = 0xCAFE;
+          if (!buffer || buffer.byteLength < HEADER_SIZE) return null;
+
+          const view = new DataView(buffer);
+          const magic = view.getUint16(0, true);
+          if (magic !== LOG_CONFIG_MAGIC) return null;
+
+          return {
+              versionMajor: view.getUint8(2),
+              versionMinor: view.getUint8(3),
+              adcSampleRateKhz: view.getUint16(4, true),
+              adcBlockSize: view.getUint16(6, true),
+
+              accelEnable: view.getUint8(8),
+              accelRangeG: view.getUint8(9),
+              accelOdrHz: view.getUint16(10, true),
+              accelBwHz: view.getUint16(12, true),
+              accelLpf2En: view.getUint8(14),
+              accelHpEn: view.getUint8(15),
+              accelHpCutoff: view.getUint8(16),
+              accelHmMode: view.getUint8(17),
+
+              checksumAlgo: view.getUint8(18),
+
+              gyroEnable: view.getUint8(19),
+              gyroLpf1En: view.getUint8(20),
+              gyroOdrHz: view.getUint16(21, true),
+              gyroRangeDps: view.getUint16(23, true),
+              gyroLpf1Bw: view.getUint8(25),
+              gyroHpEn: view.getUint8(26),
+              gyroHpCutoff: view.getUint8(27),
+              gyroHmMode: view.getUint8(28),
+
+              mavlinkLoggingEnabled: view.getUint8(29),
+              configSource: view.getUint8(31),
+              chipId: view.getUint8(32),
+
+              ctrl1Xl: view.getUint8(34),
+              ctrl2G: view.getUint8(35),
+              ctrl4C: view.getUint8(37),
+              ctrl6C: view.getUint8(38),
+              ctrl7G: view.getUint8(39),
+              ctrl8Xl: view.getUint8(40),
+              ctrl10C: view.getUint8(42),
+          };
+      }
+
+      function checksumAlgoName(id) {
+          if (id === 1) return "CRC8";
+          if (id === 2) return "SUM8";
+          if (id === 3) return "CRC8_HW";
+          return `ID:${id}`;
+      }
+
+      function fmtHex8(v) {
+          return "0x" + Number(v || 0).toString(16).toUpperCase().padStart(2, "0");
+      }
+
+      function buildDatConfigHtml(cfg) {
+          if (!cfg) return "";
+          return `
+              <div class="ds-config-panel">
+                  <div class="ds-config-title">DAT Config</div>
+                  <div class="ds-config-line">FW v${cfg.versionMajor}.${cfg.versionMinor} | chip ${fmtHex8(cfg.chipId)} | ${checksumAlgoName(cfg.checksumAlgo)}</div>
+                  <div class="ds-config-line">ADC: ${cfg.adcSampleRateKhz}kHz, block ${cfg.adcBlockSize}</div>
+                  <div class="ds-config-line">ACC: en=${cfg.accelEnable}, ±${cfg.accelRangeG}g, ODR=${cfg.accelOdrHz}, BW=${cfg.accelBwHz}, LPF2=${cfg.accelLpf2En}, HP=${cfg.accelHpEn}/${cfg.accelHpCutoff}, HM=${cfg.accelHmMode}</div>
+                  <div class="ds-config-line">GYR: en=${cfg.gyroEnable}, ±${cfg.gyroRangeDps}dps, ODR=${cfg.gyroOdrHz}, LPF1=${cfg.gyroLpf1En}/${cfg.gyroLpf1Bw}, HP=${cfg.gyroHpEn}/${cfg.gyroHpCutoff}, HM=${cfg.gyroHmMode}</div>
+              </div>
+          `;
       }
       
       // Wasm Anomaly Detection Function
@@ -1324,6 +1419,7 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
         try {
             if (isBinary) {
                 const buffer = await file.arrayBuffer();
+                const datConfig = parseDatConfigHeader(buffer);
                 let result;
                 
                 // Use Wasm parser if available (faster), fallback to Worker
@@ -1349,15 +1445,15 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
                 
                 // Add ADC Dataset (Auto-enable, skip render)
                 if (result.adc) {
-                     const adcDs = addDatasetFromWorkerResult(file.name + " (ADC)", result.adc, true, true);
+                     const adcDs = addDatasetFromWorkerResult(file.name + " (ADC)", result.adc, true, true, { datConfig });
                      if (result.pagination) adcDs.pagination = result.pagination;
-                }
+                 }
                 // Add IMU Dataset - calculate derived columns first
                 if (result.imu) {
                      calculateImuDerivedColumns(result.imu);
-                     const imuDs = addDatasetFromWorkerResult(file.name + " (IMU)", result.imu, true, true);
+                     const imuDs = addDatasetFromWorkerResult(file.name + " (IMU)", result.imu, true, true, { datConfig });
                      if (result.pagination) imuDs.pagination = result.pagination;
-                }
+                 }
                 // Render once after all datasets added
                 renderChart();
             } 
@@ -1393,7 +1489,7 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
         updateListUI();
       }
 
-      function addDatasetFromWorkerResult(name, parsed, autoEnable = true, skipRender = false) {
+      function addDatasetFromWorkerResult(name, parsed, autoEnable = true, skipRender = false, metadata = null) {
         const newDs = {
           id: datasets.length,
           name: name,
@@ -1401,7 +1497,8 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
           config: { xIndex: -1, yIndices: [], expectedFreqHz: 0 },
           anomalies: [],
           isReady: false,
-          isLoading: false
+          isLoading: false,
+          datConfig: metadata && metadata.datConfig ? metadata.datConfig : null
         };
 
         // Auto-detect config
@@ -1545,6 +1642,7 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
               // Read the header + the slice for this page
               const headerBuffer = await file.slice(0, HEADER_SIZE).arrayBuffer();
               const pageBuffer = await file.slice(startOffset, startOffset + bytesToRead).arrayBuffer();
+              const datConfig = parseDatConfigHeader(headerBuffer);
               
               // Combine header with page data
               const combined = new Uint8Array(HEADER_SIZE + pageBuffer.byteLength);
@@ -1571,12 +1669,12 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
               
               // Add new datasets (skip render, will batch after)
               if (result.adc) {
-                  const adcDs = addDatasetFromWorkerResult(file.name + " (ADC)", result.adc, true, true);
+                  const adcDs = addDatasetFromWorkerResult(file.name + " (ADC)", result.adc, true, true, { datConfig });
                   adcDs.pagination = newPagination;
               }
               if (result.imu) {
                   calculateImuDerivedColumns(result.imu);
-                  const imuDs = addDatasetFromWorkerResult(file.name + " (IMU)", result.imu, true, true);
+                  const imuDs = addDatasetFromWorkerResult(file.name + " (IMU)", result.imu, true, true, { datConfig });
                   imuDs.pagination = newPagination;
               }
               
@@ -1629,6 +1727,7 @@ function interpolateToMasterTime(srcX, srcY, masterX) {
                         ${!ds.isLoading && isMaster ? '<span style="font-size:9px; background:#007bff; padding:1px 3px; border-radius:3px;">MASTER</span>' : ""}
                     </div>
                     <div class="ds-status">${statusText}</div>
+                    ${ds.datConfig ? buildDatConfigHtml(ds.datConfig) : ""}
                     ${!ds.isLoading ? `
                     <div style="margin-top:8px; display:flex; justify-content:space-between;">
                         <button class="btn-icon ${ds.isReady ? "btn-neutral" : "btn-settings"}" onclick="openConfigModal(${idx})">⚙️ Налаштувати</button>

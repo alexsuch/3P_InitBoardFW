@@ -56,6 +56,9 @@ typedef struct logger_module_s {
 extern logger_module_t g_logger_module;
 
 hal_err_t logger_module_init(logger_module_t *module, bool is_sd_card_ok);
+// Create new logging session - creates folder and opens new log file.
+// Should be called only when logging starts, not during system init.
+hal_err_t logger_module_start_session(logger_module_t *module);
 esp_err_t logger_module_create_task(logger_module_t *module);
 
 void logger_log_drop_statistics(logger_module_t *module);
@@ -97,6 +100,10 @@ hal_err_t logger_module_stop_and_free_memory(logger_module_t *module);
 
 // Set STM32 config and write 64-byte header to the beginning of the log file
 void logger_module_set_stm_config(logger_module_t *module, const logger_config_t *config);
+
+// If a log file is currently open, overwrite the 64-byte config header at the beginning.
+// This does not modify module state and does not emit events.
+void logger_module_write_config_header(logger_module_t *module, const logger_config_t *config);
 
 // Write a complete STM32 logger frame (852 bytes) to the log file
 void logger_module_write_frame(logger_module_t *module, const logger_frame_t *frame);

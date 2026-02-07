@@ -74,7 +74,7 @@ csv_result_t write_imu_csv(const char *filepath, const log_frame_t *frames,
  * @param frames Array of frames
  * @param frame_count Number of frames
  * @param adc_sample_rate_khz Logger tick rate in kHz (from config)
- * @param imu_odr_hz IMU ODR in Hz (from config.imu_config.*_odr_hz)
+ * @param imu_odr_hz IMU ODR in Hz (from config.accel_odr_hz / config.gyro_odr_hz)
  * @param frame_ok Per-frame validity flags (0/1), may be NULL (treat as all OK)
  * @param out_anomaly_count Optional output: number of anomalies written
  * @return CSV_OK on success
@@ -108,7 +108,7 @@ csv_result_t write_mavlink_csv(const char *filepath, const log_frame_t *frames,
  * @param frame_checksum_calc Per-frame calculated checksum (8-bit), may be NULL
  * @param frame_count Number of frames
  * @param adc_sample_rate_khz Logger tick rate in kHz (from config)
- * @param checksum_algo_id Algorithm id from config.reserved[0]
+ * @param checksum_algo_id Algorithm id from config.checksum_algo
  * @return CSV_OK on success
  */
 csv_result_t write_frame_status_csv(const char *filepath, const log_frame_t *frames,

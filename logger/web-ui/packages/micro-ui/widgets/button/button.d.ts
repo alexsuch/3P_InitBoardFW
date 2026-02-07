@@ -2,13 +2,13 @@ import * as preact from 'preact';
 import { ButtonHTMLAttributes } from 'preact/compat';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-    variant?: 'filled' | 'outlined' | 'text' | 'ghost' | 'elevated';
-    color?: 'primary' | 'secondary' | 'warning' | 'success' | 'error' | 'inherit';
+    variant?: "filled" | "outlined" | "text" | "ghost" | "elevated";
+    color?: "primary" | "secondary" | "warning" | "success" | "error" | "inherit";
     iconOnly?: boolean;
-    iconAlignment?: 'left' | 'center' | 'right';
-    size?: 'xs' | 's' | 'm' | 'l' | 'xl';
+    iconAlignment?: "left" | "center" | "right";
+    size?: "xs" | "s" | "m" | "l" | "xl";
     iconName?: string;
-    iconSize?: 'xs' | 's' | 'm' | 'l' | 'xl';
+    iconSize?: "xs" | "s" | "m" | "l" | "xl";
     iconClassName?: string;
     className?: string;
     children?: any;

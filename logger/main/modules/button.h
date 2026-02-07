@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <target.h>
 
+#include "util/time-util.h"
+
 typedef struct button_s button_t;
 
 typedef enum {
@@ -48,9 +50,17 @@ typedef struct button_state_s {
     bool long_press_sent;
     bool really_long_press_sent;
     bool super_long_press_sent;
-    unsigned long down_since;
-    unsigned long last_release_time;
-    bool ignore;  // Used when button is pressed on startup
+    time_ticks_t down_since;
+    time_ticks_t last_release_time;
+
+    // Debounce / glitch filtering
+    time_ticks_t press_candidate_since;
+    time_ticks_t release_candidate_since;
+
+    // Ignore window (used on startup and as a cooldown after "handled" events)
+    bool ignore;
+    time_ticks_t ignore_since;
+    time_ticks_t ignore_duration;
 } button_state_t;
 
 typedef void (*button_callback_f)(const button_event_t *ev, void *user_data);

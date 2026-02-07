@@ -81,4 +81,4 @@ For each input file, creates a subfolder with CSV files:
   - 256 ADC samples (512 bytes)
   - 0-20 IMU samples (320 bytes)
   - MAVLink data (10 bytes)
-  - checksum8 + pad (2 bytes, CRC8 or SUM8 depending on firmware build; see `config.reserved[0]`)
+- checksum8 + pad (2 bytes, CRC8 or SUM8 depending on firmware build; see `config.checksum_algo`)

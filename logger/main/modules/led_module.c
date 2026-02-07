@@ -14,6 +14,24 @@ static const char* TAG = "LED";
 #if defined(USE_RGB_LED)
 #define LED_MODULE_DEFAULT_BRIGHTNESS 20
 static uint8_t rgb_led_brightness = LED_MODULE_DEFAULT_BRIGHTNESS;
+
+static inline void led_module_set_rgb_color_direct(led_module_t* led_module, hal_ws2812_color_t color) {
+    if (!led_module || !led_module->rgb_led_initialized) {
+        return;
+    }
+
+    hal_ws2812_color_t scaled = color;
+    if (rgb_led_brightness == 0) {
+        scaled.r = scaled.g = scaled.b = 0;
+    } else if (rgb_led_brightness < 255) {
+        scaled.r = ((uint16_t)color.r * rgb_led_brightness) / 255;
+        scaled.g = ((uint16_t)color.g * rgb_led_brightness) / 255;
+        scaled.b = ((uint16_t)color.b * rgb_led_brightness) / 255;
+    }
+
+    led_module->rgb_color_buf[0] = scaled;
+    hal_ws2812_set_colors(RGB_LED_GPIO, LED_COLOR_ORDER, led_module->rgb_color_buf, 1);
+}
 #endif
 
 // Task to control both board LED and external LED based on app mode
@@ -46,6 +64,7 @@ void led_blink_task(void* pvParameters) {
     uint8_t online_phase = 0;
     uint8_t download_phase = 0;
     bool blink_state = true;
+    bool online_was_connecting = false;
 
     while (1) {
         app_state_t* state = app_state_get_instance();
@@ -53,7 +72,11 @@ void led_blink_task(void* pvParameters) {
         led_module->current_mode = mode;
 #if defined(USE_RGB_LED)
         // Refresh every loop to ensure mode changes are reflected promptly.
-        led_module_update_rgb_color(led_module, led_module->current_mode);
+        // Exception: while WiFi/RPC is starting (STA not connected yet), we blink RGB purple manually.
+        const bool online_connecting = (led_module->current_mode == APP_MODE_ONLINE) && state && (state->wifi_sta_active == 0);
+        if (!online_connecting) {
+            led_module_update_rgb_color(led_module, led_module->current_mode);
+        }
 #endif
 
         switch (led_module->current_mode) {
@@ -90,18 +113,18 @@ void led_blink_task(void* pvParameters) {
                 if (now >= pattern_deadline) {
                     switch (download_phase) {
                         case 0:
-                            // First short flash - LED ON
+                            // 1st Blink ON
 #if BOARD_LED_ENABLED
                             hal_gpio_set_level(BOARDLED_PIN, HAL_GPIO_HIGH);
 #endif
 #if defined(USE_LED_OUT)
                             hal_gpio_set_level(LED_OUT_GPIO, HAL_GPIO_HIGH);
 #endif
-                            pattern_deadline = now + pdMS_TO_TICKS(150);
+                            pattern_deadline = now + pdMS_TO_TICKS(200);
                             download_phase = 1;
                             break;
                         case 1:
-                            // Gap between flashes - LED OFF
+                            // 1st Pause OFF
 #if BOARD_LED_ENABLED
                             hal_gpio_set_level(BOARDLED_PIN, HAL_GPIO_LOW);
 #endif
@@ -112,18 +135,18 @@ void led_blink_task(void* pvParameters) {
                             download_phase = 2;
                             break;
                         case 2:
-                            // Second short flash - LED ON
+                            // 2nd Blink ON
 #if BOARD_LED_ENABLED
                             hal_gpio_set_level(BOARDLED_PIN, HAL_GPIO_HIGH);
 #endif
 #if defined(USE_LED_OUT)
                             hal_gpio_set_level(LED_OUT_GPIO, HAL_GPIO_HIGH);
 #endif
-                            pattern_deadline = now + pdMS_TO_TICKS(150);
+                            pattern_deadline = now + pdMS_TO_TICKS(200);
                             download_phase = 3;
                             break;
                         case 3:
-                            // Gap after second flash - LED OFF
+                            // 2nd Pause OFF
 #if BOARD_LED_ENABLED
                             hal_gpio_set_level(BOARDLED_PIN, HAL_GPIO_LOW);
 #endif
@@ -134,15 +157,26 @@ void led_blink_task(void* pvParameters) {
                             download_phase = 4;
                             break;
                         case 4:
+                            // 3rd Blink ON
+#if BOARD_LED_ENABLED
+                            hal_gpio_set_level(BOARDLED_PIN, HAL_GPIO_HIGH);
+#endif
+#if defined(USE_LED_OUT)
+                            hal_gpio_set_level(LED_OUT_GPIO, HAL_GPIO_HIGH);
+#endif
+                            pattern_deadline = now + pdMS_TO_TICKS(200);
+                            download_phase = 5;
+                            break;
+                        case 5:
                         default:
-                            // Longer pause before repeating - LED OFF
+                            // Long Pause OFF
 #if BOARD_LED_ENABLED
                             hal_gpio_set_level(BOARDLED_PIN, HAL_GPIO_LOW);
 #endif
 #if defined(USE_LED_OUT)
                             hal_gpio_set_level(LED_OUT_GPIO, HAL_GPIO_LOW);
 #endif
-                            pattern_deadline = now + pdMS_TO_TICKS(900);
+                            pattern_deadline = now + pdMS_TO_TICKS(1000);
                             download_phase = 0;
                             break;
                     }
@@ -151,10 +185,49 @@ void led_blink_task(void* pvParameters) {
                 break;
             }
             case APP_MODE_ONLINE: {
+                const bool wifi_connected = state && (state->wifi_sta_active != 0);
+                if (!wifi_connected) {
+                    TickType_t now = xTaskGetTickCount();
+
+                    if (!online_was_connecting) {
+                        online_was_connecting = true;
+                        last_toggle = now;
+                        blink_state = true;
+                    }
+
+                    // Slow blink while connecting to SSID (STA not active yet).
+                    if (now - last_toggle >= pdMS_TO_TICKS(500)) {
+                        blink_state = !blink_state;
+                        last_toggle = now;
+                    }
+
+#if BOARD_LED_ENABLED
+                    hal_gpio_set_level(BOARDLED_PIN, blink_state ? HAL_GPIO_HIGH : HAL_GPIO_LOW);
+#endif
+#if defined(USE_LED_OUT)
+                    hal_gpio_set_level(LED_OUT_GPIO, blink_state ? HAL_GPIO_HIGH : HAL_GPIO_LOW);
+#endif
+
+#if defined(USE_RGB_LED)
+                    hal_ws2812_color_t off = {.r = 0, .g = 0, .b = 0};
+                    led_module_set_rgb_color_direct(led_module, blink_state ? LED_COLOR_ONLINE : off);
+#endif
+
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                    break;
+                }
+
+                if (online_was_connecting) {
+                    online_was_connecting = false;
+                    online_phase = 0;
+                    pattern_deadline = xTaskGetTickCount();
+                }
+
                 TickType_t now = xTaskGetTickCount();
                 if (now >= pattern_deadline) {
                     switch (online_phase) {
                         case 0:
+                            // 1st Blink ON
 #if BOARD_LED_ENABLED
                             hal_gpio_set_level(BOARDLED_PIN, HAL_GPIO_HIGH);
 #endif
@@ -165,16 +238,18 @@ void led_blink_task(void* pvParameters) {
                             online_phase = 1;
                             break;
                         case 1:
+                            // 1st Pause OFF
 #if BOARD_LED_ENABLED
                             hal_gpio_set_level(BOARDLED_PIN, HAL_GPIO_LOW);
 #endif
 #if defined(USE_LED_OUT)
                             hal_gpio_set_level(LED_OUT_GPIO, HAL_GPIO_LOW);
 #endif
-                            pattern_deadline = now + pdMS_TO_TICKS(200);
+                            pattern_deadline = now + pdMS_TO_TICKS(100);
                             online_phase = 2;
                             break;
                         case 2:
+                            // 2nd Blink ON
 #if BOARD_LED_ENABLED
                             hal_gpio_set_level(BOARDLED_PIN, HAL_GPIO_HIGH);
 #endif
@@ -185,7 +260,30 @@ void led_blink_task(void* pvParameters) {
                             online_phase = 3;
                             break;
                         case 3:
+                            // 2nd Pause OFF
+#if BOARD_LED_ENABLED
+                            hal_gpio_set_level(BOARDLED_PIN, HAL_GPIO_LOW);
+#endif
+#if defined(USE_LED_OUT)
+                            hal_gpio_set_level(LED_OUT_GPIO, HAL_GPIO_LOW);
+#endif
+                            pattern_deadline = now + pdMS_TO_TICKS(100);
+                            online_phase = 4;
+                            break;
+                        case 4:
+                            // 3rd Blink ON
+#if BOARD_LED_ENABLED
+                            hal_gpio_set_level(BOARDLED_PIN, HAL_GPIO_HIGH);
+#endif
+#if defined(USE_LED_OUT)
+                            hal_gpio_set_level(LED_OUT_GPIO, HAL_GPIO_HIGH);
+#endif
+                            pattern_deadline = now + pdMS_TO_TICKS(200);
+                            online_phase = 5;
+                            break;
+                        case 5:
                         default:
+                            // Long Pause OFF
 #if BOARD_LED_ENABLED
                             hal_gpio_set_level(BOARDLED_PIN, HAL_GPIO_LOW);
 #endif

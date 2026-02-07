@@ -3,6 +3,8 @@ import { Button } from "micro-ui/widgets/button";
 import { Icon } from "micro-ui/widgets/icon";
 import { Input } from "micro-ui/widgets/input";
 import { Spinner } from "micro-ui/widgets/spinner";
+import { toastService } from "micro-ui/widgets/toast-service";
+import { useModal } from "micro-ui/widgets/modal";
 import {
   rpc,
   wifiScanning,
@@ -12,7 +14,116 @@ import {
   type WiFiNetwork,
 } from "../store";
 
+const ManualWiFiModalContent = ({
+  hideModal,
+  onConnected,
+}: {
+  hideModal: () => void;
+  onConnected: (ssid: string) => void;
+}) => {
+  const ssid = useSignal("");
+  const password = useSignal("");
+  const connecting = useSignal(false);
+  const error = useSignal("");
+
+  const handleConnect = async () => {
+    const trimmedSsid = ssid.value.trim();
+    if (!trimmedSsid) return;
+
+    connecting.value = true;
+    error.value = "";
+    try {
+      const result = await rpc.connectToNetwork(trimmedSsid, password.value);
+      if (result.success) {
+        onConnected(trimmedSsid);
+        toastService.showSuccess("Connected");
+        hideModal();
+      } else {
+        error.value = result.error || "Connection failed";
+        toastService.showError(error.value);
+      }
+    } catch (err) {
+      error.value = "Connection failed";
+      toastService.showError(error.value);
+      console.error("Manual connect failed:", err);
+    } finally {
+      connecting.value = false;
+    }
+  };
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center gap-3">
+        <Icon name="lock" size="m" />
+        <h3 className="text-lg font-semibold text-strong">
+          Connect to Hidden Network
+        </h3>
+      </div>
+      <p className="text-sm text-muted">
+        Enter SSID and password manually.
+      </p>
+
+      <div>
+        <label className="block text-sm text-muted mb-2">SSID</label>
+        <Input
+          type="text"
+          value={ssid.value}
+          onInput={(e) => (ssid.value = (e.target as HTMLInputElement).value)}
+          placeholder="Enter SSID"
+          disabled={connecting.value}
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm text-muted mb-2">Password</label>
+        <Input
+          type="password"
+          value={password.value}
+          onInput={(e) =>
+            (password.value = (e.target as HTMLInputElement).value)
+          }
+          placeholder="Enter password"
+          disabled={connecting.value}
+        />
+      </div>
+
+      {error.value && (
+        <div className="bg-error/20 border border-error rounded-lg p-3 text-error text-sm">
+          {error.value}
+        </div>
+      )}
+
+      <div className="flex gap-3 justify-end pt-2">
+        <Button
+          variant="ghost"
+          size="m"
+          onClick={hideModal}
+          disabled={connecting.value}
+        >
+          Cancel
+        </Button>
+        <Button
+          variant="filled"
+          size="m"
+          onClick={handleConnect}
+          disabled={connecting.value || !ssid.value.trim() || !password.value}
+        >
+          {connecting.value ? (
+            <div className="flex items-center gap-2">
+              <Spinner size="xs" />
+              <span>Connecting...</span>
+            </div>
+          ) : (
+            "Connect"
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+};
+
 export const WiFiPage = () => {
+  const { showModal } = useModal();
   const savedNetworks = useSignal<WiFiNetwork[]>([]);
   const availableNetworks = useSignal<WiFiNetwork[]>([]);
   const connecting = useSignal(false);
@@ -84,6 +195,7 @@ export const WiFiPage = () => {
           savedNetworks.value = [...savedNetworks.value, selectedNetwork.value];
         }
         showPasswordDialog.value = false;
+        toastService.showSuccess("Connected");
       } else {
         errorMessage.value = result.error || "Connection failed";
       }
@@ -92,6 +204,16 @@ export const WiFiPage = () => {
       console.error("Connect failed:", err);
     } finally {
       connecting.value = false;
+    }
+  };
+
+  const addSavedNetwork = (ssid: string) => {
+    if (!ssid) return;
+    if (!savedNetworks.value.find((n) => n.ssid === ssid)) {
+      savedNetworks.value = [
+        ...savedNetworks.value,
+        { ssid, rssi: -50, secure: true },
+      ];
     }
   };
 
@@ -159,12 +281,12 @@ export const WiFiPage = () => {
         </div>
       </div>
 
-      {/* Error Message */}
-      {errorMessage.value && (
-        <div className="bg-error/20 border border-error rounded-lg p-4 text-error">
-          {errorMessage.value}
-        </div>
-      )}
+       {/* Error Message */}
+       {errorMessage.value && (
+         <div className="bg-error/20 border border-error rounded-lg p-4 text-error">
+           {errorMessage.value}
+         </div>
+       )}
 
       {/* Saved Networks */}
       <div className="bg-panel rounded-xl p-6 border border-border">
@@ -204,13 +326,22 @@ export const WiFiPage = () => {
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-strong">
             Available Networks
-          </h3>
-          <div className="flex items-center gap-3">
-            {wifiScanning.value && <Spinner size="s" />}
+           </h3>
+           <div className="flex items-center gap-3">
+             {wifiScanning.value && <Spinner size="s" />}
             <Button
               variant="outlined"
               size="s"
-              iconName="refresh"
+              iconName="lock"
+              onClick={() => showModal(ManualWiFiModalContent, { onConnected: addSavedNetwork })}
+              disabled={connecting.value}
+            >
+              Hidden SSID
+            </Button>
+             <Button
+               variant="outlined"
+               size="s"
+               iconName="refresh"
               onClick={handleScan}
               disabled={wifiScanning.value}
             >

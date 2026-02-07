@@ -4,7 +4,7 @@
   "idf.toolsPathWin": "C:\\Espressif",
   "idf.flashType": "JTAG",
   "idf.openOcdConfigs": ["board/esp32s3-builtin.cfg"],
-  "idf.portWin": "COM4",
+  "idf.portWin": "COM38",
   "idf.openOcdLaunchArgs": ["-f", "board/esp32s3-builtin.cfg"],
   "idf.sdkconfigDefaults": ["sdkconfig.defaults"],
   "editor.formatOnSave": true,

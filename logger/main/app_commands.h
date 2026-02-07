@@ -22,6 +22,7 @@ typedef enum {
     APP_CMD_REBOOT,
     APP_CMD_START_USB_FILE_SERVER,
     APP_CMD_STOP_USB_FILE_SERVER,
+    APP_CMD_SEND_CONFIG_TO_STM,
 } app_command_id_e;
 
 typedef struct {
@@ -41,6 +42,7 @@ typedef enum {
     APP_EVENT_WIFI_AP_STARTED,
     APP_EVENT_WIFI_AP_STOPPED,
     APP_EVENT_WIFI_DISCONNECTED,
+    APP_EVENT_LOGGER_CONFIG_RECEIVED,
 } app_event_id_e;
 
 typedef struct {

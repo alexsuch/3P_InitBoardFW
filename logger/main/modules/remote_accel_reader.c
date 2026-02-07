@@ -8,6 +8,7 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 
@@ -33,7 +34,7 @@ static uint32_t s_valid_frames = 0;
 static uint32_t s_invalid_frames = 0;
 static uint32_t s_drain_batches = 0;
 static const uint64_t DIAG_IDLE_INTERVAL_US = 2000000ULL;  // 2 seconds
-
+ 
 // Keep the SPI reader task responsive even if STM32 is unplugged/not running.
     static const uint64_t CONFIG_INT_WAIT_TIMEOUT_US = 30000ULL;  // 30 ms for INT to assert after CMD 42
     static const uint32_t CONFIG_MAX_ATTEMPTS = 5;
@@ -42,9 +43,15 @@ static const uint64_t DIAG_IDLE_INTERVAL_US = 2000000ULL;  // 2 seconds
     // Give STM32 time to boot after a reset before we start sending CMD 42.
     // If this value is too small, ESP can get stuck in a reset loop (STM never reaches Logger_Init()).
     static const uint64_t CONFIG_AFTER_RESET_GRACE_US = 500000ULL;  // 500 ms
-    static const uint64_t CONFIG_RETRY_AFTER_INCOMPLETE_US = 150000ULL;
-    static const uint64_t CONFIG_RETRY_NO_INT_BACKOFF_US = 200000ULL;
-    static const uint32_t CONFIG_NO_INT_RETRY_WITHOUT_RESET = 2;
+    // After sending CMD 45 (SET_CONFIG), give STM32 time to apply settings and settle INT signaling.
+static const uint64_t CONFIG_AFTER_SET_CONFIG_GRACE_US = 200000ULL;  // 200 ms
+static const uint64_t CONFIG_RETRY_AFTER_INCOMPLETE_US = 150000ULL;
+static const uint64_t CONFIG_RETRY_NO_INT_BACKOFF_US = 200000ULL;
+static const uint32_t CONFIG_NO_INT_RETRY_WITHOUT_RESET = 2;
+static const uint32_t SET_CONFIG_CMD_MAX_ATTEMPTS = 4;
+static const uint64_t SET_CONFIG_INT_WAIT_TIMEOUT_US = 200000ULL;  // 200ms timeout for STM32 to arm DMA
+static const TickType_t SET_CONFIG_CMD_RETRY_DELAY = pdMS_TO_TICKS(5);
+static const TickType_t SET_CONFIG_PRE_CMD_DELAY = pdMS_TO_TICKS(2);
 
 static bool s_configured = false;
 static bool s_config_waiting_int = false;
@@ -93,7 +100,7 @@ static void remote_accel_reader_log_config(const logger_config_t* cfg) {
         return;
     }
 
-    const uint8_t checksum_algo_id = cfg->reserved[0];
+    const uint8_t checksum_algo_id = cfg->checksum_algo;
     const char* checksum_algo_name = "UNKNOWN";
     switch (checksum_algo_id) {
         case 1:
@@ -110,31 +117,43 @@ static void remote_accel_reader_log_config(const logger_config_t* cfg) {
     }
 
     LOG_I(TAG, "STM32 config received:");
-    LOG_I(TAG, "  magic=0x%04X version=%u.%u", (unsigned)cfg->magic, (unsigned)cfg->version_major, (unsigned)cfg->version_minor);
+    LOG_I(TAG, "  magic=0x%04X FW Version=%u.%u", (unsigned)cfg->magic, (unsigned)cfg->version_major, (unsigned)cfg->version_minor);
     LOG_I(TAG, "  ADC: sample_rate=%u kHz block_size=%u", (unsigned)cfg->adc_sample_rate_khz, (unsigned)cfg->adc_block_size);
     LOG_I(TAG, "  checksum: algo=%s (id=%u)", checksum_algo_name, (unsigned)checksum_algo_id);
 
-    LOG_I(TAG, "  IMU: accel_present=%u gyro_present=%u chip_id=0x%02X", (unsigned)cfg->imu_config.accel_present,
-          (unsigned)cfg->imu_config.gyro_present, (unsigned)cfg->imu_config.chip_id);
-    LOG_I(TAG, "  IMU: accel_odr=%u Hz gyro_odr=%u Hz accel_range=%u g gyro_range=%u dps", (unsigned)cfg->imu_config.accel_odr_hz,
-          (unsigned)cfg->imu_config.gyro_odr_hz, (unsigned)cfg->imu_config.accel_range_g, (unsigned)cfg->imu_config.gyro_range_dps);
-    LOG_I(TAG, "  IMU regs: CTRL1_XL=0x%02X CTRL2_G=0x%02X CTRL3_C=0x%02X CTRL7_G=0x%02X CTRL4_C=0x%02X",
-          (unsigned)cfg->imu_config.reserved0, (unsigned)cfg->imu_config.reserved1, (unsigned)cfg->imu_config.reserved2,
-          (unsigned)cfg->imu_config.reserved3, (unsigned)cfg->imu_config.reserved4);
+    LOG_I(TAG, "  IMU: accel_enable=%u gyro_enable=%u chip_id=0x%02X", (unsigned)cfg->accel_enable,
+          (unsigned)cfg->gyro_enable, (unsigned)cfg->chip_id);
+    LOG_I(TAG, "  IMU: accel_odr=%u Hz gyro_odr=%u Hz accel_range=%u g gyro_range=%u dps", (unsigned)cfg->accel_odr_hz,
+          (unsigned)cfg->gyro_odr_hz, (unsigned)cfg->accel_range_g, (unsigned)cfg->gyro_range_dps);
+    LOG_I(TAG, "  IMU filters: accel_bw=%uHz lpf2=%u hp=%u hp_cutoff=%u gyro_lpf1=%u gyro_lpf1_bw=%u gyro_hp=%u gyro_hp_cutoff=%u",
+          (unsigned)cfg->accel_bw_hz, (unsigned)cfg->accel_lpf2_en, (unsigned)cfg->accel_hp_en,
+          (unsigned)cfg->accel_hp_cutoff, (unsigned)cfg->gyro_lpf1_en, (unsigned)cfg->gyro_lpf1_bw,
+          (unsigned)cfg->gyro_hp_en, (unsigned)cfg->gyro_hp_cutoff);
+    LOG_I(TAG, "  IMU power modes: accel_hm_mode=%u gyro_hm_mode=%u",
+          (unsigned)cfg->accel_hm_mode, (unsigned)cfg->gyro_hm_mode);
+    LOG_I(TAG, "  IMU regs: CTRL1_XL=0x%02X CTRL2_G=0x%02X CTRL3_C=0x%02X CTRL4_C=0x%02X CTRL6_C=0x%02X CTRL7_G=0x%02X CTRL8_XL=0x%02X CTRL9_XL=0x%02X CTRL10_C=0x%02X",
+          (unsigned)cfg->ctrl1_xl, (unsigned)cfg->ctrl2_g, (unsigned)cfg->ctrl3_c, (unsigned)cfg->ctrl4_c, (unsigned)cfg->ctrl6_c,
+          (unsigned)cfg->ctrl7_g, (unsigned)cfg->ctrl8_xl, (unsigned)cfg->ctrl9_xl, (unsigned)cfg->ctrl10_c);
 
     LOG_I(TAG, "  MAVLink logging: %s", cfg->mavlink_logging_enabled ? "enabled" : "disabled");
 
-    LOG_I(TAG,
-          "  reserved[32]=%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X "
-          "%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
-          (unsigned)cfg->reserved[0], (unsigned)cfg->reserved[1], (unsigned)cfg->reserved[2], (unsigned)cfg->reserved[3],
-          (unsigned)cfg->reserved[4], (unsigned)cfg->reserved[5], (unsigned)cfg->reserved[6], (unsigned)cfg->reserved[7],
-          (unsigned)cfg->reserved[8], (unsigned)cfg->reserved[9], (unsigned)cfg->reserved[10], (unsigned)cfg->reserved[11],
-          (unsigned)cfg->reserved[12], (unsigned)cfg->reserved[13], (unsigned)cfg->reserved[14], (unsigned)cfg->reserved[15],
-          (unsigned)cfg->reserved[16], (unsigned)cfg->reserved[17], (unsigned)cfg->reserved[18], (unsigned)cfg->reserved[19],
-          (unsigned)cfg->reserved[20], (unsigned)cfg->reserved[21], (unsigned)cfg->reserved[22], (unsigned)cfg->reserved[23],
-          (unsigned)cfg->reserved[24], (unsigned)cfg->reserved[25], (unsigned)cfg->reserved[26], (unsigned)cfg->reserved[27],
-          (unsigned)cfg->reserved[28], (unsigned)cfg->reserved[29], (unsigned)cfg->reserved[30], (unsigned)cfg->reserved[31]);
+    char reserved_hex[(sizeof(cfg->reserved) * 3u) + 1u];
+    size_t pos = 0u;
+    for (size_t i = 0; i < sizeof(cfg->reserved); ++i) {
+        int written = snprintf(&reserved_hex[pos], sizeof(reserved_hex) - pos, "%02X%s", (unsigned)cfg->reserved[i],
+                               (i + 1u < sizeof(cfg->reserved)) ? " " : "");
+        if (written <= 0) {
+            break;
+        }
+        size_t w = (size_t)written;
+        if (w >= (sizeof(reserved_hex) - pos)) {
+            pos = sizeof(reserved_hex) - 1u;
+            break;
+        }
+        pos += w;
+    }
+    reserved_hex[pos] = '\0';
+    LOG_I(TAG, "  reserved[%u]=%s", (unsigned)sizeof(cfg->reserved), reserved_hex);
 }
 
     void remote_accel_reader_restart_session(void) {
@@ -189,6 +208,25 @@ static void remote_accel_reader_log_config(const logger_config_t* cfg) {
     xTaskNotifyGive(s_reader_task_handle);
     }
 
+void remote_accel_reader_request_config_refresh(void) {
+    if (!s_reader_ready || s_reader_task_handle == NULL) {
+        return;
+    }
+
+    // Re-run CMD 42 handshake without resetting STM32.
+    s_configured = false;
+    s_config_waiting_int = false;
+    s_config_attempts = 0;
+    s_config_no_int_without_reset = 0;
+    s_config_next_attempt_us = esp_timer_get_time() + CONFIG_AFTER_SET_CONFIG_GRACE_US;
+    s_config_wait_deadline_us = 0;
+
+    // Ensure logger writes a fresh config header for the updated configuration.
+    g_logger_module.stm_config_received = false;
+
+    xTaskNotifyGive(s_reader_task_handle);
+}
+ 
     static void remote_accel_reader_fail_config_and_retry(const char* reason) {
         ++s_config_attempts;
 
@@ -205,13 +243,14 @@ static void remote_accel_reader_log_config(const logger_config_t* cfg) {
     }
 
         const bool no_int = (reason != NULL) && (strcmp(reason, "no config response (INT stayed low)") == 0);
+        const bool bad_magic = (reason != NULL) && (strcmp(reason, "bad config magic") == 0);
 
-        if (no_int && s_config_no_int_without_reset < CONFIG_NO_INT_RETRY_WITHOUT_RESET) {
+        if ((no_int || bad_magic) && s_config_no_int_without_reset < CONFIG_NO_INT_RETRY_WITHOUT_RESET) {
             // Avoid reset-looping the STM32: it may still be booting / not yet arming SPI RX.
             // Back off and re-send CMD42 without resetting first.
             s_config_no_int_without_reset++;
             LOG_W(TAG,
-                  "STM32 config failed (%s). Attempt %u/%u -> backing off %llu ms and retrying without reset (%u/%u)...",
+                  "STM32 config failed (%s). Attempt %u/%u -> backing off %llu ms and retrying CMD42 without reset (%u/%u)...",
                   reason, (unsigned)s_config_attempts, (unsigned)CONFIG_MAX_ATTEMPTS,
                   (unsigned long long)(CONFIG_RETRY_NO_INT_BACKOFF_US / 1000ULL),
                   (unsigned)s_config_no_int_without_reset, (unsigned)CONFIG_NO_INT_RETRY_WITHOUT_RESET);
@@ -300,8 +339,8 @@ static void IRAM_ATTR remote_link_isr(void* arg) {
             }
 
             const bool imu_cfg_missing =
-                (config_response.imu_config.chip_id == 0) && (config_response.imu_config.accel_odr_hz == 0) && (config_response.imu_config.gyro_odr_hz == 0) &&
-                (config_response.imu_config.reserved0 == 0) && (config_response.imu_config.reserved1 == 0);
+                (config_response.chip_id == 0) && (config_response.accel_odr_hz == 0) && (config_response.gyro_odr_hz == 0) &&
+                (config_response.ctrl1_xl == 0) && (config_response.ctrl2_g == 0);
                 if (imu_cfg_missing) {
                 // STM32 responded, but the IMU config fields are not populated yet (likely still initializing after a reset).
                 // Wait a bit and re-request the config without resetting again.
@@ -346,6 +385,80 @@ static void IRAM_ATTR remote_link_isr(void* arg) {
     // Request sent: wait for INT to assert, but do not block the whole task.
     s_config_waiting_int = true;
     s_config_wait_deadline_us = now_us + CONFIG_INT_WAIT_TIMEOUT_US;
+}
+
+bool remote_accel_reader_send_config(const logger_config_t *cfg) {
+    if (!cfg) {
+        return false;
+    }
+
+    // Suspend reader task to prevent interference (it monitors INT pin)
+    bool reader_was_suspended = false;
+    if (s_reader_task_handle) {
+        vTaskSuspend(s_reader_task_handle);
+        reader_was_suspended = true;
+    }
+
+    static uint8_t s_cmd_tx[5] = {0x2D, 0, 0, 0, 0}; // CMD 45 (SET_CONFIG)
+
+    LOG_I(TAG, "Sending config to STM32 (CMD 45)...");
+
+    // Give STM32 a short window to complete CMD42 TX callback and re-arm command RX.
+    vTaskDelay(SET_CONFIG_PRE_CMD_DELAY);
+
+    bool stm_ready_for_payload = false;
+    hal_err_t err = HAL_ERR_NONE;
+    for (uint32_t attempt = 1u; attempt <= SET_CONFIG_CMD_MAX_ATTEMPTS; ++attempt) {
+        err = hal_spi_device_transmit(&s_link_device, 0, 0, s_cmd_tx, sizeof(s_cmd_tx), NULL, 0);
+        if (err != HAL_ERR_NONE) {
+            LOG_W(TAG, "SET_CONFIG command tx failed (attempt %u/%u, err=%d)", (unsigned)attempt,
+                  (unsigned)SET_CONFIG_CMD_MAX_ATTEMPTS, (int)err);
+            vTaskDelay(SET_CONFIG_CMD_RETRY_DELAY);
+            continue;
+        }
+
+        const uint64_t deadline_us = esp_timer_get_time() + SET_CONFIG_INT_WAIT_TIMEOUT_US;
+        while (hal_gpio_get_level(LINK_INT_GPIO) == HAL_GPIO_LOW && esp_timer_get_time() < deadline_us) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
+
+        if (hal_gpio_get_level(LINK_INT_GPIO) == HAL_GPIO_HIGH) {
+            stm_ready_for_payload = true;
+            break;
+        }
+
+        LOG_W(TAG, "STM32 did not assert INT for SET_CONFIG (attempt %u/%u); retrying command...",
+              (unsigned)attempt, (unsigned)SET_CONFIG_CMD_MAX_ATTEMPTS);
+        vTaskDelay(SET_CONFIG_CMD_RETRY_DELAY);
+    }
+
+    if (!stm_ready_for_payload) {
+        LOG_E(TAG, "STM32 did not assert INT (ready) for SET_CONFIG after %u attempts",
+              (unsigned)SET_CONFIG_CMD_MAX_ATTEMPTS);
+        if (reader_was_suspended) {
+            vTaskResume(s_reader_task_handle);
+        }
+        return false;
+    }
+
+    // 3. Send Payload (64 bytes)
+    // Give STM32 a short delay to finish DMA arming after raising INT.
+    vTaskDelay(pdMS_TO_TICKS(10));
+    err = hal_spi_device_transmit(&s_link_device, 0, 0, (uint8_t*)cfg, sizeof(logger_config_t), NULL, 0);
+    if (err != HAL_ERR_NONE) {
+        LOG_E(TAG, "Failed to send config payload");
+        if (reader_was_suspended) {
+            vTaskResume(s_reader_task_handle);
+        }
+        return false;
+    } else {
+        LOG_I(TAG, "Config sent successfully");
+    }
+
+    if (reader_was_suspended) {
+        vTaskResume(s_reader_task_handle);
+    }
+    return true;
 }
 
 static void remote_accel_reader_drain_frames(uint64_t now_us) {

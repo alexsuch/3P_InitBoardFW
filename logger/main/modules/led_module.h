@@ -32,8 +32,8 @@ void led_module_on_app_state_change(const es_event_t *ev, void *user);
 #define LED_COLOR_ERROR (hal_ws2812_color_t){.r = 255, .g = 0, .b = 0}
 #define LED_COLOR_IDLE (hal_ws2812_color_t){.r = 0, .g = 255, .b = 0}       // Solid green in IDLE
 #define LED_COLOR_LOGGING (hal_ws2812_color_t){.r = 255, .g = 128, .b = 0}  // Orange during logging
-#define LED_COLOR_DOWNLOAD (hal_ws2812_color_t){.r = 0, .g = 0, .b = 255}  // Solid blue in download mode
-#define LED_COLOR_ONLINE (hal_ws2812_color_t){.r = 0, .g = 0, .b = 255}
+#define LED_COLOR_DOWNLOAD (hal_ws2812_color_t){.r = 0, .g = 0, .b = 255}   // Blue when USB MSC is mounted
+#define LED_COLOR_ONLINE (hal_ws2812_color_t){.r = 128, .g = 0, .b = 128}   // Purple when WiFi/RPC is enabled
 
 // Internal function to update RGB LED color based on app mode
 void led_module_update_rgb_color(led_module_t *led_module, app_mode_t mode);

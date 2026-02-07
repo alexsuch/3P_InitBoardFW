@@ -37,6 +37,11 @@
 #define DIAGNOSTIC_IN_LOG
 #define DIAGNOSTIC_IN_LOG_PERIOD_SEC 30U
 
+// If enabled, keeps a small ring buffer of the last serial log lines and
+// periodically persists it into NVS. On next boot (even after power-cycle),
+// the previous boot's last lines are printed to help debug crashes/USB MSC issues.
+// #define LAST_SERIAL_LOG_NVS
+
 // STM32 link SPI clock (Hz). This is the master SCK used to read `logger_frame_t` from STM32.
 // Note: Higher frequencies reduce backlog risk but require good signal integrity.
 #ifndef LINK_SPI_FREQ_HZ
@@ -107,7 +112,9 @@
 // Task Priority Definitions
 #define TASK_PRIORITY_LED_BLINK 1
 #define TASK_PRIORITY_USB_BOOT_CMD 1
-#define TASK_PRIORITY_APP_LOGIC 2
+// App logic polls buttons and dispatches commands. Keep it above the STM link task so
+// the user can always stop logging even under heavy SPI streaming load.
+#define TASK_PRIORITY_APP_LOGIC 9
 #define TASK_PRIORITY_IO_MANAGER 3
 #define TASK_PRIORITY_LOGGER 6
 #define TASK_PRIORITY_STM_LINK 8

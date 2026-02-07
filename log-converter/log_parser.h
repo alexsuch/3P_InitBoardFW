@@ -36,32 +36,8 @@ extern "C" {
  */
 
 /**
- * @brief IMU configuration structure (23 bytes, packed)
- */
-typedef struct __attribute__((packed)) {
-  uint8_t accel_present; // 1 if accelerometer enabled
-  uint8_t gyro_present;  // 1 if gyroscope enabled
-  uint8_t chip_id;       // WHO_AM_I register (0x69 for LSM6DS3)
-  uint8_t reserved_pad;  // Padding
-
-  uint16_t accel_odr_hz; // Accelerometer ODR in Hz
-  uint16_t gyro_odr_hz;  // Gyroscope ODR in Hz
-
-  uint8_t accel_range_g;   // Accel range: 2, 4, 8, or 16 G
-  uint8_t reserved_align;  // Alignment padding
-  uint16_t gyro_range_dps; // Gyro range: 245, 500, 1000, 2000 DPS
-
-  uint8_t reserved[11]; // Reserved for future use
-} log_imu_config_t;
-
-/**
  * @brief Logger configuration header (64 bytes, packed)
  * Written at the start of each binary log file
- *
- * TODO: Add backward compatibility for older versions when needed.
- *       Currently MVP version - only 64-byte config supported.
- *       Future versions should read magic+version first, then
- *       handle different config sizes based on version.
  */
 typedef struct __attribute__((packed)) {
   uint16_t magic;        // 0xCAFE - validity check
@@ -71,12 +47,46 @@ typedef struct __attribute__((packed)) {
   uint16_t adc_sample_rate_khz; // ADC sampling rate in kHz
   uint16_t adc_block_size;      // Samples per frame (256)
 
-  log_imu_config_t imu_config; // IMU configuration (23 bytes)
+  uint8_t accel_enable;     // 1 if accelerometer enabled
+  uint8_t accel_range_g;    // 2, 4, 8, 16 g
+  uint16_t accel_odr_hz;    // 0..6660 Hz
+  uint16_t accel_bw_hz;     // 50/100/200/400 Hz
+  uint8_t accel_lpf2_en;    // CTRL8_XL.LPF2_XL_EN
+  uint8_t accel_hp_en;      // CTRL8_XL.HP_SLOPE_XL_EN
+  uint8_t accel_hp_cutoff;  // CTRL8_XL.HPCF_XL[1:0]
+  uint8_t accel_hm_mode;    // CTRL6_C.XL_HM_MODE
+  uint8_t checksum_algo;    // 1=CRC8, 2=SUM8, 3=CRC8_HW
 
-  uint8_t mavlink_logging_enabled; // 1 = MAVLink logging enabled
+  uint8_t gyro_enable;      // 1 if gyroscope enabled
+  uint8_t gyro_lpf1_en;     // Gyro LPF1 enable (CTRL4_C.LPF1_SEL_G)
+  uint16_t gyro_odr_hz;     // 0..6660 Hz
+  uint16_t gyro_range_dps;  // 125/245/500/1000/2000 dps
+  uint8_t gyro_lpf1_bw;     // Gyro LPF1 bandwidth index (CTRL6_C.FTYPE[1:0])
+  uint8_t gyro_hp_en;       // CTRL7_G.HP_G_EN
+  uint8_t gyro_hp_cutoff;   // CTRL7_G.HPCF_G[1:0]
+  uint8_t gyro_hm_mode;     // CTRL7_G.G_HM_MODE
+  uint8_t mavlink_logging_enabled;
 
-  uint8_t reserved[32]; // reserved[0]=checksum algorithm id; remaining reserved for future use
+  uint8_t logging_active;
+  uint8_t config_source;
+  uint8_t chip_id;
+  uint8_t reserved_state;
+
+  uint8_t ctrl1_xl;
+  uint8_t ctrl2_g;
+  uint8_t ctrl3_c;
+  uint8_t ctrl4_c;
+  uint8_t ctrl6_c;
+  uint8_t ctrl7_g;
+  uint8_t ctrl8_xl;
+  uint8_t ctrl9_xl;
+  uint8_t ctrl10_c;
+
+  uint8_t reserved[21];
 } log_config_t;
+
+_Static_assert(sizeof(log_config_t) == LOG_CONFIG_SIZE,
+               "log_config_t must match 64-byte header");
 
 /**
  * @brief IMU raw sample with timestamp (16 bytes, packed)

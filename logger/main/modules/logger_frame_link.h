@@ -113,54 +113,6 @@ typedef struct __attribute__((packed)) {
 _Static_assert(sizeof(logger_frame_t) == LOGGER_FRAME_SIZE_BYTES, "logger_frame_t must be 852 bytes");
 
 /* ============================================================================
- * IMU CONFIGURATION STRUCTURE (Phase 5 SPI - Embedded in logger_config_t)
- * ============================================================================
- *
- * Extended IMU configuration with actual hardware register snapshots.
- * Embedded as nested structure within logger_config_t (offset 8-30).
- *
- * Layout (23 bytes total):
- *   Offset 0-3:   IMU presence and identification
- *   Offset 4-7:   Output Data Rates
- *   Offset 8-11:  Full-scale ranges
- *   Offset 12-16: Control register snapshots (CTRL1_XL, CTRL2_G, CTRL3_C, CTRL7_G, CTRL4_C)
- *   Offset 17-22: Reserved for future expansion (6 bytes)
- */
-typedef struct __attribute__((packed)) {
-    // Offset 0-3: Presence and identification (4 bytes)
-    uint8_t accel_present;  // 1 if IMU accel is enabled (ODR > 0), 0 otherwise
-    uint8_t gyro_present;   // 1 if gyroscope enabled (ODR > 0), 0 otherwise
-    uint8_t chip_id;        // WHO_AM_I register value (0x69 for LSM6DS3)
-    uint8_t reserved_pad;   // Padding for alignment
-
-    // Offset 4-7: Output Data Rates (4 bytes)
-    uint16_t accel_odr_hz;  // Decoded from CTRL1_XL[7:4] (0-6664 Hz)
-    uint16_t gyro_odr_hz;   // Decoded from CTRL2_G[7:4] (0-6664 Hz)
-
-    // Offset 8-11: Full-scale ranges (4 bytes)
-    uint8_t accel_range_g;    // Decoded from CTRL1_XL[3:2]: 2, 4, 8, or 16 G
-    uint8_t reserved_align;   // Alignment byte for uint16_t gyro_range_dps
-    uint16_t gyro_range_dps;  // Decoded from CTRL2_G[3:2]: 245, 500, 1000, or 2000 DPS
-
-    // Offset 12-16: Control register snapshots (5 bytes)
-    uint8_t reserved0;  // CTRL1_XL (0x10) snapshot - Accel ODR + FS
-    uint8_t reserved1;  // CTRL2_G (0x11) snapshot - Gyro ODR + FS
-    uint8_t reserved2;  // CTRL3_C (0x12) snapshot - Common control (BDU, IF_INC)
-    uint8_t reserved3;  // CTRL7_G (0x16) snapshot - Gyro HP mode
-    uint8_t reserved4;  // CTRL4_C (0x13) snapshot - DRDY control
-
-    // Offset 17-22: Reserved for future expansion (6 bytes)
-    uint8_t reserved5;   // Future: Additional sensor parameters
-    uint8_t reserved6;   // Future: LIS2DH12 or other IMU support
-    uint8_t reserved7;   // Future: Expansion slot
-    uint8_t reserved8;   // Future: Expansion slot
-    uint8_t reserved9;   // Future: Expansion slot
-    uint8_t reserved10;  // Future: Expansion slot
-} imu_config_t;
-
-_Static_assert(sizeof(imu_config_t) == 23, "imu_config_t must be exactly 23 bytes");
-
-/* ============================================================================
  * LOGGER CONFIGURATION (Phase 5 SPI Protocol - Command 0x2A)
  * ============================================================================
  *
@@ -170,42 +122,77 @@ _Static_assert(sizeof(imu_config_t) == 23, "imu_config_t must be exactly 23 byte
  *
  * Size: Fixed 64 bytes (padded to 640-byte DMA frame with zeros on STM32)
  * Magic: 0xCAFE (for validation)
- * Version: Split into major.minor (1B each, extensible for future protocol versions)
- * Layout: 2B magic + 1B major + 1B minor + 4B ADC params + 23B IMU config + 1B MAVLink flag + 32B reserved = 64 bytes
+ * Version: Major.Minor (Firmware Version of STM32)
+ *
+ * Layout (64 bytes total):
+ *   Header (4B)
+ *   ADC parameters (4B)
+ *   Accelerometer parameters (11B) - formerly part of imu_config_t
+ *   Gyroscope parameters (11B) - formerly part of imu_config_t
+ *   Runtime state (4B)
+ *   Register snapshots (9B)
+ *   Reserved (21B)
  */
 #define LOGGER_CONFIG_MAGIC 0xCAFE
-#define LOGGER_CONFIG_VERSION_MAJOR 0
-#define LOGGER_CONFIG_VERSION_MINOR 1
 
 #define LOGGER_CONFIG_SIZE_BYTES 64u
 
-/* Logger Configuration Version History:
- * v0.1 (2026-01-15): Initial MAVLink integration
- *   - Added mavlink_log_data_t (10 bytes) to logger_frame_t
- *   - Frame size: 852 bytes (was 842 bytes)
- *   - Added mavlink_logging_enabled flag to logger_config_t
- *   - imu_config_t reduced to 23 bytes (was 24 bytes)
- *   - MAVLink event logging: event_flags (32-bit), speed_ms, altitude_m
- */
+/* Config source values */
+#define LOGGER_CONFIG_SOURCE_DEFAULT 0   // Using hardcoded defaults
+#define LOGGER_CONFIG_SOURCE_NVS 1       // Loaded from flash/NVS
+#define LOGGER_CONFIG_SOURCE_RECEIVED 2  // Received from ESP32 via CMD 45
 
 typedef struct __attribute__((packed)) {
-    uint16_t magic;           // 0xCAFE - validity check (2B)
-    uint8_t version_major;    // Major version (1B)
-    uint8_t version_minor;    // Minor version (1B)
+    /* Header (4B) */
+    uint16_t magic;         // 0xCAFE — validity check
+    uint8_t version_major;  // STM32 Firmware Major Version
+    uint8_t version_minor;  // STM32 Firmware Minor Version
 
-    // --- Core ADC parameters (4B) ---
-    uint16_t adc_sample_rate_khz;  // Sampling frequency kHz (2B)
-    uint16_t adc_block_size;       // Samples per frame (2B)
+    /* ADC parameters (4B) */
+    uint16_t adc_sample_rate_khz;  // Sampling frequency kHz (1-200, default: 100)
+    uint16_t adc_block_size;       // Samples per frame (default: 256)
 
-    // --- Extended IMU configuration (23B) ---
-    imu_config_t imu_config;  // Nested IMU config structure
+    /* Accelerometer parameters (11B) */
+    uint8_t accel_enable;     // 1=enabled, 0=disabled
+    uint8_t accel_range_g;    // Full scale: 2, 4, 8, or 16 G
+    uint16_t accel_odr_hz;    // Output data rate: 0-6664 Hz
+    uint16_t accel_bw_hz;     // Anti-aliasing BW: 50, 100, 200, 400 Hz
+    uint8_t accel_lpf2_en;    // LPF2 enable (CTRL8_XL[7])
+    uint8_t accel_hp_en;      // HP filter enable (CTRL8_XL[2])
+    uint8_t accel_hp_cutoff;  // HP cutoff index 0-3 (CTRL8_XL[6:5])
+    uint8_t accel_hm_mode;    // CTRL6_C.XL_HM_MODE: 0=high-performance, 1=normal/low-power path
+    uint8_t checksum_algo;    // 1=CRC8, 2=SUM8, 3=CRC8_HW
 
-    // --- MAVLink logging control (1B) ---
-    uint8_t mavlink_logging_enabled;  // 1 = MAVLink event logging enabled, 0 = disabled
+    /* Gyroscope parameters (11B) */
+    uint8_t gyro_enable;              // 1=enabled, 0=disabled
+    uint8_t gyro_lpf1_en;             // Gyro LPF1 enable (CTRL4_C.LPF1_SEL_G)
+    uint16_t gyro_odr_hz;             // Output data rate: 0-6660 Hz (chip-specific limits apply)
+    uint16_t gyro_range_dps;          // Full scale: 125, 245, 500, 1000, 2000 DPS
+    uint8_t gyro_lpf1_bw;             // Gyro LPF1 bandwidth index 0-3 (CTRL6_C.FTYPE[1:0])
+    uint8_t gyro_hp_en;               // HP filter enable (CTRL7_G[6])
+    uint8_t gyro_hp_cutoff;           // HP cutoff index 0-3 (CTRL7_G[5:4])
+    uint8_t gyro_hm_mode;             // CTRL7_G.G_HM_MODE: 0=high-performance, 1=normal/low-power path
+    uint8_t mavlink_logging_enabled;  // 1=MAVLink event logging enabled
 
-    // --- Reserved bytes for future expansion (32B) ---
-    uint8_t reserved[32];  // reserved[0]=checksum algorithm id; remaining reserved for future use
+    /* Runtime state (read-only, 4B) */
+    uint8_t logging_active;  // 1=currently logging, 0=idle
+    uint8_t config_source;   // LOGGER_CONFIG_SOURCE_*
+    uint8_t chip_id;         // WHO_AM_I (0x69 for LSM6DS3)
+    uint8_t reserved_state;
+
+    /* Register snapshots (9B) */
+    uint8_t ctrl1_xl;  // CTRL1_XL actual value
+    uint8_t ctrl2_g;   // CTRL2_G actual value
+    uint8_t ctrl3_c;   // CTRL3_C actual value
+    uint8_t ctrl4_c;   // CTRL4_C actual value
+    uint8_t ctrl6_c;   // CTRL6_C actual value
+    uint8_t ctrl7_g;   // CTRL7_G actual value
+    uint8_t ctrl8_xl;  // CTRL8_XL actual value
+    uint8_t ctrl9_xl;  // CTRL9_XL actual value
+    uint8_t ctrl10_c;  // CTRL10_C actual value
+
+    /* Reserved for future expansion (21B) */
+    uint8_t reserved[21];
 } logger_config_t;
-
 
 _Static_assert(sizeof(logger_config_t) == LOGGER_CONFIG_SIZE_BYTES, "logger_config_t must be exactly 64 bytes");

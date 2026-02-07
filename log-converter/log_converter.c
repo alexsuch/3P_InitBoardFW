@@ -265,7 +265,7 @@ static int convert_file(const char *input_path, const char *output_dir) {
   // Read all frames (do not drop invalid ones)
   size_t frames_read = 0;
   size_t frames_invalid = 0;
-  const uint8_t algo_id = config.reserved[0];
+  const uint8_t algo_id = config.checksum_algo;
   for (size_t i = 0; i < frame_count; i++) {
     size_t read = fread(&frames[i], 1, sizeof(log_frame_t), fp);
     if (read == 0) {
@@ -343,7 +343,7 @@ static int convert_file(const char *input_path, const char *output_dir) {
   csv_result = write_frame_status_csv(filepath, frames, frame_magic_ok,
                                        frame_checksum_ok, frame_checksum_calc,
                                        frames_read, config.adc_sample_rate_khz,
-                                       config.reserved[0]);
+                                       config.checksum_algo);
   if (csv_result != CSV_OK) {
     fprintf(stderr, "Error: Failed to write frame_status.csv\n");
   } else {
@@ -403,9 +403,9 @@ static int convert_file(const char *input_path, const char *output_dir) {
            PATH_SEPARATOR);
   size_t imu_anomaly_count = 0;
   // Prefer accel ODR for expected period estimation; fall back to gyro ODR.
-  uint16_t imu_odr_hz = config.imu_config.accel_odr_hz;
+  uint16_t imu_odr_hz = config.accel_odr_hz;
   if (imu_odr_hz == 0) {
-    imu_odr_hz = config.imu_config.gyro_odr_hz;
+    imu_odr_hz = config.gyro_odr_hz;
   }
   csv_result = write_imu_anomalies_csv(filepath, frames, frames_read,
                                        config.adc_sample_rate_khz, imu_odr_hz,

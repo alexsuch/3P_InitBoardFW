@@ -1,6 +1,6 @@
 import { createContext } from 'preact';
 import { useEffect, useContext, useRef } from 'preact/hooks';
-import styles2 from '../button.module-32CM4QAI.module.css';
+import styles2 from '../button.module-APT35VFH.module.css';
 import styles from '../icon.module-K7UO6GPK.module.css';
 import { jsxs, Fragment, jsx } from 'preact/jsx-runtime';
 import { modalService } from 'micro-ui/widgets/modal-service';
@@ -153,7 +153,7 @@ var Button = ({
       ...rest,
       children: [
         iconAlignment !== "right" && iconEl,
-        showText && /* @__PURE__ */ jsx("span", { className: "pointer-events-none select-none", children: text || children }),
+        showText && /* @__PURE__ */ jsx("span", { className: cx("pointer-events-none select-none", styles2.content), children: text || children }),
         iconAlignment === "right" && iconEl
       ]
     }

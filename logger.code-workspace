@@ -1,25 +1,31 @@
 {
   "folders": [
-	{
-		"path": "IB_Wing_STM32G431CBT6"
-	},
-	{
-		"path": "logger"
-	},
-	{
-		"path": "shared"
-	},
-	{
-		"path": "docs"
-	},
-	{
-		"path": "log-converter"
-	}
-],
+    {
+      "path": "IB_Wing_STM32G431CBT6",
+    },
+    {
+      "path": "logger",
+    },
+    {
+      "path": "shared",
+    },
+    {
+      "path": "docs",
+    },
+    {
+      "path": "log-converter",
+    },
+    {
+      "path": "../../gemslibe/micro-ui",
+    },
+    {
+      "path": "log-viwer",
+    },
+  ],
   "settings": {
     "files.associations": {
-      "*.h": "c"
+      "*.h": "c",
     },
-    "cortex-debug.stm32cubeprogrammer.windows": "c:/ST/STM32CubeCLT_1.20.0/STM32CubeProgrammer/bin"
-  }
+    "cortex-debug.stm32cubeprogrammer.windows": "c:/ST/STM32CubeCLT_1.20.0/STM32CubeProgrammer/bin",
+  },
 }

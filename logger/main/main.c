@@ -18,6 +18,8 @@
 #include "hal/init.h"
 #include "io/io_manager.h"
 #include "platform/system.h"
+#include "esp_core_dump.h"
+#include "util/bootlog.h"
 
 // Static assert to ensure stack size is properly aligned for FreeRTOS
 _Static_assert((TASK_STACK_SIZE_USB_BOOT_CMD % sizeof(StackType_t)) == 0, "TASK_STACK_SIZE_USB_BOOT_CMD must be expressed in bytes and aligned to StackType_t");
@@ -61,6 +63,21 @@ void usb_boot_cmd_start(void) {
 static const char *TAG = "Main";
 
 void app_main() {
+    // CRITICAL FIX: Clear the force download boot bit.
+    // This must be the first action in app_main to prevent getting stuck in bootloader mode.
+    system_clear_force_download_boot_bit();
+
+    static bootlog_snapshot_t prev_bootlog;
+    bootlog_capture_snapshot(&prev_bootlog);
+    bootlog_init_for_new_boot();
+
+    // Give user time to attach monitor before printing key debug info.
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
+    LOG_I(TAG, "Reset reason: %d", esp_reset_reason());
+    bootlog_nvs_dump_last();
+    bootlog_dump_snapshot(&prev_bootlog);
+
     // Print heap memory information
     size_t free_heap = esp_get_free_heap_size();
     size_t min_heap = esp_get_minimum_free_heap_size();
@@ -72,12 +89,6 @@ void app_main() {
     LOG_I(TAG, "Total heap: %zu bytes (%.2f KB)", total_heap, total_heap / 1024.0f);
     LOG_I(TAG, "Heap usage: %.1f%%", ((total_heap - free_heap) * 100.0f) / total_heap);
     LOG_I(TAG, "========================");
-
-    // CRITICAL FIX: Clear the force download boot bit.
-    // This must be the first action in app_main to prevent getting stuck in bootloader mode.
-    system_clear_force_download_boot_bit();
-
-    vTaskDelay(pdMS_TO_TICKS(3000));
 
     // usb_cdc_hooks_init();
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
@@ -115,6 +126,17 @@ void app_main() {
     LOG_I(TAG, "ESP32 CPU Cores: %lu", system_get_cpu_cores());
     LOG_I(TAG, "ESP32 Flash Size: %lu", system_get_flash_size_bytes());
 
+    // Check for saved core dump
+    esp_core_dump_summary_t summary;
+    if (esp_core_dump_get_summary(&summary) == ESP_OK) {
+        LOG_I(TAG, "Creates Core Dump found!");
+        LOG_I(TAG, "Core Dump Summary:");
+        LOG_I(TAG, "  PC: 0x%lx", summary.exc_pc);
+        LOG_I(TAG, "  TCB: 0x%lx", summary.exc_tcb);
+    } else {
+        LOG_I(TAG, "No Core Dump found.");
+    }
+
     app_state_init();
 
     // Disable Task Watchdog Timer during high-frequency logging performance tests.
@@ -137,14 +159,13 @@ void app_main() {
         // Start only essential tasks at boot; start heavy tasks on-demand (button events)
         app_logic_start_minimal_tasks(app_logic);
 
-        // TEMPORARY: Auto-start logging on boot for testing purposes.
-        // Remove this block once manual button control is preferred.
-        LOG_I(TAG, "Auto-starting logging mode (temporary)...");
-        if (app_logic_start_all_tasks(app_logic) == ESP_OK) {
-            app_logic_send_command(app_logic, APP_CMD_SET_MODE_LOGGING);
-        } else {
-            LOG_E(TAG, "Failed to start logging tasks for auto-start");
-        }
+        // DISABLED: Auto-start logging removed - use web UI start button instead.
+        // LOG_I(TAG, "Auto-starting logging mode (temporary)...");
+        // if (app_logic_start_all_tasks(app_logic) == ESP_OK) {
+        //     app_logic_send_command(app_logic, APP_CMD_SET_MODE_LOGGING);
+        // } else {
+        //     LOG_E(TAG, "Failed to start logging tasks for auto-start");
+        // }
     } else {
         LOG_E(TAG, "Module initialization failed. Check logs for details. Starting minimal tasks only.");
         app_state_t *state = app_state_get_instance();
